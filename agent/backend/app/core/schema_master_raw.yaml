@@ -1,0 +1,938 @@
+version: 1.2.0
+note: '本文件记录实际进入 SQLite 数据库的表结构和标签信息。 只包含会写入 SQLite 的表、列、标签，其他无关信息已移除。 标签解释、局限性、子标签映射等语义信息请查阅 schema_dictionary.yaml。
+
+  '
+source_files:
+  sqlite_writer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/downstream/ubm/to_sqlite_db.py
+  tokenizer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py
+  car_end_tag_parser: /root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/topic_parser/em_behavior_tag_parser.py
+  car_end_tag_map: /root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/tag_map.py
+  user_workspace: /root/data/data_mining/UBM_mining/ubm_data_mining/user_workspace/
+sqlite_database:
+  engine: SQLite
+  sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260515_T68_1131_5bb5ec_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
+  note: ONLY to_sqlite_db.py writes to SQLite. Downstream processors NEVER write back.
+  tables:
+  - name: dynamic_lane
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: lane_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: ref_link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: left_boundary_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: right_boundary_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: lane_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_turn_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_trans_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: predecessors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: successors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_relate_obs_ids
+      type: TEXT
+      notnull: false
+      pk: false
+  - name: dynamic_link
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: link_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: link_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_attribute
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_exp_speed_limit
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: link_predecessor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_successor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: include_lane_ids
+      type: TEXT
+      notnull: false
+      pk: false
+  - name: dynamic_obj
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: obj_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: obs_lane_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: obs_static_map_link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: obs_hq_lane_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: obs_to_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_to_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_fl_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_fr_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_rl_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_rr_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_fl_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_fr_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_rl_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_corner_rr_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_to_centerline_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: obs_dr_trajectory
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: ts_ms
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: z
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: l
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: w
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: h
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: heading
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: absolute_velocity_x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: absolute_velocity_y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: relative_velocity_x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: relative_velocity_y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: is_static
+      type: BOOLEAN
+      notnull: false
+      pk: false
+  - name: ego
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: acc_magnitude
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_lane_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_static_map_link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_hq_lane_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_lane_curvature
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_to_centerline_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_to_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_to_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_fl_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_fr_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_rl_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_rr_2_left_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_fl_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_fr_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_rl_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_corner_rr_2_right_boundary_dist
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: traffic_light_status
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_hq_lane_ids_on_cross_section
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: ego_lane_index_on_hq_cross_section
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_lane_successor_count
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_lane_predecessor_count
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: ego_lane_width
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: ego_dr_trajectory
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: ts_ms
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: speed
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: steering_angle
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: latest_traffic_light_status
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: latest_stop_line_direction
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: navigation_status
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: wiper_status
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: indicator_status
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: cumulative_distance
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: utm_x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: utm_y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: utm_yaw
+      type: FLOAT
+      notnull: false
+      pk: false
+  - name: intersection_info
+    columns:
+    - name: intersection_id
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_count
+      type: BIGINT
+      notnull: false
+      pk: false
+    - name: ego_lane_index
+      type: BIGINT
+      notnull: false
+      pk: false
+    - name: lane_info
+      type: TEXT
+      notnull: false
+      pk: false
+    note: 存储 EgoIntoIntersection 事件（从 range_tag 中过滤，单独存放）
+  - name: range_tag
+    columns:
+    - name: start_ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: end_ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: tag_name
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: param
+      type: TEXT
+      notnull: false
+      pk: false
+    primary_key:
+    - start_ts
+    - end_ts
+    - tag_name
+  - name: static_lane
+    columns:
+    - name: lane_id
+      type: TEXT
+      notnull: false
+      pk: true
+  - name: static_link
+    columns:
+    - name: link_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: link_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_turn_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_class
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_attribute
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_speed_limit
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: link_predecessor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_successor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_exp_speed_limit
+      type: FLOAT
+      notnull: false
+      pk: false
+  - name: static_obj
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: obj_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: ts_ms
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: z
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: l
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: w
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: h
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: heading
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: param
+      type: TEXT
+      notnull: false
+      pk: false
+range_tag:
+  injection_sources:
+  - id: cloud_operators_add_event
+    description: tokenizer_processor_new.py 中注册的 cloud 端算子通过 add_event() 添加
+    path: L2_Pred/rule_based_mining/semantic_mining/activity_new/
+    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list → to_sqlite_db._inject_range_tag_to_virtual_table() → virtual_table → SQLite
+
+      '
+    note: 标签是否出现取决于算子是否被触发（场景匹配）
+  - id: car_end_behavior_tags
+    description: 车端 bag 文件中的行为标签
+    parser: gsbag_parser/topic_parser/em_behavior_tag_parser.py
+    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经 Filter 合并后存入 label_info JSON。 在部分 pipeline 版本中，label_info 会被合并到 TokenizerResult，最终进入 SQLite。
+
+      '
+    note: 车端标签命名规范与 cloud 端不同（如 CRUISE_STRAIGHT, INTERSECTION_RIGHTTURN）
+  - id: user_workspace_add_event
+    description: user_workspace 自定义算子通过 add_event() 注入
+    current_operators:
+    - name: SlopeSchemaOperator
+      author: zhanglikai
+      label_id: Slope
+      enabled: true
+    note: 其他 user_workspace 算子（DrTrajectory, EgoAcc, MapSchema）不写 range_tag
+  - id: add_table_direct
+    description: 算子绕过 add_event，直接通过 add_table("range_tag") 写入 virtual_table
+    current_operators:
+    - name: LaneKeep
+      file: op_lane_keep.py
+      note: add_event 被注释掉，改用 add_table 直接写入 horizontal table
+  actual_tags_from_sample_db:
+    description: 从样本 DB 中 DISTINCT 查询得到的实际存在的标签（30个）
+    sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260515_T68_1131_5bb5ec_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
+    tags:
+    - name: ActiveWiperState
+      source: cloud_operator
+      operator: ActiveWiperState
+    - name: BinCounter
+      source: cloud_operator
+      operator: BinCounter
+    - name: Intersection
+      source: cloud_operator
+      operator: IntersectionOperator
+    - name: LaneKeep
+      source: add_table_direct
+      operator: op_lane_keep.py
+      note: add_event 被注释
+    - name: LowTTC
+      source: cloud_operator
+      operator: LowTTCOperator
+    - name: NoSpeedIncrease
+      source: cloud_operator
+      operator: NoSpeedIncreaseOperator
+    - name: ObstacleCollision
+      source: cloud_operator
+      operator: ObstacleCollision
+    - name: OverSpeedLimit
+      source: cloud_operator
+      operator: OverSpeedLimitOperator
+    - name: StraightDriving
+      source: cloud_operator
+      operator: StraightDrivingOperator
+    - name: TrafficIntersection
+      source: cloud_operator
+      operator: TrafficIntersection
+    - name: Turning
+      source: cloud_operator
+      operator: TurningOperator
+    - name: route_deviation
+      source: cloud_operator
+      operator: YawOperator
+    - name: accelerating
+      source: cloud_operator
+      operator: SpeedStateOperator
+      note: 动态 label_id（state_name）
+    - name: cruising
+      source: cloud_operator
+      operator: SpeedStateOperator
+      note: 动态 label_id（state_name）
+    - name: decelerating
+      source: cloud_operator
+      operator: SpeedStateOperator
+      note: 动态 label_id（state_name）
+    - name: navi_enter
+      source: cloud_operator
+      operator: NaviCommandOperator
+      note: 动态 label_id（sub_type）
+    - name: navi_keep
+      source: cloud_operator
+      operator: NaviCommandOperator
+      note: 动态 label_id（sub_type）
+    - name: navi_u_turn
+      source: cloud_operator
+      operator: NaviCommandOperator
+      note: 动态 label_id（sub_type）
+    - name: steering_left_120_185
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: steering_left_15_60
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: steering_left_60_120
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: steering_right_15_60
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: steering_right_60_120
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: steering_slightly
+      source: cloud_operator
+      operator: SteeringOperator
+      note: 动态 label_id（转角区间）
+    - name: Slope
+      source: user_workspace
+      operator: SlopeSchemaOperator
+      author: zhanglikai
+    - name: CRUISE_CURVE
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: CRUISE_FOLLOW
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: CRUISE_STRAIGHT
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: INTERSECTION_RIGHTTURN
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: INTERSECTION
+    - name: INTERSECTION_STRAIGHT
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: INTERSECTION
+  potential_tags_not_in_sample:
+    description: '以下标签理论上会通过上述注入源进入 SQLite，但在样本 DB 中未出现。 未出现原因：样本 bag 的场景未触发对应算子，或车端未产生对应行为标签。
+
+      '
+    cloud_operators_fixed_label_id:
+    - name: AbnormalLaneChange
+      operator: AbnormalLaneChange
+    - name: AbnormalRightLaneChangeToRightestStopV3
+      operator: AbnormalRightLaneChangeToRightestStopV3
+    - name: AbnormalRightLaneChangeToRightestStopV5
+      operator: AbnormalRightLaneChangeToRightestStopV5
+    - name: AvoidanceBorrowLane
+      operator: AvoidanceBorrowLane
+    - name: Avoidance_InLane
+      operator: FixedOptimizedOpbAvoidanceInLane
+    - name: CloseFollow
+      operator: CloseFollowOperator
+    - name: CrossStopLineOnYellowLight
+      operator: CrossStopLineOnYellowLight
+    - name: CrossVRUV1
+      operator: CrossVRUOperator_v1
+    - name: CrossVehicle
+      operator: CrossVehicleOperator
+    - name: CrawlingFollow
+      operator: CrawlingFollowOperator
+    - name: Cutin
+      operator: CutinOperator
+    - name: EgoIntoIntersection
+      operator: IntersectionOperator
+      note: 被过滤到 intersection_info 表，不在 range_tag
+    - name: GreenLightNotProceeding
+      operator: GreenLightNotProceeding
+    - name: HighSteeringWheelTorque
+      operator: HighSteeringWheelTorqueOperator
+    - name: Jerk
+      operator: JerkOperator
+    - name: LaneChange
+      operator: LaneChange
+    - name: LaneMerging
+      operator: LaneMergingOperator
+    - name: NotCenter
+      operator: NotCenter
+    - name: ObstacleNearMiss
+      operator: ObstacleNearMiss
+    - name: OffRamp
+      operator: OffRampOperator
+    - name: OnRamp
+      operator: OnRampOperator
+    - name: OtherRamp
+      operator: OtherRampOperator
+    - name: RainLevel
+      operator: RainLevelOperator
+    - name: Roundabout
+      operator: RoundaboutOperator
+    - name: RunRedLight
+      operator: RunRedLight
+    - name: SolidLaneChange
+      operator: SolidLaneChange
+    - name: SteeringSmallSwing
+      operator: SteeringSwingOperator
+    - name: SteeringWheelSlam
+      operator: SteeringWheelSlamOperator
+    - name: TrafficLightAbnormal
+      operator: TrafficLightAbnormal
+    - name: YellowLightStop
+      operator: YellowLightStopController
+    cloud_operators_dynamic_label_id:
+      speed_state:
+        operator: SpeedStateOperator
+        note: label_id = state_name，父标签名 SpeedState 不会出现在 DB 中，以下值互斥
+        values:
+        - stationary
+        - creeping
+        - cruising
+        - decelerating
+        - accelerating
+        - hard_braking
+        - reversing
+      steering:
+        operator: SteeringOperator
+        note: label_id = 转角区间，父标签名 Steering 不会出现在 DB 中，以下值互斥
+        values:
+        - steering_slightly
+        - steering_left_15_60
+        - steering_left_60_120
+        - steering_left_120_185
+        - steering_left_above_185
+        - steering_right_15_60
+        - steering_right_60_120
+        - steering_right_120_185
+        - steering_right_above_185
+      navi_command:
+        operator: NaviCommandOperator
+        note: label_id = sub_type，父标签名 NaviCommand 不会出现在 DB 中，以下值互斥
+        values:
+        - navi_guide_line_infos_empty
+        - navi_not_in_sd
+        - navi_keep
+        - navi_enter
+        - navi_exit
+        - navi_other
+        - navi_turn_left
+        - navi_turn_right
+        - navi_u_turn
+    car_end_behavior_tags_potential:
+      note: 车端标签取决于 bag 文件中的 beh_tag 消息内容
+      cruise:
+      - CRUISE_CONGESTION
+      - CRUISE_FREESPACE
+      - CRUISE_PREDECELERATE
+      - CRUISE_YIELDTOPEDESTRIANS
+      - CRUISE_EMERGENCYBRAKE
+      - CRUISE_SLOWMOVE
+      - CRUISE_CUTIN
+      - CRUISE_CUTOUT
+      - CRUISE_SLOWFOLLOW
+      - CRUISE_CREEP
+      - CRUISE_RAMP
+      - CRUISE_CROSS
+      - CRUISE_FREESPACEAVOIDANCE
+      - CRUISE_DISTANTFOLLOW
+      - CRUISE_FOLLOWBICYCLISTORTRICYLISTBRAKE
+      - CRUISE_BICYCLISTORTRICYCLISTCUTIN
+      - CRUISE_LEADCUTOUTLEADINGSTOPPED
+      - CRUISE_BICYCLISTORTRICYCLISTCROSS
+      - CRUISE_FREESPACEYIELD
+      - CRUISE_FOLLOWCARORTRUCKBRAKE
+      - CRUISE_CARORTRUCKCUTIN
+      - CRUISE_BICYCLISTORTRICYCLISTCUTOUT
+      - CRUISE_CARORTRUCKCROSS
+      - CRUISE_FOLLOWVRUBRAKE
+      - CRUISE_VRUCUTIN
+      - CRUISE_CARORTRUCKCUTOUT
+      - CRUISE_VRUCROSS
+      - CRUISE_NRUBRAKE
+      - CRUISE_CLOSECUTIN
+      - CRUISE_VRUCUTOUT
+      - CRUISE_OVERTAKECUTIN
+      stop_and_go:
+      - STOPANDGO_STOPBEHINDOBSTACLE
+      - STOPANDGO_STARTFOLLOWOBSTACLE
+      - STOPANDGO_STARTNONFOLLOWOBSTACLE
+      - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+      - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+      - STOPANDGO_BRAKESTOP
+      - STOPANDGO_STOP
+      - STOPANDGO_FOLLOWSTOPVEHICLE
+      - STOPANDGO_STARTCONGESTION
+      - STOPANDGO_STARTRAMP
+      - STOPANDGO_TRAFFICLIGHTGREENFLASHSTOP
+      - STOPANDGO_TRAFFICLIGHTREDSTART
+      - STOPANDGO_BRAKESTOPSTATICVEHICLE
+      - STOPANDGO_STOPINLANE
+      - STOPANDGO_FOLLOWSTOP_CONGESTION
+      - STOPANDGO_STARTCURB
+      - STOPANDGO_TRAFFICLIGHTYELLOWFLASHSTOP
+      - STOPANDGO_TRAFFICLIGHTGREENFLASHGO
+      - STOPANDGO_BRAKESTOPBICYCLISTORTRICYCLIST
+      - STOPANDGO_STOPPULLOVER
+      - STOPANDGO_FOLLOWSTOPRAMP
+      - STOPANDGO_STARTSPOT
+      - STOPANDGO_TRAFFICLIGHTYELLOWSTOP
+      - STOPANDGO_TRAFFICLIGHTINACTIVEGO
+      - STOPANDGO_BRAKESTOPVRU
+      - STOPANDGO_FOLLOWSTOPESCAPE
+      - STOPANDGO_TRAFFICLIGHTREDWAIT
+      - STOPANDGO_BRAKESTOPCONE
+      - STOPANDGO_BRAKESTOPANTICRASHBUCKET
+      - STOPANDGO_BRAKESTOPCONSTRUCTIONSIGN
+      - STOPANDGO_BRAKESTOPGRIDZONE
+      - STOPANDGO_BRAKESTOPEMERGENCY
+      lanechange:
+      - LANECHANGE_NAVIGATION
+      - LANECHANGE_OVERTAKE
+      - LANECHANGE_AVOIDANCE
+      - LANECHANGE_TRUNSIGNAL
+      - LANECHANGE_ABANDON
+      - LANECHANGE_MERGEDIVERGE
+      - LANECHANGE_FREEWAY
+      - LANECHANGE_NAVLANECHANGEMAIN
+      - LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST
+      - LANECHANGE_ABANDONLANECHANGEAUTO
+      - LANECHANGE_MERGELANECHANGEDROP
+      - LANECHANGE_NAVLANECHANGEDIVERGE
+      - LANECHANGE_OVERTAKERIGHTCARORTRUCK
+      - LANECHANGE_MERGEROADZIPPER
+      - LANECHANGE_NAVLANECHANGERAMP
+      - LANECHANGE_NAVLANECHANGECONGESTION
+      - LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST
+      - LANECHANGE_OVERTAKELEFTCARORTRUCK
+      - LANECHANGE_NAVLANECHANGEPARALLEL
+      - LANECHANGE_DIVERGELANECHANGERIGHTTURN
+      - LANECHANGE_DIVERGELANECHANGESTRAIGHT
+      - LANECHANGE_NAVLANECHANGEMERGE
+      avoidance:
+      - AVOIDANCE_INLANE
+      - AVOIDANCE_INSAMELANE
+      - AVOIDANCE_INREVERSELANE
+      - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+      - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
+      - AVOIDANCE_LANEBORROWYIELDBICYCLISTORTRICYCLIST
+      - AVOIDANCE_LANEBORROWYIELDOPPOSITE
+      - AVOIDANCE_LANEYIELDCARORTRUCK
+      - AVOIDANCE_LANEBORROWYIELDCARORTRUCK
+      - AVOIDANCE_LANEBORROWOVERTAKEOPPOSITE
+      - AVOIDANCE_LANEYIELDVRU
+      - AVOIDANCE_LANEBORROWYIELDVRU
+      - AVOIDANCE_LANEBORROWDRIVE
+      - AVOIDANCE_LANEYIELDCONE
+      - AVOIDANCE_LANEBORROWYIELDCONE
+      - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
+      - AVOIDANCE_LANEBORROWYIELDDIVERGE
+      - AVOIDANCE_LANEYIELDCRUB
+      - AVOIDANCE_LANEBORROWYIELDCLOSE
+      - AVOIDANCE_LANEBORROWYIELDSOLIDLINE
+      intersection:
+      - INTERSECTION_LEFTTURN
+      - INTERSECTION_UTURN
+      - INTERSECTION_ROUNDABOUT
+      - INTERSECTION_TOLLBOOTH
+      - INTERSECTION_UTURNLEFTTURNLANE
+      - INTERSECTION_ROUNDABOUTSIGNAL
+      - INTERSECTION_TOLLBOOTHMANUAL
+      - INTERSECTION_UTURNDASHEDLINE
+      - INTERSECTION_ROUNDABOUTUNSIGNAL
+      - INTERSECTION_TOLLBOOTHETC
+      - INTERSECTION_UTURNLANE
+not_in_sqlite:
+  description: 以下标签/结果明确不会回写到 SQLite，只输出到 JSON 文件
+  categories:
+  - name: db_py_rule_query_results
+    description: db_py_rule/ 中 SQL SELECT 查询结果
+    output: sql_query_result.json
+    examples:
+    - cross_conflict
+    - pedestrian_crossing
+    - obj_cut_in
+    - ego_cut_in
+    - meeting_oncoming
+    - left_turn_conflict
+    - right_turn_conflict
+    - Intersection_Crossing
+    - Intersection_Stop
+    note: 这些 SQL 查询 SQLite 的 ego/dynamic_obj/range_tag 等表，结果写入 JSON
+  - name: release_db_rule_py_convert_results
+    description: release_db_rule_py/ 和 raw_convert_rules/ 中标签转换结果
+    output: convert_sql.json
+    examples:
+    - Solid_LaneChange
+    - Run_RedLight
+    - Car_Cutin
+    - VruPed_Cross
+    - turning_left
+    note: 基于 range_tag 已有标签做名字映射或规则转换，输出到 JSON
+  - name: track_tags
+    description: TrackConverter 生成的 track 标签
+    output: '{bag_id}_api_track.json'
+    examples:
+    - ego_speed_track
+    - lng_action_track
+    - lat_action_track
+    - navigation_command_track
+    - intent_phase_track
+    - traffic_light_state_track
+    - lane_curvature_track
+    - link_type_track
+    - link_attribute_track
+    - link_class_track
+    note: TrackConverter 读取 sql_query_result JSON，按时间轴生成 track 片段
+  - name: user_workspace_disabled
+    description: user_workspace 中被 disabled 的算子
+    examples:
+    - CustomOperator (sufei/op_custom_operator.py, enabled=false)
+    note: 即使 enabled，也只添加示例行，不是真实业务标签
+  - name: unregistered_operators
+    description: 代码中存在但 tokenizer_processor_new.py 中未注册的算子
+    examples:
+    - BrakeStop
+    - AbnormalRightLaneChangeToRightestStopV4
+    - AbnormalRightLaneChangeToRightestStopV6
+    - SpeedIncreaseStatsOperator
+    - DataStatistics
+    - IntersectionCountOperator
+    note: 这些算子的 add_event 不会被执行
+git_version:
+  data_mining_repo: 1df5784fe76e3d67d08edac2da9bcbeae65b42cc
+  branch: origin/data_mining/master
+  synced_at: '2026-05-19T17:14:52.726027+08:00'
+  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

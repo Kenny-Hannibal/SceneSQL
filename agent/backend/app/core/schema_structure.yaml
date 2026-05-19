@@ -1,0 +1,483 @@
+version: 1.2.0
+note: '纯 SQLite 结构文件，用于 LLM SQL 生成阶段注入 prompt。 不含任何自然语言解释，只包含表名、列名、数据类型、主键、标签枚举值。 字段/标签的详细定义请查阅 schema_dictionary.yaml。
+
+  '
+database_schema:
+  tables:
+  - name: range_tag
+    type: horizontal_event
+    columns:
+    - name: start_ts
+      type: BIGINT
+      nullable: false
+    - name: end_ts
+      type: BIGINT
+      nullable: false
+    - name: tag_name
+      type: TEXT
+      nullable: false
+    - name: param
+      type: TEXT
+      nullable: false
+    primary_key:
+    - start_ts
+    - end_ts
+    - tag_name
+    enum:
+    - AbnormalLaneChange
+    - AbnormalRightLaneChangeToRightestStopV3
+    - AbnormalRightLaneChangeToRightestStopV5
+    - ActiveWiperState
+    - AvoidanceBorrowLane
+    - Avoidance_InLane
+    - BinCounter
+    - CloseFollow
+    - CrossStopLineOnYellowLight
+    - CrossVRUV1
+    - CrossVehicle
+    - CrawlingFollow
+    - Cutin
+    - GreenLightNotProceeding
+    - HighSteeringWheelTorque
+    - Intersection
+    - Jerk
+    - LaneChange
+    - LaneKeep
+    - LaneMerging
+    - LowTTC
+    - NoSpeedIncrease
+    - NotCenter
+    - ObstacleCollision
+    - ObstacleNearMiss
+    - OffRamp
+    - OnRamp
+    - OtherRamp
+    - OverSpeedLimit
+    - RainLevel
+    - Roundabout
+    - RunRedLight
+    - Slope
+    - SolidLaneChange
+    - SteeringSmallSwing
+    - SteeringWheelSlam
+    - StraightDriving
+    - TrafficIntersection
+    - TrafficLightAbnormal
+    - Turning
+    - YellowLightStop
+    - route_deviation
+    - stationary
+    - creeping
+    - cruising
+    - decelerating
+    - accelerating
+    - hard_braking
+    - reversing
+    - steering_slightly
+    - steering_left_15_60
+    - steering_left_60_120
+    - steering_left_120_185
+    - steering_left_above_185
+    - steering_right_15_60
+    - steering_right_60_120
+    - steering_right_120_185
+    - steering_right_above_185
+    - navi_guide_line_infos_empty
+    - navi_not_in_sd
+    - navi_keep
+    - navi_enter
+    - navi_exit
+    - navi_other
+    - navi_turn_left
+    - navi_turn_right
+    - navi_u_turn
+    - CRUISE_CURVE
+    - CRUISE_FOLLOW
+    - CRUISE_STRAIGHT
+    - INTERSECTION_RIGHTTURN
+    - INTERSECTION_STRAIGHT
+    notes:
+    - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*, AVOIDANCE_*, INTERSECTION_*
+    - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
+    - param 列为 JSON 字符串，可用 json_extract() 提取子标签（sub_tag）、障碍物 ID 等
+  - name: intersection_info
+    type: horizontal_event
+    columns:
+    - name: intersection_id
+      type: TEXT
+      nullable: false
+    - name: lane_count
+      type: BIGINT
+      nullable: false
+    - name: ego_lane_index
+      type: BIGINT
+      nullable: false
+    - name: lane_info
+      type: TEXT
+      nullable: false
+    notes:
+    - 存储 EgoIntoIntersection 事件，从 range_tag 中过滤后单独存放
+  - name: ego
+    type: vertical_timeseries
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: false
+      pk: true
+    - name: acc_magnitude
+      type: FLOAT
+      nullable: false
+    - name: ego_lane_id
+      type: INTEGER
+      nullable: false
+    - name: ego_link_id
+      type: INTEGER
+      nullable: false
+    - name: ego_static_map_link_id
+      type: INTEGER
+      nullable: false
+    - name: ego_hq_lane_id
+      type: INTEGER
+      nullable: false
+    - name: ego_lane_curvature
+      type: FLOAT
+      nullable: false
+    - name: ego_to_centerline_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_to_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_to_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_fl_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_fr_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_rl_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_rr_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_fl_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_fr_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_rl_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: ego_corner_rr_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: traffic_light_status
+      type: INTEGER
+      nullable: false
+    - name: ego_hq_lane_ids_on_cross_section
+      type: TEXT
+      nullable: false
+    - name: ego_lane_index_on_hq_cross_section
+      type: INTEGER
+      nullable: false
+    - name: ego_lane_successor_count
+      type: INTEGER
+      nullable: false
+    - name: ego_lane_predecessor_count
+      type: INTEGER
+      nullable: false
+    - name: ego_lane_width
+      type: FLOAT
+      nullable: false
+    - name: ego_dr_trajectory
+      type: TEXT
+      nullable: false
+    - name: ts_ms
+      type: FLOAT
+      nullable: false
+    - name: speed
+      type: FLOAT
+      nullable: false
+    - name: steering_angle
+      type: FLOAT
+      nullable: false
+    - name: latest_traffic_light_status
+      type: TEXT
+      nullable: false
+    - name: latest_stop_line_direction
+      type: FLOAT
+      nullable: false
+    - name: navigation_status
+      type: TEXT
+      nullable: false
+    - name: wiper_status
+      type: TEXT
+      nullable: false
+    - name: indicator_status
+      type: TEXT
+      nullable: false
+    - name: cumulative_distance
+      type: FLOAT
+      nullable: false
+    - name: utm_x
+      type: FLOAT
+      nullable: false
+    - name: utm_y
+      type: FLOAT
+      nullable: false
+    - name: utm_yaw
+      type: FLOAT
+      nullable: false
+  - name: dynamic_obj
+    type: vertical_timeseries
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: false
+      pk: true
+    - name: obj_id
+      type: TEXT
+      nullable: false
+      pk: true
+    - name: obs_lane_id
+      type: INTEGER
+      nullable: false
+    - name: obs_static_map_link_id
+      type: INTEGER
+      nullable: false
+    - name: obs_hq_lane_id
+      type: INTEGER
+      nullable: false
+    - name: obs_to_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_to_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_fl_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_fr_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_rl_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_rr_2_left_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_fl_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_fr_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_rl_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_corner_rr_2_right_boundary_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_to_centerline_dist
+      type: FLOAT
+      nullable: false
+    - name: obs_dr_trajectory
+      type: TEXT
+      nullable: false
+    - name: ts_ms
+      type: FLOAT
+      nullable: false
+    - name: x
+      type: FLOAT
+      nullable: false
+    - name: y
+      type: FLOAT
+      nullable: false
+    - name: z
+      type: FLOAT
+      nullable: false
+    - name: l
+      type: FLOAT
+      nullable: false
+    - name: w
+      type: FLOAT
+      nullable: false
+    - name: h
+      type: FLOAT
+      nullable: false
+    - name: heading
+      type: FLOAT
+      nullable: false
+    - name: type
+      type: TEXT
+      nullable: false
+    - name: absolute_velocity_x
+      type: FLOAT
+      nullable: false
+    - name: absolute_velocity_y
+      type: FLOAT
+      nullable: false
+    - name: relative_velocity_x
+      type: FLOAT
+      nullable: false
+    - name: relative_velocity_y
+      type: FLOAT
+      nullable: false
+    - name: is_static
+      type: BOOLEAN
+      nullable: false
+  - name: static_obj
+    type: vertical_timeseries
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: false
+      pk: true
+    - name: obj_id
+      type: TEXT
+      nullable: false
+      pk: true
+    - name: ts_ms
+      type: FLOAT
+      nullable: false
+    - name: x
+      type: FLOAT
+      nullable: false
+    - name: y
+      type: FLOAT
+      nullable: false
+    - name: z
+      type: FLOAT
+      nullable: false
+    - name: l
+      type: FLOAT
+      nullable: false
+    - name: w
+      type: FLOAT
+      nullable: false
+    - name: h
+      type: FLOAT
+      nullable: false
+    - name: heading
+      type: FLOAT
+      nullable: false
+    - name: type
+      type: TEXT
+      nullable: false
+    - name: param
+      type: TEXT
+      nullable: false
+  - name: static_lane
+    type: static_reference
+    columns:
+    - name: lane_id
+      type: TEXT
+      nullable: false
+      pk: true
+  - name: static_link
+    type: static_reference
+    columns:
+    - name: link_id
+      type: TEXT
+      nullable: false
+      pk: true
+    - name: link_type
+      type: TEXT
+      nullable: false
+    - name: link_turn_type
+      type: TEXT
+      nullable: false
+    - name: link_class
+      type: TEXT
+      nullable: false
+    - name: link_attribute
+      type: TEXT
+      nullable: false
+    - name: link_speed_limit
+      type: FLOAT
+      nullable: false
+    - name: link_predecessor
+      type: TEXT
+      nullable: false
+    - name: link_successor
+      type: TEXT
+      nullable: false
+    - name: link_exp_speed_limit
+      type: FLOAT
+      nullable: false
+  - name: dynamic_lane
+    type: vertical_timeseries
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: false
+      pk: true
+    - name: lane_id
+      type: TEXT
+      nullable: false
+      pk: true
+    - name: ref_link_id
+      type: INTEGER
+      nullable: false
+    - name: left_boundary_id
+      type: INTEGER
+      nullable: false
+    - name: right_boundary_id
+      type: INTEGER
+      nullable: false
+    - name: lane_type
+      type: TEXT
+      nullable: false
+    - name: lane_turn_type
+      type: TEXT
+      nullable: false
+    - name: lane_trans_type
+      type: TEXT
+      nullable: false
+    - name: predecessors
+      type: TEXT
+      nullable: false
+    - name: successors
+      type: TEXT
+      nullable: false
+    - name: lane_relate_obs_ids
+      type: TEXT
+      nullable: false
+  - name: dynamic_link
+    type: vertical_timeseries
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: false
+      pk: true
+    - name: link_id
+      type: TEXT
+      nullable: false
+      pk: true
+    - name: link_type
+      type: TEXT
+      nullable: false
+    - name: link_attribute
+      type: TEXT
+      nullable: false
+    - name: link_exp_speed_limit
+      type: FLOAT
+      nullable: false
+    - name: link_predecessor
+      type: TEXT
+      nullable: false
+    - name: link_successor
+      type: TEXT
+      nullable: false
+    - name: include_lane_ids
+      type: TEXT
+      nullable: false
+git_version:
+  data_mining_repo: 1df5784fe76e3d67d08edac2da9bcbeae65b42cc
+  branch: origin/data_mining/master
+  synced_at: '2026-05-19T17:14:52.726027+08:00'
+  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

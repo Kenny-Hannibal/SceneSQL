@@ -1,0 +1,1242 @@
+version: 1.2.0
+note: '标签与字段语义字典。按 tag_name / field_name 为 key，支持 O(1) 快速查询。 包含标签定义、子标签、局限性、来源、相关表等信息。 本字典只包含实际会进入 SQLite 的标签和字段。
+
+  '
+tags:
+  AbnormalLaneChange:
+    description: 异常变道行为
+    sub_tags: []
+    source: cloud_operator
+    operator: AbnormalLaneChange
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStopV3:
+    description: 自车无合理动机异常右变道到最右车道停车（V3 版本）
+    sub_tags:
+    - RightLaneChangeAndStop
+    source: cloud_operator
+    operator: AbnormalRightLaneChangeToRightestStopV3
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStopV5:
+    description: 自车无合理动机异常右变道到最右车道停车（V5 版本）
+    sub_tags:
+    - RightLaneChangeAndStop
+    source: cloud_operator
+    operator: AbnormalRightLaneChangeToRightestStopV5
+    limitations: []
+    related_tables:
+    - range_tag
+  ActiveWiperState:
+    description: 车辆雨刮器处于激活工作状态
+    sub_tags:
+    - ActiveWiperState
+    source: cloud_operator
+    operator: ActiveWiperState
+    limitations:
+    - 仅在雨刮器启动时触发，不记录关闭状态
+    related_tables:
+    - range_tag
+  AvoidanceBorrowLane:
+    description: 自车借用左右车道避让前方障碍物后返回原车道
+    sub_tags:
+    - AvoidanceBorrowLaneLeft
+    - AvoidanceBorrowLaneRight
+    source: cloud_operator
+    operator: AvoidanceBorrowLane
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  Avoidance_InLane:
+    description: 自车在当前车道内避让前方障碍物
+    sub_tags:
+    - AvoidanceInLaneLeft
+    source: cloud_operator
+    operator: FixedOptimizedOpbAvoidanceInLane
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  BinCounter:
+    description: Bin 计数校验标签（产线专用）
+    sub_tags:
+    - BinOK
+    source: cloud_operator
+    operator: BinCounter
+    limitations:
+    - 每袋仅生成一个事件，用于产线数据校验
+    related_tables:
+    - range_tag
+  CloseFollow:
+    description: 自车与前车近距离跟车（高碰撞风险）
+    sub_tags:
+    - CloseFollow
+    source: cloud_operator
+    operator: CloseFollowOperator
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrossStopLineOnYellowLight:
+    description: 车辆黄灯期间越过停止线
+    sub_tags:
+    - CrossStopLineOnYellowLight
+    source: cloud_operator
+    operator: CrossStopLineOnYellowLight
+    limitations: []
+    related_tables:
+    - range_tag
+  CrossVRUV1:
+    description: VRU（行人/骑行者）横穿自车路径
+    sub_tags:
+    - Cross_From_Left
+    - Cross_From_Right
+    source: cloud_operator
+    operator: CrossVRUOperator_v1
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrossVehicle:
+    description: 侧方车辆横穿自车路径，自车减速避让
+    sub_tags:
+    - Cross_From_Left
+    - Cross_From_Right
+    source: cloud_operator
+    operator: CrossVehicleOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrawlingFollow:
+    description: 极低速蠕行跟车（走走停停、车距极近）
+    sub_tags:
+    - CrawlingFollow
+    source: cloud_operator
+    operator: CrawlingFollowOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  Cutin:
+    description: 他车切入自车车道前方
+    sub_tags:
+    - CarCutin
+    - CarCloseCutin
+    - TruckBusCutin
+    - TruckBusCloseCutin
+    - VruCutin
+    - VruCloseCutin
+    source: cloud_operator
+    operator: CutinOperator
+    limitations:
+    - sub_tag（切入车辆类型/距离）存储在 param JSON 中，查询需用 json_extract(param, '$.sub_tag')
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  GreenLightNotProceeding:
+    description: 绿灯亮起后车辆未及时起步通行
+    sub_tags:
+    - GreenLightNotProceeding
+    source: cloud_operator
+    operator: GreenLightNotProceeding
+    limitations: []
+    related_tables:
+    - range_tag
+  HighSteeringWheelTorque:
+    description: 方向盘力矩过大
+    sub_tags:
+    - HighSteeringWheelTorque
+    source: cloud_operator
+    operator: HighSteeringWheelTorqueOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  Intersection:
+    description: 自车处于路口区域（直行 / 左转 / 右转 / 掉头 / 不稳定路口）
+    sub_tags:
+    - IsIntersection
+    - LeftIntersection
+    - LuturnIntersection
+    - RightIntersection
+    - UnstableIntersection
+    source: cloud_operator
+    operator: IntersectionOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    - 与 INTERSECTION_STRAIGHT/INTERSECTION_RIGHTTURN（车端标签）不同源，不重复
+    related_tables:
+    - range_tag
+  Jerk:
+    description: 自车急加速或急刹车（加加速度突变）
+    sub_tags:
+    - brake
+    - speed_up
+    source: cloud_operator
+    operator: JerkOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  LaneChange:
+    description: 自车执行变道行为
+    sub_tags:
+    - LeftLaneChange
+    - RightLaneChange
+    source: cloud_operator
+    operator: LaneChange
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    - 实线变道被单独标记为 SolidLaneChange，不在此标签内
+    related_tables:
+    - range_tag
+  LaneKeep:
+    description: 自车保持当前车道直行
+    sub_tags:
+    - LaneKeep
+    source: add_table_direct
+    operator: op_lane_keep.py
+    limitations:
+    - 此标签不走 add_event 路径，而是通过 add_table 直接写入 virtual_table
+    related_tables:
+    - range_tag
+  LaneMerging:
+    description: 自车行驶在车道合并路段
+    sub_tags: []
+    source: cloud_operator
+    operator: LaneMergingOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  LowTTC:
+    description: 自车与障碍物碰撞时间过低（高风险）
+    sub_tags:
+    - TTC_Risk
+    source: cloud_operator
+    operator: LowTTCOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  NoSpeedIncrease:
+    description: 自车低于限速且不主动提速（不追限速）
+    sub_tags:
+    - 10-20
+    source: cloud_operator
+    operator: NoSpeedIncreaseOperator
+    limitations:
+    - sub_tag 表示速度差区间，存储在 param JSON 中
+    related_tables:
+    - range_tag
+  NotCenter:
+    description: 自车未在车道中心行驶
+    sub_tags: []
+    source: cloud_operator
+    operator: NotCenter
+    limitations: []
+    related_tables:
+    - range_tag
+  ObstacleCollision:
+    description: 自车与障碍物发生碰撞
+    sub_tags:
+    - ObstacleCollision
+    source: cloud_operator
+    operator: ObstacleCollision
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  ObstacleNearMiss:
+    description: 自车与障碍物发生近碰（未实际碰撞但距离极近）
+    sub_tags:
+    - ObstacleNearMiss
+    source: cloud_operator
+    operator: ObstacleNearMiss
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  OffRamp:
+    description: 自车行驶在高速 / 快速路下匝道
+    sub_tags:
+    - OffRamp
+    source: cloud_operator
+    operator: OffRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OnRamp:
+    description: 自车行驶在高速 / 快速路上匝道
+    sub_tags:
+    - OnRamp
+    source: cloud_operator
+    operator: OnRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OtherRamp:
+    description: 自车行驶在其他匝道路段
+    sub_tags:
+    - OtherRamp
+    source: cloud_operator
+    operator: OtherRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OverSpeedLimit:
+    description: 自车行驶速度超过道路限速
+    sub_tags:
+    - OverSpeedLimit
+    source: cloud_operator
+    operator: OverSpeedLimitOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  RainLevel:
+    description: 降雨状态（小雨 / 中雨 / 大雨，持续超 10 秒）
+    sub_tags:
+    - heavy_rain
+    - light_rain
+    - moderate_rain
+    source: cloud_operator
+    operator: RainLevelOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  Roundabout:
+    description: 自车行驶在环岛路段
+    sub_tags:
+    - Roundabout
+    source: cloud_operator
+    operator: RoundaboutOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  RunRedLight:
+    description: 车辆闯红灯越过停止线
+    sub_tags:
+    - RunRedLight
+    source: cloud_operator
+    operator: RunRedLight
+    limitations: []
+    related_tables:
+    - range_tag
+  Slope:
+    description: 车辆行驶在坡道路段
+    sub_tags: []
+    source: user_workspace
+    operator: SlopeSchemaOperator
+    author: zhanglikai
+    limitations:
+    - 仅基于地图海拔数据计算，不感知实际路面坡度
+    - sub_tag（上坡/下坡等）存储在 param JSON 中
+    related_tables:
+    - range_tag
+  SolidLaneChange:
+    description: 车辆在实线区域违规变道
+    sub_tags:
+    - SolidLeftLaneChange
+    - SolidRightLaneChange
+    source: cloud_operator
+    operator: SolidLaneChange
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  SteeringSmallSwing:
+    description: 方向盘小角度左右连续交替摆动
+    sub_tags:
+    - LeftRightAlternateSwing
+    source: cloud_operator
+    operator: SteeringSwingOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  SteeringWheelSlam:
+    description: 自车猛打方向盘（短时高强度急转向）
+    sub_tags:
+    - SteeringWheelSlam
+    source: cloud_operator
+    operator: SteeringWheelSlamOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  StraightDriving:
+    description: 自车直行超过 3 秒（测试标签）
+    sub_tags:
+    - long_straight
+    - medium_straight
+    - short_straight
+    source: cloud_operator
+    operator: StraightDrivingOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  TrafficIntersection:
+    description: 自车处于交通灯控制的路口
+    sub_tags:
+    - TrafficIntersection
+    source: cloud_operator
+    operator: TrafficIntersection
+    limitations: []
+    related_tables:
+    - range_tag
+  TrafficLightAbnormal:
+    description: 交通灯信号状态异常
+    sub_tags:
+    - TrafficLightAbnormal
+    source: cloud_operator
+    operator: TrafficLightAbnormal
+    limitations: []
+    related_tables:
+    - range_tag
+  Turning:
+    description: 自车转向（左转 / 右转 / 掉头）
+    sub_tags:
+    - turn_back
+    - turn_left
+    - turn_right
+    source: cloud_operator
+    operator: TurningOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  YellowLightStop:
+    description: 黄灯停车控制
+    sub_tags: []
+    source: cloud_operator
+    operator: YellowLightStopController
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation:
+    description: 自车行驶路线偏离
+    sub_tags: []
+    source: cloud_operator
+    operator: YawOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CURVE:
+    description: 弯道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 命名规范与 cloud 端标签不同
+    related_tables:
+    - range_tag
+  CRUISE_FOLLOW:
+    description: 跟行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_STRAIGHT:
+    description: 直道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  INTERSECTION_RIGHTTURN:
+    description: 路口右转
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=RightIntersection 不同源
+    related_tables:
+    - range_tag
+  INTERSECTION_STRAIGHT:
+    description: 路口直行
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=IsIntersection 不同源
+    related_tables:
+    - range_tag
+  car_end_behavior_tags:
+    description: 车端行为标签完整列表
+    source: car_end_behavior_tag
+    note: '以下标签取决于 bag 文件中的 beh_tag 消息内容，不保证每个 DB 中都存在。 命名统一以大写字母 + 下划线分隔。
+
+      '
+    categories:
+      cruise:
+      - CRUISE_UNKNOWN
+      - CRUISE_CONGESTION
+      - CRUISE_FREESPACE
+      - CRUISE_PREDECELERATE
+      - CRUISE_YIELDTOPEDESTRIANS
+      - CRUISE_EMERGENCYBRAKE
+      - CRUISE_SLOWMOVE
+      - CRUISE_CUTIN
+      - CRUISE_CUTOUT
+      - CRUISE_SLOWFOLLOW
+      - CRUISE_CREEP
+      - CRUISE_RAMP
+      - CRUISE_CROSS
+      - CRUISE_FREESPACEAVOIDANCE
+      - CRUISE_DISTANTFOLLOW
+      - CRUISE_FOLLOWBICYCLISTORTRICYLISTBRAKE
+      - CRUISE_BICYCLISTORTRICYCLISTCUTIN
+      - CRUISE_LEADCUTOUTLEADINGSTOPPED
+      - CRUISE_BICYCLISTORTRICYCLISTCROSS
+      - CRUISE_FREESPACEYIELD
+      - CRUISE_FOLLOWCARORTRUCKBRAKE
+      - CRUISE_CARORTRUCKCUTIN
+      - CRUISE_BICYCLISTORTRICYCLISTCUTOUT
+      - CRUISE_CARORTRUCKCROSS
+      - CRUISE_FOLLOWVRUBRAKE
+      - CRUISE_VRUCUTIN
+      - CRUISE_NRUBRAKE
+      - CRUISE_CLOSECUTIN
+      - CRUISE_VRUCUTOUT
+      - CRUISE_OVERTAKECUTIN
+      stop_and_go:
+      - STOPANDGO_UNKNOWN
+      - STOPANDGO_STOPBEHINDOBSTACLE
+      - STOPANDGO_STARTFOLLOWOBSTACLE
+      - STOPANDGO_STARTNONFOLLOWOBSTACLE
+      - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+      - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+      - STOPANDGO_BRAKESTOP
+      - STOPANDGO_STOP
+      - STOPANDGO_FOLLOWSTOPVEHICLE
+      - STOPANDGO_STARTCONGESTION
+      - STOPANDGO_STARTRAMP
+      - STOPANDGO_TRAFFICLIGHTGREENFLASHSTOP
+      - STOPANDGO_TRAFFICLIGHTREDSTART
+      - STOPANDGO_BRAKESTOPSTATICVEHICLE
+      - STOPANDGO_STOPINLANE
+      - STOPANDGO_FOLLOWSTOP_CONGESTION
+      - STOPANDGO_STARTCURB
+      - STOPANDGO_TRAFFICLIGHTYELLOWFLASHSTOP
+      - STOPANDGO_TRAFFICLIGHTGREENFLASHGO
+      - STOPANDGO_BRAKESTOPBICYCLISTORTRICYCLIST
+      - STOPANDGO_STOPPULLOVER
+      - STOPANDGO_FOLLOWSTOPRAMP
+      - STOPANDGO_STARTSPOT
+      - STOPANDGO_TRAFFICLIGHTYELLOWSTOP
+      - STOPANDGO_TRAFFICLIGHTINACTIVEGO
+      - STOPANDGO_BRAKESTOPVRU
+      - STOPANDGO_FOLLOWSTOPESCAPE
+      - STOPANDGO_TRAFFICLIGHTREDWAIT
+      - STOPANDGO_BRAKESTOPCONE
+      - STOPANDGO_BRAKESTOPANTICRASHBUCKET
+      - STOPANDGO_BRAKESTOPCONSTRUCTIONSIGN
+      - STOPANDGO_BRAKESTOPGRIDZONE
+      - STOPANDGO_BRAKESTOPEMERGENCY
+      lanechange:
+      - LANECHANGE_UNKNOWN
+      - LANECHANGE_NAVIGATION
+      - LANECHANGE_OVERTAKE
+      - LANECHANGE_AVOIDANCE
+      - LANECHANGE_TRUNSIGNAL
+      - LANECHANGE_ABANDON
+      - LANECHANGE_MERGEDIVERGE
+      - LANECHANGE_FREEWAY
+      - LANECHANGE_NAVLANECHANGEMAIN
+      - LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST
+      - LANECHANGE_ABANDONLANECHANGEAUTO
+      - LANECHANGE_MERGELANECHANGEDROP
+      - LANECHANGE_NAVLANECHANGEDIVERGE
+      - LANECHANGE_OVERTAKERIGHTCARORTRUCK
+      - LANECHANGE_MERGEROADZIPPER
+      - LANECHANGE_NAVLANECHANGERAMP
+      - LANECHANGE_NAVLANECHANGECONGESTION
+      - LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST
+      - LANECHANGE_OVERTAKELEFTCARORTRUCK
+      - LANECHANGE_NAVLANECHANGEPARALLEL
+      - LANECHANGE_DIVERGELANECHANGERIGHTTURN
+      - LANECHANGE_DIVERGELANECHANGESTRAIGHT
+      - LANECHANGE_NAVLANECHANGEMERGE
+      avoidance:
+      - AVOIDANCE_UNKNOWN
+      - AVOIDANCE_INLANE
+      - AVOIDANCE_INSAMELANE
+      - AVOIDANCE_INREVERSELANE
+      - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+      - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
+      - AVOIDANCE_LANEBORROWYIELDBICYCLISTORTRICYCLIST
+      - AVOIDANCE_LANEBORROWYIELDOPPOSITE
+      - AVOIDANCE_LANEYIELDCARORTRUCK
+      - AVOIDANCE_LANEBORROWYIELDCARORTRUCK
+      - AVOIDANCE_LANEBORROWOVERTAKEOPPOSITE
+      - AVOIDANCE_LANEYIELDVRU
+      - AVOIDANCE_LANEBORROWYIELDVRU
+      - AVOIDANCE_LANEBORROWDRIVE
+      - AVOIDANCE_LANEYIELDCONE
+      - AVOIDANCE_LANEBORROWYIELDCONE
+      - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
+      - AVOIDANCE_LANEBORROWYIELDDIVERGE
+      - AVOIDANCE_LANEYIELDCRUB
+      - AVOIDANCE_LANEBORROWYIELDCLOSE
+      - AVOIDANCE_LANEBORROWYIELDSOLIDLINE
+      intersection:
+      - INTERSECTION_UNKNOWN
+      - INTERSECTION_LEFTTURN
+      - INTERSECTION_UTURN
+      - INTERSECTION_ROUNDABOUT
+      - INTERSECTION_TOLLBOOTH
+      - INTERSECTION_UTURNLEFTTURNLANE
+      - INTERSECTION_ROUNDABOUTSIGNAL
+      - INTERSECTION_TOLLBOOTHMANUAL
+      - INTERSECTION_UTURNDASHEDLINE
+      - INTERSECTION_ROUNDABOUTUNSIGNAL
+      - INTERSECTION_TOLLBOOTHETC
+      - INTERSECTION_UTURNLANE
+  stationary:
+    description: 自车静止状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 与 creeping/cruising/decelerating/accelerating/hard_braking/reversing 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  creeping:
+    description: 自车蠕行状态（极低速移动）
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  cruising:
+    description: 自车巡航状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  decelerating:
+    description: 自车减速状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  accelerating:
+    description: 自车加速状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  hard_braking:
+    description: 自车急刹车状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  reversing:
+    description: 自车倒车状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_slightly:
+    description: 方向盘小角度转动
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 各 steering_* 标签互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_15_60:
+    description: 方向盘左转 15°~60°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_60_120:
+    description: 方向盘左转 60°~120°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_120_185:
+    description: 方向盘左转 120°~185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_above_185:
+    description: 方向盘左转超过 185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_15_60:
+    description: 方向盘右转 15°~60°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_60_120:
+    description: 方向盘右转 60°~120°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_120_185:
+    description: 方向盘右转 120°~185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_above_185:
+    description: 方向盘右转超过 185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_guide_line_infos_empty:
+    description: 导航输入异常（guide_line_info_dict 为空）
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 各 navi_* 标签互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_not_in_sd:
+    description: 自车不在 SD 导航状态
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_keep:
+    description: 导航直行
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_enter:
+    description: 导航进入
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_exit:
+    description: 导航驶出
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_other:
+    description: 导航其他场景
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_turn_left:
+    description: 导航左转
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_turn_right:
+    description: 导航右转
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_u_turn:
+    description: 导航掉头
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+fields:
+  range_tag.start_ts:
+    description: 标签生效开始时间戳（秒级 Unix 时间戳）
+    type: BIGINT
+    unit: seconds
+    example: 1767231833
+    related_tables:
+    - range_tag
+  range_tag.end_ts:
+    description: 标签生效结束时间戳（秒级 Unix 时间戳，≥ start_ts）
+    type: BIGINT
+    unit: seconds
+    example: 1767231856
+    related_tables:
+    - range_tag
+  range_tag.tag_name:
+    description: 标签名称，对应算子 label_id 或车端标签英文名
+    type: TEXT
+    related_tables:
+    - range_tag
+    notes:
+    - 值域范围参见 schema_structure.yaml 中 range_tag.enum
+  range_tag.param:
+    description: 标签参数（JSON 字符串），包含子标签、障碍物信息、状态比例等扩展字段
+    type: TEXT
+    related_tables:
+    - range_tag
+    notes:
+    - 可用 SQLite 函数 json_extract(param, '$.key') 提取字段
+    - '常见 key: sub_tag, object_id, state_ratio, frame_count, duration, en'
+  intersection_info.intersection_id:
+    description: 路口唯一编码
+    type: TEXT
+    related_tables:
+    - intersection_info
+  intersection_info.lane_count:
+    description: 进入路口总车道数
+    type: BIGINT
+    related_tables:
+    - intersection_info
+  intersection_info.ego_lane_index:
+    description: 自车所在车道索引（0-based）
+    type: BIGINT
+    related_tables:
+    - intersection_info
+  intersection_info.lane_info:
+    description: 车道详细信息（JSON 字符串）
+    type: TEXT
+    related_tables:
+    - intersection_info
+  ego.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - ego
+  ego.speed:
+    description: 自车纵向速度
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - ego
+    notes:
+    - 正值为前进，负值为倒车
+    - 1 m/s ≈ 3.6 km/h
+  ego.steering_angle:
+    description: 方向盘转角
+    type: FLOAT
+    unit: degrees
+    related_tables:
+    - ego
+    notes:
+    - 正值通常表示左转，负值表示右转（取决于车辆坐标系定义）
+  ego.acc_magnitude:
+    description: 自车加速度大小（纵向加速度绝对值）
+    type: FLOAT
+    unit: m/s²
+    related_tables:
+    - ego
+  ego.navigation_status:
+    description: 导航状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：navi_keep, navi_enter, navi_turn_left 等
+  ego.wiper_status:
+    description: 雨刮器状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：off, low, high, auto 等
+  ego.indicator_status:
+    description: 转向灯状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：off, left, right, hazard 等
+  ego.traffic_light_status:
+    description: 当前交通灯状态编码
+    type: INTEGER
+    related_tables:
+    - ego
+    notes:
+    - 具体编码需参考车端定义
+  ego.utm_x:
+    description: 自车 UTM 坐标 X（东向）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.utm_y:
+    description: 自车 UTM 坐标 Y（北向）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.utm_yaw:
+    description: 自车航向角（UTM 坐标系下）
+    type: FLOAT
+    unit: radians
+    related_tables:
+    - ego
+    notes:
+    - 0 通常指向正北，顺时针增大
+  ego.ego_lane_id:
+    description: 自车当前车道 ID
+    type: INTEGER
+    related_tables:
+    - ego
+    - static_lane
+    - dynamic_lane
+  ego.ego_link_id:
+    description: 自车当前道路 Link ID
+    type: INTEGER
+    related_tables:
+    - ego
+    - static_link
+    - dynamic_link
+  ego.ego_lane_width:
+    description: 自车当前车道宽度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.ego_to_centerline_dist:
+    description: 自车中心到车道中心线的横向距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+    notes:
+    - 正值表示偏向左侧，负值表示偏向右侧（取决于坐标系）
+  ego.cumulative_distance:
+    description: 自车累计行驶距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.ego_dr_trajectory:
+    description: 自车 DR（Dead Reckoning）轨迹数据（JSON 字符串）
+    type: TEXT
+    related_tables:
+    - ego
+  dynamic_obj.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obj_id:
+    description: 障碍物唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.type:
+    description: 障碍物类型
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+    notes:
+    - 常见值：CAR, TRUCK, BUS, PEDESTRIAN, BICYCLE, TRICYCLE, CONE 等
+  dynamic_obj.is_static:
+    description: 障碍物是否为静态
+    type: BOOLEAN
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.x:
+    description: 障碍物中心 X 坐标（自车坐标系）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.y:
+    description: 障碍物中心 Y 坐标（自车坐标系）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.heading:
+    description: 障碍物航向角
+    type: FLOAT
+    unit: radians
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.l:
+    description: 障碍物长度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.w:
+    description: 障碍物宽度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.h:
+    description: 障碍物高度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.absolute_velocity_x:
+    description: 障碍物绝对速度 X 分量
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.absolute_velocity_y:
+    description: 障碍物绝对速度 Y 分量
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obs_lane_id:
+    description: 障碍物所在车道 ID
+    type: INTEGER
+    related_tables:
+    - dynamic_obj
+    - static_lane
+    - dynamic_lane
+  dynamic_obj.obs_to_centerline_dist:
+    description: 障碍物中心到车道中心线的横向距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obs_dr_trajectory:
+    description: 障碍物 DR 轨迹数据（JSON 字符串）
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+  static_link.link_id:
+    description: 道路 Link 唯一 ID
+    type: TEXT
+    related_tables:
+    - static_link
+  static_link.link_type:
+    description: 道路类型
+    type: TEXT
+    related_tables:
+    - static_link
+    notes:
+    - 如：main, ramp, roundabout, intersection 等
+  static_link.link_speed_limit:
+    description: 道路限速
+    type: FLOAT
+    unit: km/h
+    related_tables:
+    - static_link
+  static_link.link_turn_type:
+    description: 道路转弯类型
+    type: TEXT
+    related_tables:
+    - static_link
+  static_link.link_class:
+    description: 道路等级
+    type: TEXT
+    related_tables:
+    - static_link
+    notes:
+    - 如：highway, urban_expressway, urban_road 等
+  static_lane.lane_id:
+    description: 车道唯一 ID
+    type: TEXT
+    related_tables:
+    - static_lane
+  dynamic_link.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_link
+  dynamic_link.link_id:
+    description: 道路 Link 唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_link
+  dynamic_link.link_type:
+    description: 道路类型（动态，可能随时间变化）
+    type: TEXT
+    related_tables:
+    - dynamic_link
+  dynamic_lane.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_lane
+  dynamic_lane.lane_id:
+    description: 车道唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+  dynamic_lane.lane_type:
+    description: 车道类型
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+    notes:
+    - 如：normal, bus_only, bike_lane, emergency 等
+  dynamic_lane.lane_turn_type:
+    description: 车道转弯类型
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+    notes:
+    - 如：straight, left, right, uturn, left_right 等
+git_version:
+  data_mining_repo: 1df5784fe76e3d67d08edac2da9bcbeae65b42cc
+  branch: origin/data_mining/master
+  synced_at: '2026-05-19T17:14:52.726027+08:00'
+  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

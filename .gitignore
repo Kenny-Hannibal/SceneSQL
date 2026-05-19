@@ -1,0 +1,45 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Node
+visualizer/frontend/node_modules/
+visualizer/frontend/build/
+npm-debug.log*
+
+# Environment & Secrets
+.env
+backend/.env
+*.key
+*.pem
+
+# Gradio cache
+.gradio/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Video outputs (runtime generated)
+/tmp/rosbag_videos/
+outputs/
+outputs_local/
+
+# Large binaries excluded from git (download separately)
+three_party/gsbag_x86_Release_4.2.18_20260227_Linux/bin/GsbagViz
+three_party/gsbag_x86_Release_4.2.18_20260227_Linux/lib/libprotoc.so.30.0.3
+three_party/gsbag_x86_Release_4.2.18_20260227_Linux/external/platform_sdk/lib/gacrnd/libprotoc.so.30.0.3
