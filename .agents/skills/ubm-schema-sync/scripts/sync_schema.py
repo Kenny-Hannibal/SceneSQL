@@ -29,6 +29,7 @@ SCHEMA_FILES = [
     "schema_structure.yaml",
     "schema_dictionary.yaml",
 ]
+ETL_SCRIPT_PATH = Path("agent/backend/app/services/etl/etl_sqlite_to_parquet.py")
 
 # 与 SQLite 注入相关的文件模式（匹配 git diff 返回的路径，含 UBM_mining/ubm_data_mining/ 前缀）
 TRACKED_PATTERNS = [
@@ -250,7 +251,7 @@ def analyze_impact(commits: list[dict]) -> dict:
     return impact
 
 
-def generate_report(commits: list[dict], impact: dict, old_hash: str, new_hash: str) -> str:
+def generate_report(commits: list[dict], impact: dict, old_hash: str, new_hash: str, etl_sync: dict | None = None) -> str:
     """生成 Markdown 格式的变更报告。"""
     lines = [
         "# Schema 同步报告",
@@ -309,19 +310,100 @@ def generate_report(commits: list[dict], impact: dict, old_hash: str, new_hash: 
     ]):
         lines.append("_未发现对 SQLite 注入源有影响的变更。_")
 
+    # ---- ETL CORE_TABLES 同步状态 ----
+    if etl_sync is None:
+        etl_sync = {"changed": False, "added": [], "removed": []}
     lines.extend([
         "",
+        "## ETL 同步状态",
+        "",
+    ])
+    if etl_sync["changed"]:
+        lines.append(f"- ✅ **CORE_TABLES 已自动同步** (`{ETL_SCRIPT_PATH}`)")
+        if etl_sync["added"]:
+            lines.append(f"  - 新增表: {', '.join(etl_sync['added'])}")
+        if etl_sync["removed"]:
+            lines.append(f"  - 移除表: {', '.join(etl_sync['removed'])}")
+    else:
+        lines.append("- ✅ CORE_TABLES 已与 schema_structure.yaml 保持一致，无需修改。")
+    lines.append("")
+
+    lines.extend([
         "## 建议操作",
         "",
-        "1. 查看上方变更文件，确认是否有新的 `add_event()` 调用或 `add_table(\"range_tag\")` 调用。",
+        "1. 查看上方变更文件，确认是否有新的 `add_event()` 调用或 `add_table()` 调用。",
         "2. 如有新增算子，确认其 `label_id` 值并补充到 schema 的 `range_tag.enum` 中。",
-        "3. 如有新增车端标签，确认 `tag_map.py` 中的映射并补充。",
-        "4. 更新 `schema_dictionary.yaml` 中对应标签的定义。",
-        "5. 运行本脚本更新 schema 文件中的 `git_version`。",
+        "3. 如有新增表结构（`to_sqlite_db.py` 中新增 `CREATE TABLE`），同步更新 `schema_structure.yaml`，并确认 `CORE_TABLES` 已自动同步。",
+        "4. 如有新增车端标签，确认 `tag_map.py` 中的映射并补充。",
+        "5. 更新 `schema_dictionary.yaml` 中对应标签/字段的定义。",
+        "6. 运行本脚本更新 schema 文件中的 `git_version`。",
         "",
     ])
 
     return "\n".join(lines)
+
+
+def get_schema_tables() -> list[str]:
+    """从 schema_structure.yaml 中提取当前定义的表名列表（保持 YAML 中的顺序）。"""
+    schema_path = Path(SCHEMA_DIR) / "schema_structure.yaml"
+    if not schema_path.exists():
+        return []
+    with schema_path.open() as f:
+        data = yaml.safe_load(f)
+    tables = data.get("database_schema", {}).get("tables", [])
+    return [t["name"] for t in tables if "name" in t]
+
+
+def get_etl_core_tables() -> list[str]:
+    """从 ETL 脚本中提取当前的 CORE_TABLES 列表。"""
+    etl_path = Path(ETL_SCRIPT_PATH)
+    if not etl_path.exists():
+        return []
+    with etl_path.open() as f:
+        content = f.read()
+    match = re.search(r'CORE_TABLES\s*=\s*\[(.*?)\]', content, re.DOTALL)
+    if not match:
+        return []
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def sync_etl_core_tables() -> dict:
+    """同步 ETL 脚本的 CORE_TABLES 与 schema_structure.yaml 保持一致。
+
+    Returns:
+        {"changed": bool, "old": list, "new": list, "added": list, "removed": list}
+    """
+    schema_tables = get_schema_tables()
+    old_tables = get_etl_core_tables()
+
+    added = [t for t in schema_tables if t not in old_tables]
+    removed = [t for t in old_tables if t not in schema_tables]
+
+    if not added and not removed:
+        return {"changed": False, "old": old_tables, "new": schema_tables, "added": [], "removed": []}
+
+    etl_path = Path(ETL_SCRIPT_PATH)
+    with etl_path.open() as f:
+        content = f.read()
+
+    # 生成新的列表文本（保持 schema 中的定义顺序）
+    lines = ["CORE_TABLES = ["]
+    for t in schema_tables:
+        lines.append(f'    "{t}",')
+    lines.append("]")
+    new_block = "\n".join(lines)
+
+    new_content = re.sub(
+        r'CORE_TABLES\s*=\s*\[.*?\]',
+        new_block,
+        content,
+        flags=re.DOTALL,
+    )
+
+    with etl_path.open("w") as f:
+        f.write(new_content)
+
+    return {"changed": True, "old": old_tables, "new": schema_tables, "added": added, "removed": removed}
 
 
 def update_schema_git_versions(repo_path: Path, new_hash: str, branch: str):
@@ -381,6 +463,15 @@ def main():
     old_hash = get_previous_hash(master_schema)
     print(f"[INFO] 上一版本 commit: {old_hash[:12] if old_hash else 'N/A'}")
 
+    # 无论 git hash 是否变化，都先同步 ETL CORE_TABLES（schema_structure.yaml 可能被手动修改）
+    etl_sync = sync_etl_core_tables()
+    if etl_sync["changed"]:
+        print(f"[OK] CORE_TABLES 已自动同步: {ETL_SCRIPT_PATH}")
+        if etl_sync["added"]:
+            print(f"    新增表: {', '.join(etl_sync['added'])}")
+        if etl_sync["removed"]:
+            print(f"    移除表: {', '.join(etl_sync['removed'])}")
+
     if old_hash == new_hash:
         print("[INFO] schema 已与最新代码同步，无需更新")
         # 仍然更新 synced_at 时间戳
@@ -393,7 +484,7 @@ def main():
     impact = analyze_impact(commits)
 
     # 生成报告
-    report = generate_report(commits, impact, old_hash, new_hash)
+    report = generate_report(commits, impact, old_hash, new_hash, etl_sync=etl_sync)
     report_path = Path("/tmp/schema_sync_report.md")
     with report_path.open("w") as f:
         f.write(report)

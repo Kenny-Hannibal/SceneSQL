@@ -46,15 +46,33 @@ class AgentResult:
 
 
 class AgentEngine:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str = ""):
+        self.query_mode = os.environ.get("QUERY_MODE", "sqlite")
         self.db_path = db_path
-        self.is_dir = os.path.isdir(db_path)
+        self.is_dir = os.path.isdir(db_path) if db_path else False
+        self._parquet_conn = None
+        self._resolver = None
+        self._resolver_lock = asyncio.Lock()
+        self.llm = LLMClient()
+
+        if self.query_mode == "parquet":
+            self._init_parquet_mode()
+        else:
+            self._init_sqlite_mode(db_path)
+
+    def _init_sqlite_mode(self, db_path: str):
+        """SQLite 模式：逐个连接 SQLite DB 查询。"""
         self.sample_db = self._get_sample_db()
         self.schema = read_schema(self.sample_db)
         self.schema_text = format_schema_for_prompt(self.schema)
-        self.llm = LLMClient()
-        self._resolver = None
-        self._resolver_lock = asyncio.Lock()
+
+    def _init_parquet_mode(self):
+        """Parquet 模式：通过 DuckDB 查询聚合后的 Parquet 文件。"""
+        from agent.backend.app.services.etl import get_manager
+        self.etl_manager = get_manager()
+        self._parquet_conn = self.etl_manager.get_connection()
+        self.schema = read_schema("", conn=self._parquet_conn)
+        self.schema_text = format_schema_for_prompt(self.schema)
 
     def _get_sample_db(self) -> str:
         if not self.is_dir:
@@ -158,6 +176,27 @@ class AgentEngine:
             logger.warning("SQL execution failed on %s: %s", db_file, exc)
             return [{"_error": str(exc), "db_file": db_file}]
 
+    def _execute_parquet(self, sql: str, result_limit: int) -> List[Dict[str, Any]]:
+        """在 Parquet 聚合数据上执行 SQL（DuckDB），返回带 bag_id 的结果。"""
+        try:
+            if self._parquet_conn is None:
+                raise RuntimeError("Parquet 连接未初始化")
+            cursor = self._parquet_conn.execute(sql)
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+            result = []
+            for row in rows:
+                d = dict(zip(columns, row))
+                # Parquet 中已有 bag_id 列，无需额外解析
+                if "bag_id" not in d:
+                    d["bag_id"] = ""
+                result.append(d)
+            return result
+        except Exception as exc:
+            logger.warning("Parquet SQL execution failed: %s", exc)
+            return [{"_error": str(exc)}]
+
     async def _query_batch(self, sql: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
         sql = self._inject_limit(sql, result_limit)
         try:
@@ -209,6 +248,30 @@ class AgentEngine:
             matched_dbs=matched,
         )
 
+    async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
+        """Parquet 模式：在聚合后的 Parquet 上执行单次查询。"""
+        sql = self._inject_limit(sql, result_limit)
+        rows = self._execute_parquet(sql, result_limit)
+        errors = [r for r in rows if "_error" in r]
+        good_rows = [r for r in rows if "_error" not in r]
+        columns = list(good_rows[0].keys()) if good_rows else []
+
+        # 去重统计 bag_id
+        bag_ids = set()
+        for r in good_rows:
+            if "bag_id" in r and r["bag_id"]:
+                bag_ids.add(r["bag_id"])
+
+        return AgentResult(
+            sql=sql,
+            explanation=f"Parquet 聚合查询，命中 {len(bag_ids)} 个 bag，返回 {len(good_rows)} 条记录",
+            rows=good_rows,
+            columns=columns,
+            error=f"{len(errors)} 个错误" if errors else None,
+            scanned_dbs=len(bag_ids),
+            matched_dbs=len(bag_ids),
+        )
+
     async def _query_single(self, sql: str, result_limit: int = 100) -> AgentResult:
         sql = self._inject_limit(sql, result_limit)
         db_file = os.path.basename(self.db_path)
@@ -247,7 +310,9 @@ class AgentEngine:
                 error=validation_error,
             )
 
-        if self.is_dir:
+        if self.query_mode == "parquet":
+            return await self._query_parquet(sql, result_limit=result_limit)
+        elif self.is_dir:
             return await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit)
         else:
             return await self._query_single(sql, result_limit=result_limit)

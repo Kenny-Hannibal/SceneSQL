@@ -243,8 +243,13 @@ FIELD_SEMANTICS = {
 }
 
 
-def read_schema(db_path: str) -> List[TableInfo]:
-    """读取 SQLite 数据库的完整 Schema，并注入语义描述。"""
+def read_schema(db_path: str, conn: Optional[Any] = None) -> List[TableInfo]:
+    """读取 SQLite 数据库的完整 Schema，并注入语义描述。
+    
+    Args:
+        db_path: SQLite DB 路径（或 Parquet 目录路径）
+        conn: 可选的已打开连接（DuckDB 或 SQLite），用于 Parquet 模式
+    """
     # 加载外部 schema 文档
     structure = _load_yaml(_SCHEMA_STRUCTURE_PATH)
     dictionary = _load_yaml(_SCHEMA_DICTIONARY_PATH)
@@ -252,6 +257,16 @@ def read_schema(db_path: str) -> List[TableInfo]:
     tag_desc_map = _get_tag_descriptions(dictionary)
     range_tag_enum = _get_range_tag_enum(structure)
 
+    # 判断模式：如果传入了 conn（DuckDB），或 db_path 以 .parquet 结尾
+    is_parquet = conn is not None or str(db_path).endswith(".parquet")
+
+    if is_parquet:
+        return _read_schema_from_parquet(conn, db_path, field_desc_map, range_tag_enum)
+    else:
+        return _read_schema_from_sqlite(db_path, field_desc_map, range_tag_enum)
+
+
+def _read_schema_from_sqlite(db_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str]) -> List[TableInfo]:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -267,19 +282,57 @@ def read_schema(db_path: str) -> List[TableInfo]:
         for col in cols:
             col_name = col[1]
             col_type = col[2]
-            # 优先从 schema_dictionary.yaml 读取字段描述，回退到 FIELD_SEMANTICS
             dict_key = f"{t}.{col_name}"
             col_desc = field_desc_map.get(dict_key, semantics.get(col_name, ""))
             col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc))
 
-        # 为 range_tag 附加 enum
-        enum = None
-        if t == "range_tag" and range_tag_enum:
-            enum = range_tag_enum
-
+        enum = range_tag_enum if t == "range_tag" and range_tag_enum else None
         result.append(TableInfo(name=t, description=table_desc, columns=col_infos, enum=enum))
 
     conn.close()
+    return result
+
+
+def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str]) -> List[TableInfo]:
+    """从 Parquet 文件读取 schema（通过 DuckDB）。"""
+    import duckdb
+    close_conn = False
+    if conn is None:
+        conn = duckdb.connect()
+        close_conn = True
+
+    # 读取所有视图（ETL 创建的视图对应原表）
+    views = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_type = 'VIEW'").fetchall()
+    view_names = [v[0] for v in views]
+
+    # 如果没有视图，尝试直接读取 Parquet 文件
+    if not view_names and parquet_path.endswith(".parquet"):
+        view_names = ["range_tag"]  # fallback
+        conn.execute(f"CREATE OR REPLACE VIEW range_tag AS SELECT * FROM read_parquet('{parquet_path}')")
+
+    result = []
+    for t in view_names:
+        try:
+            cursor = conn.execute(f"DESCRIBE {t}")
+            cols = cursor.fetchall()
+            semantics = FIELD_SEMANTICS.get(t, {})
+            table_desc = semantics.get("_desc", f"表 {t}")
+            col_infos = []
+            for col in cols:
+                col_name = col[0]
+                col_type = col[1]
+                dict_key = f"{t}.{col_name}"
+                col_desc = field_desc_map.get(dict_key, semantics.get(col_name, ""))
+                col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc))
+
+            enum = range_tag_enum if t == "range_tag" and range_tag_enum else None
+            result.append(TableInfo(name=t, description=table_desc, columns=col_infos, enum=enum))
+        except Exception:
+            # 某些视图可能无法 DESCRIBE，跳过
+            continue
+
+    if close_conn:
+        conn.close()
     return result
 
 

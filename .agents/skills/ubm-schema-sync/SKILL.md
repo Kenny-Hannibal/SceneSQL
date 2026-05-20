@@ -24,18 +24,22 @@ new operators are added, `add_event()` logic changes, car-end behavior tags expa
 This skill automates the detection of those changes and produces a report so the
 schema YAML files (`schema_structure.yaml`, `schema_dictionary.yaml`) can be updated.
 
+**Additionally**, whenever `schema_structure.yaml` gains or loses tables, the ETL script
+`agent/backend/app/services/etl/etl_sqlite_to_parquet.py` is automatically kept in sync
+so that `CORE_TABLES` always matches the schema definition.
+
 **Key rule:** Only `to_sqlite_db.py` writes to SQLite. All other processors
 (track converter, db_py_rule queries) only read SQLite or output JSON.
 
 ## How it works (no functions — scripts + LLM)
 
 This skill has no callable functions. Instead it provides:
-1. `scripts/sync_schema.py` — deterministic script that compares git hashes and generates a Markdown report
+1. `scripts/sync_schema.py` — deterministic script that compares git hashes, generates a Markdown report, **and auto-syncs ETL `CORE_TABLES`**
 2. `references/injection_sources.md` — methodology for manually verifying what enters SQLite
 3. This SKILL.md — workflow for the LLM to follow
 
 The LLM (you) runs the script, reads the report, decides what needs updating,
-and edits the schema files.
+and edits the schema files. The ETL `CORE_TABLES` sync is fully automatic.
 
 ## Prerequisites
 
@@ -66,7 +70,8 @@ The script:
    - `gsbag_parser/tag_map.py` / `em_behavior_tag_parser.py` — car-end tags
    - `mining_pipeline.py` — pipeline orchestration
 4. Generates `/tmp/schema_sync_report.md`
-5. Prompts to update `git_version` in all three schema files
+5. **Auto-syncs `CORE_TABLES` in `etl_sqlite_to_parquet.py` against `schema_structure.yaml`**
+6. Prompts to update `git_version` in all three schema files
 
 If the report says "no relevant changes", the schema enum probably does not need updating.
 Still answer `y` to record the new git hash.
@@ -85,7 +90,8 @@ The script **does not auto-update enum values** — this requires human/LLM judg
 
 1. **Update `schema_structure.yaml`**
    - Add/remove tag names from `range_tag.enum`
-   - Update table/column defs if `to_sqlite_db.py` changed
+   - Update table/column defs if `to_sqlite_db.py` changed (e.g. new `CREATE TABLE`)
+   - ⚠️ **Any table added/removed here will be automatically reflected in ETL `CORE_TABLES`** when the sync script runs
 
 2. **Update `schema_dictionary.yaml`**
    - Add new tag entries under `tags:`
@@ -96,7 +102,19 @@ The script **does not auto-update enum values** — this requires human/LLM judg
    - Update `actual_tags_from_sample_db` if a new DB was sampled
    - Update `potential_tags_not_in_sample`
 
-### Step 4 — Record the new git hash
+### Step 4 — ETL auto-sync (automatic)
+
+The sync script reads `schema_structure.yaml → database_schema.tables[].name` and
+compares it against `etl_sqlite_to_parquet.py → CORE_TABLES`.
+
+- If tables match → nothing happens.
+- If `schema_structure.yaml` has new tables → they are **appended** to `CORE_TABLES`.
+- If tables were removed from schema → they are **removed** from `CORE_TABLES`.
+
+This step runs automatically at the start of the script, regardless of git hash changes.
+Check the report's "ETL 同步状态" section for details.
+
+### Step 5 — Record the new git hash
 
 Run the script again (or answer `y` at the prompt) to write the new commit hash
 into all three schema files' `git_version` block.
