@@ -1,6 +1,7 @@
 # Architecture Discussion & Design Decisions
 
-> 本文档记录于 2026-05-16/17，汇总了项目从 Gradio 单体迁移到 FastAPI + React 过程中的关键设计讨论与决策。供后续开发者/AI Agent 参考。
+> 本文档记录于 2026-05-16/17，汇总了项目从 Gradio 单体迁移到 FastAPI + React 过程中的关键设计讨论与决策。
+> 2026-05-20 更新：新增 NL2SQL Agent 优化方案与 P0-P4 排期。
 
 ---
 
@@ -15,9 +16,15 @@
 ```
 用户自然语言
     ↓
-[AI Agent] → 生成 SQL
+[Tag Router] → 关键词路由 → 匹配标签 + 涉及表
     ↓
-[SQL Executor] → 查询本地 SQLite
+[Schema 分层注入] → Layer 0 常驻 Card + Layer 1 按需表结构 + Layer 2 标签语义 + few-shot
+    ↓
+[LLM] → 生成 SQL
+    ↓
+[SQL Validator] → 安全校验 + 字段存在性检查
+    ↓
+[SQL Executor] → 查询 SQLite / Parquet (DuckDB)
     ↓
 返回列表：[{bag_id, start_ts, end_ts}, ...]
     ↓
@@ -70,18 +77,6 @@
 - 当前没有多系统复用 Agent 的需求
 - 函数调用无网络开销，单日志流便于调试
 
-**Provider 模式设计**：
-```
-backend/app/services/agent_engine/
-├── provider.py          # 抽象接口 AgentProvider
-├── openai_provider.py   # GPT-4 / OpenAI 实现
-├── claude_provider.py   # Anthropic Claude 实现
-├── local_provider.py    # 本地模型（vLLM / Ollama）实现
-└── mock_provider.py     # 测试用
-```
-
-**切换方式**：通过配置 `AGENT_PROVIDER=openai` 一键切换，无需改业务代码。
-
 **未来拆分条件**（满足任意一条即可拆为独立服务）：
 1. Agent 需要被 3 个以上业务系统复用
 2. Agent 团队与可视化团队的发布节奏差异巨大
@@ -98,6 +93,45 @@ backend/app/services/agent_engine/
 - 用户内部文档、脚本、浏览器书签均围绕 30001
 - 前端 dev server 用 3000（React 默认），通过 proxy 转发到 30001
 - 生产部署时前端 build 产物由后端统一 serve
+
+---
+
+### 2.5 NL2SQL 路由策略：关键词 + RAG，不用 LLM 路由
+
+**决策**：使用关键词匹配作为主路由，RAG 语义检索作为兜底，不使用 LLM 做路由判断。
+
+**理由**：
+- 弱模型（7B-14B Qwen/GLM）路由准确率低，本身就需要路由才能生成 SQL，形成循环依赖
+- LLM 路由增加 200-500ms 延迟和 1 次 API 调用成本
+- 关键词路由对 7 表 + 60 标签的规模足够，命中率 > 80%
+- RAG 作为兜底处理关键词无法覆盖的模糊表达
+
+**替代方案**：LLM 路由（P3 阶段可视准确率数据决定是否引入强模型做轻量路由）。
+
+---
+
+### 2.6 Schema 注入策略：三层四类，替代全量注入
+
+**决策**：Schema 按"三层四类"体系分层注入，替代当前全量 Schema 灌入。
+
+| 层 | 内容 | Token 量 | 何时注入 |
+|----|------|----------|----------|
+| Layer 0 | Schema Card（表概览 + 表分类） | ~200 | 始终 |
+| Layer 1 | 命中表的完整字段定义 | ~200-500/表 | 路由后按需 |
+| Layer 2 | 标签语义描述 + few-shot 模板 | ~100-300 | 路由后按需 |
+
+**四类表分类**：
+| 类别 | 表 | 特征 |
+|------|-----|------|
+| horizontal_event | range_tag, intersection_info | 事件/片段型，秒级时间 |
+| vertical_timeseries | ego, dynamic_obj, static_obj | 时序型，纳秒级时间，10Hz |
+| dynamic_ref | dynamic_lane, dynamic_link | 动态拓扑，实时变化 |
+| static_ref | static_lane, static_link | 静态参考，不随时间变化 |
+
+**理由**：
+- 当前全量 Schema ~3000+ token，弱模型上下文利用率极低
+- 精准注入后 ~800-1500 token，信息密度更高
+- 三层结构让 LLM 先看全局再聚焦，符合"渐进式理解"的认知规律
 
 ---
 
@@ -127,34 +161,156 @@ backend/app/services/agent_engine/
 - `App.js` 集成 Bag 加载、Camera Topic 选择、视频提取与播放
 - `package.json` 配置 `proxy: http://localhost:30001`
 
+### 3.4 NL2SQL Agent P0 改造（2026-05-20）
+| 改造项 | 旧代码 | 新代码 |
+|--------|--------|--------|
+| Schema 注入 | 全量 `format_schema_for_prompt()` | `only_tables` 参数按需注入 |
+| 路由 | 无 | `TagRouter` 关键词路由 → `RouteResult` |
+| Prompt 组装 | 固定 `SYSTEM_PROMPT` + 全量 schema | `build_prompt()` 分层组装 |
+| 标签语义 | `schema_dictionary.yaml` 未参与 prompt | `format_tag_semantics()` Layer 2 注入 |
+| 跨表 JOIN 提示 | 仅在规则中文字描述 | `format_cross_table_join_hint()` 精准规则 |
+| Few-shot | 无 | 内置 10 条 + 外部 `templates.jsonl` 20 条 |
+| 验证 | 仅检查 SELECT/FROM + 禁词 | 增加 `known_tables` 字段存在性校验 |
+
 ---
 
-## 4. 待办事项与演进路线
+## 4. NL2SQL Agent 优化方案
 
-### 第一阶段（2 周内）：Text2SQL + 可视化闭环跑通
-- [ ] 后端：`/api/agent/generate-sql` 接口
-- [ ] 后端：`agent_engine` Provider 模块（至少实现 OpenAI）
-- [ ] 后端：`/api/query/execute` 接口 + SQL 沙箱（只读、超时）
-- [ ] 前端：三栏布局（聊天 / 表格 / 播放器）
-- [ ] 前端：点击"可视化"按钮调用视频提取 API（传入 start_ts/end_ts）
+### 4.1 核心问题诊断
 
-### 第二阶段（1 个月内）：产品化加固
-- [ ] **Celery + Redis** 替换 `BackgroundTasks`
-  - 视频提取任务持久化
-  - 支持并发提取多个片段
-  - 任务进度不丢失
-- [ ] **SQL Sandbox**
-  - 白名单：仅允许 `SELECT`
-  - 超时：单条 SQL 最多 10 秒
-  - 路径校验：bag_path 必须在 OSS 挂载目录白名单内
-- [ ] **视频提取结果缓存**
-  - 同一片段（bag + topic + start_ts + end_ts）避免重复提取
-  - 缓存键 hash 化，存于本地磁盘
+| 问题 | 根因 | 影响 |
+|------|------|------|
+| 全量 Schema 灌入 | `format_schema_for_prompt()` 无过滤 | 3000+ token，弱模型上下文噪声大 |
+| 标签字典未入 prompt | `schema_dictionary.yaml` 仅被 `schema_reader` 读取字段描述 | LLM 不知道"变道"→ LaneChange 的映射 |
+| 无路由 | 每次查询都带全部表 | LLM 可能选错表、混淆时间单位 |
+| 验证薄弱 | `_validate_sql()` 仅 10 行 | 字段不存在、表名拼错等低级错误无法拦截 |
+| 无 few-shot | 纯 zero-shot 生成 | 弱模型缺乏格式参照，SQL 结构不规范 |
 
-### 第三阶段（按需）：深度优化
-- [ ] 视频预提取：常用 bag 提前后台转码
-- [ ] 前端播放器帧级跳转：配合 start_ts 精确到帧
-- [ ] 多路相机同步播放：恢复 legacy Gradio 的 3×3 网格能力
+### 4.2 优化路线图（P0-P4）
+
+#### P0：规则基座（已完成 ✓ 2026-05-20）
+
+**目标**：关键词路由 + Schema 分层注入，零 LLM 成本，解决 80% 确定性 case。
+
+| 组件 | 文件 | 状态 |
+|------|------|------|
+| TagRouter | `agent/backend/app/core/tag_router.py` | ✅ 新建 |
+| Schema 按需过滤 | `agent/backend/app/core/schema_reader.py` | ✅ 改造 `only_tables` 参数 |
+| Prompt 分层组装 | `agent/backend/app/core/tag_router.py` → `build_prompt()` | ✅ 新建 |
+| Agent Engine 集成 | `agent/backend/app/services/agent_engine.py` | ✅ 改造 |
+| Few-shot 模板库 | `agent/backend/app/core/templates.jsonl` | ✅ 新建 |
+
+**关键设计**：
+- 关键词索引从 `schema_dictionary.yaml` 自动构建 + 手工同义词补充
+- 路由完全无 LLM 调用，延迟 < 1ms
+- Fallback 机制：关键词未命中 → 默认 range_tag 表
+- Layer 0 Schema Card 始终注入（~200 token），Layer 1/2 按路由结果按需注入
+
+**预期效果**：
+- Prompt token 从 ~3000 降至 ~800-1500
+- 标签命中率：关键词匹配覆盖 80%+ 常见查询
+- SQL 生成准确率：从 ~30% 提升到 ~50-60%（主要靠 few-shot 和标签精准注入）
+
+---
+
+#### P1：Few-shot 模板库扩充（预计 1 周）
+
+**目标**：手工构建 20-30 条高质量 SQL 模板，覆盖 7 个表 + 常见跨表 JOIN。
+
+| 任务 | 交付物 | 预估工时 |
+|------|--------|----------|
+| 标注 20-30 条真实 NL→SQL 对 | `templates.jsonl` 扩充 | 4h |
+| 覆盖 7 表 + 5 种 JOIN 模式 | 模板分类标注 | 2h |
+| 验证所有模板在 DuckDB 上可执行 | 测试脚本 | 2h |
+
+**JOIN 模式清单**：
+1. range_tag × ego（秒→纳秒时间桥接）
+2. range_tag × dynamic_obj（秒→纳秒时间桥接）
+3. ego × dynamic_obj（纳秒对齐）
+4. range_tag × intersection_info（时间 + intersection_id）
+5. ego × dynamic_lane（时间对齐 + lane_id）
+
+---
+
+#### P2：RAG 语义检索（预计 2 周）
+
+**目标**：关键词路由的兜底 + 语义模糊查询的支持。
+
+| 组件 | 说明 | 预估工时 |
+|------|------|----------|
+| 三索引构建 | 标签索引、表索引、SQL 模板索引，各自独立 embed | 4h |
+| Embedding 模型 | 选用 bge-large-zh-v1.5 或 m3e-base（中文优化） | 2h |
+| Bi-Encoder 检索 | 向量库（FAISS/ChromaDB），余弦相似度 top-k | 6h |
+| HyDE 查询改写 | 用 LLM 生成假设性 SQL → embed → 检索模板 | 4h |
+| 路由融合 | 关键词 + RAG 双路召回 → 去重合并 | 4h |
+| 评估 | 50 条测试集 + 准确率/召回率统计 | 4h |
+
+**三索引设计**：
+```
+标签索引:  tag_name + description + sub_tags → embed → 768d vector
+表索引:    table_name + description + key_columns → embed → 768d vector
+模板索引:  nl + sql + domain → embed → 768d vector
+```
+
+**检索流程**：
+```
+NL query
+  ├─ 关键词路由 → matched_tags + involved_tables
+  ├─ RAG 检索 → top-k 标签 + top-k 模板
+  └─ 融合去重 → 最终 route_result
+```
+
+---
+
+#### P3：Cross-Encoder 重排序 + 查询改写（预计 1.5 周）
+
+**目标**：RAG 召回结果精准排序 + 复杂 NL 分解。
+
+| 组件 | 说明 | 预估工时 |
+|------|------|----------|
+| Cross-Encoder | bge-reranker-v2-m3 对 top-k 结果重排序 | 4h |
+| 查询改写 | 多意图分解："变道时有什么目标且速度>60" → 两个子查询 | 6h |
+| 双向检索 | 正向(NL→SQL) + 反向(SQL→NL) 双路召回 | 4h |
+| 强模型 fallback | 路由失败 → 调用强模型(Kimi/GLM-4) 生成 | 2h |
+
+---
+
+#### P4：数据飞轮（持续迭代）
+
+**目标**：自动入库 + 负样本反馈 + 定期去重，形成自学习闭环。
+
+| 组件 | 说明 | 预估工时 |
+|------|------|----------|
+| 自动入库 | 执行成功的 SQL→NL 对自动加入模板库 | 4h |
+| 负样本反馈 | 执行失败的 SQL → 标注原因 → 更新路由/模板 | 6h |
+| 去重机制 | 相似度 > 0.95 的模板合并 | 3h |
+| 定期评估 | 每周自动跑 50 条测试集，输出准确率报告 | 4h |
+| 标签枚举同步 | `schema_structure.yaml` → `tag_router` 索引自动更新 | 2h |
+
+---
+
+### 4.3 预期效果时间线
+
+| 阶段 | 准确率 | 主要提升来源 |
+|------|--------|-------------|
+| 当前 | ~30% | 基线 |
+| P0 后 | ~50-60% | Schema 精准注入 + few-shot + 标签语义 |
+| P1 后 | ~65-70% | 丰富 few-shot 覆盖 |
+| P2 后 | ~75-80% | RAG 语义检索兜底 |
+| P3 后 | ~85%+ | 重排序 + 查询改写 + 强模型 fallback |
+| P4 后 | 持续提升 | 数据飞轮自学习 |
+
+---
+
+### 4.4 工业化方案调研参考
+
+| 方案 | 核心思想 | 本项目借鉴点 |
+|------|---------|-------------|
+| C3SQL | Candidate pruning: 先生成候选 Schema 再剪枝 | Schema 分层注入本质就是预剪枝 |
+| DIN-SQL | Decomposition: 复杂查询分解为子问题 | P3 查询改写参考此思路 |
+| CHESS | Cross-Encoder 重排序 Schema-linking | P3 重排序直接采用 |
+| Vanna | RAG + DDL/SQL training data | P2 三索引设计参考 |
+| FK Graph Pruning | 确定性图剪枝（外键关系） | 7 表规模小，关键词已足够，暂不需要图 |
 
 ---
 
@@ -182,6 +338,17 @@ backend/app/services/agent_engine/
 - 后端：**30001**（冻结，未经用户批准不得修改）
 - 前端 dev：`3000`（React 默认，可接受）
 
+### 5.5 时间单位（NL2SQL 专项）
+- `range_tag.start_ts / end_ts`：**秒**（BIGINT）
+- `ego.ts / dynamic_obj.ts`：**纳秒**（BIGINT）
+- 跨表 JOIN 条件：`ego.ts BETWEEN range_tag.start_ts * 1e9 AND range_tag.end_ts * 1e9`
+- `ts_ms`（毫秒）仅存在于 ego/dynamic_obj，可用于辅助桥接
+
+### 5.6 range_tag.param JSON 字段
+- 子标签提取：`json_extract(param, '$.sub_tag')`
+- 目标类型提取：`json_extract(param, '$.object_type')`
+- 常见 key：sub_tag, object_id, state_ratio, frame_count, duration, en
+
 ---
 
 ## 6. 常见误区提醒
@@ -193,6 +360,9 @@ backend/app/services/agent_engine/
 | "BackgroundTasks 够用了" | 视频提取是长时间任务，必须上 Celery |
 | "AI 生成的 SQL 直接执行" | 必须 sandbox（只读、超时、路径校验） |
 | "把帧率只写在 ffmpeg 输出端" | 裸 HEVC 输入端也必须写 `-r 10` |
+| "全量 Schema 让 LLM 自己选表" | 弱模型上下文利用率低，必须精准注入 |
+| "LLM 路由更智能" | 弱模型路由准确率低，关键词 + RAG 更可靠 |
+| "RAG 能替代关键词路由" | 关键词路由零成本零延迟，RAG 是兜底不是替代 |
 
 ---
 
@@ -202,13 +372,19 @@ backend/app/services/agent_engine/
 |------|------|
 | `AGENTS.md` | AI 维护指南（环境、启动、常见错误） |
 | `ARCHITECTURE_DISCUSSION.md` | 本文档（设计决策、演进路线） |
+| `ARCHITECTURE.md` | 详细架构设计文档 |
 | `backend/app/core/config.py` | 全局配置 |
 | `backend/app/services/video_extractor.py` | 视频提取核心逻辑 |
-| `backend/app/services/agent_engine/` | （待创建）Agent Provider 模块 |
+| `backend/app/services/agent_engine.py` | NL2SQL 核心引擎（P0 已改造） |
+| `backend/app/core/tag_router.py` | 关键词路由器（P0 新建） |
+| `backend/app/core/schema_reader.py` | Schema 读取（P0 已改造，支持 only_tables） |
+| `backend/app/core/templates.jsonl` | Few-shot SQL 模板库（P0 新建） |
+| `backend/app/core/schema_dictionary.yaml` | 标签字典（路由索引的数据源） |
+| `backend/app/core/schema_structure.yaml` | 数据库表结构定义 |
 | `deploy.sh` | 一键部署脚本 |
 | `run_backend.sh` | 后端开发启动脚本 |
 
 ---
 
-*最后更新：2026-05-17*
+*最后更新：2026-05-20*
 *下次修改代码前，务必同步更新本文档及 `AGENTS.md`*

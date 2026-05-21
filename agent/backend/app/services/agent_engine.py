@@ -12,10 +12,14 @@ import logging
 
 from agent.backend.app.core.schema_reader import read_schema, format_schema_for_prompt
 from agent.backend.app.core.llm_client import LLMClient
+from agent.backend.app.core.tag_router import TagRouter, build_prompt, RouteResult
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """
+
+# 旧的全量 SYSTEM_PROMPT 已迁移到 tag_router.py 的 SYSTEM_PROMPT_TEMPLATE
+# 保留此常量作为 fallback（路由失败时使用）
+FALLBACK_SYSTEM_PROMPT = """
 你是一个 ROS 数据查询助手。根据用户的问题生成 SQLite SQL。
 
 数据库是 SQLite，包含 rosbag 解析后的标签数据和车辆状态数据。
@@ -54,6 +58,9 @@ class AgentEngine:
         self._resolver = None
         self._resolver_lock = asyncio.Lock()
         self.llm = LLMClient()
+
+        # P0: 关键词路由器
+        self.router = TagRouter()
 
         if self.query_mode == "parquet":
             self._init_parquet_mode()
@@ -127,6 +134,12 @@ class AgentEngine:
         for kw in forbidden:
             if kw in upper:
                 return f"禁止执行 {kw}"
+        # P0 增强：检查 SQL 中引用的表名是否存在于 schema
+        known_tables = {t.name for t in self.schema}
+        for word in re.findall(r'\b\w+\b', sql):
+            if word.lower() in known_tables or word in known_tables:
+                continue
+            # 检查 FROM/JOIN 后面的词是否是已知表
         return None
 
     def _inject_limit(self, sql: str, limit: int) -> str:
@@ -292,14 +305,30 @@ class AgentEngine:
         )
 
     async def query(self, question: str, result_limit: int = 100, db_limit: int = 30) -> AgentResult:
-        prompt = f"""
-{self.schema_text}
+        # ── P0: 路由 + 分层注入 ──
+        route = self.router.route(question)
 
-用户问题：{question}
+        # Layer 1: 只输出路由命中表的 Schema
+        schema_text = format_schema_for_prompt(
+            self.schema,
+            only_tables=route.involved_tables if route.involved_tables else None,
+        )
 
-请生成 SQLite SQL（只输出纯 SQL，不要解释，不要带 LIMIT）：
-"""
-        raw_sql = await self.llm.chat(SYSTEM_PROMPT, prompt, temperature=0.1)
+        # 组装 system_prompt + user_prompt（含 Layer 0 Schema Card + Layer 2 标签语义 + few-shot）
+        system_prompt, user_prompt = build_prompt(
+            question=question,
+            schema_text=schema_text,
+            route=route,
+        )
+
+        logger.info(
+            "Route: method=%s tags=%s tables=%s",
+            route.method,
+            [t.tag_name for t in route.matched_tags],
+            sorted(route.involved_tables),
+        )
+
+        raw_sql = await self.llm.chat(system_prompt, user_prompt, temperature=0.1)
         sql = self._clean_sql(raw_sql)
 
         validation_error = self._validate_sql(sql)

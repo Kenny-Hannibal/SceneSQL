@@ -12,7 +12,7 @@ Schema Reader — 读取 SQLite DB 结构并生成带语义描述的 Schema 上�
 import sqlite3
 import yaml
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Set
 from dataclasses import dataclass
 
 
@@ -336,10 +336,19 @@ def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc
     return result
 
 
-def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int = 50) -> str:
-    """将 Schema 格式化为 Markdown，供 LLM Prompt 使用。"""
+def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int = 50, only_tables: Optional[Set[str]] = None) -> str:
+    """将 Schema 格式化为 Markdown，供 LLM Prompt 使用。
+    
+    Args:
+        tables: 全量表 Schema 列表
+        max_columns_per_table: 每表最多显示的列数
+        only_tables: 如果指定，只输出这些表的 Schema（Layer 1 按需注入）
+    """
     lines = ["# 数据库 Schema", ""]
     for t in tables:
+        # Layer 1 过滤：如果指定了 only_tables，只输出相关表
+        if only_tables is not None and t.name not in only_tables:
+            continue
         lines.append(f"## {t.name}")
         lines.append(f"{t.description}")
         lines.append("")
