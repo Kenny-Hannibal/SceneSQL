@@ -73,6 +73,15 @@ fi
 # 5. Start backend
 # ============================================
 echo "[INFO] Starting backend server..."
+
+# 加载 .env 到当前 shell 环境，确保子进程能读取所有环境变量
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+    set -a
+    source "${PROJECT_ROOT}/.env"
+    set +a
+    echo "[INFO] Loaded .env"
+fi
+
 nohup $PYTHON -m uvicorn backend.app.main:app --host 0.0.0.0 --port 30001 > /tmp/rosbag_visualizer.log 2>&1 &
 NEW_PID=$!
 sleep 3

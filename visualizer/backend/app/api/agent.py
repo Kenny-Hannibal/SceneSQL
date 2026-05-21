@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from app.models.schemas import AgentQueryRequest, AgentQueryResponse
@@ -8,28 +9,100 @@ from app.core.config import settings
 
 # Ensure agent path is available for import
 import sys
-AGENT_DIR = str(settings.PROJECT_ROOT / "agent" / "backend")
+AGENT_DIR = str(settings.PROJECT_ROOT)
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
 
-from agent.backend.app.services.agent_engine import AgentEngine, SYSTEM_PROMPT
+from agent.backend.app.services.agent_engine import AgentEngine, FALLBACK_SYSTEM_PROMPT as SYSTEM_PROMPT
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 logger = logging.getLogger(__name__)
 
-# Lazy-init engine per db_path
+# Lazy-init engine per (db_path, query_mode, batch_id)
 _engines: dict = {}
 
 
-def _get_engine(db_path: str) -> AgentEngine:
-    if db_path not in _engines:
-        _engines[db_path] = AgentEngine(db_path)
-    return _engines[db_path]
+def _resolve_db_path(req: AgentQueryRequest):
+    """根据请求参数解析最终 db_path 和 query_mode。
+
+    优先级：
+    1. 手动填写的 db_path（向后兼容）
+    2. batch_id + query_mode（新逻辑）
+    3. .env 默认值
+    """
+    # P1: 手动路径
+    if req.db_path and req.db_path.strip():
+        return req.db_path.strip(), req.query_mode or settings.QUERY_MODE or "sqlite"
+
+    # P2: batch_id + query_mode
+    query_mode = (req.query_mode or settings.QUERY_MODE or "sqlite").lower()
+    batch_id = req.batch_id
+
+    if query_mode == "sqlite":
+        base_path = Path(settings.SQLITE_DB_PATH) if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data")
+        if batch_id:
+            db_path = str(base_path / "sqlite_dbs" / batch_id)
+        else:
+            db_path = str(base_path)
+    else:  # parquet
+        base_path = Path(settings.ETL_BASE_PATH) if settings.ETL_BASE_PATH else (
+            Path(settings.SQLITE_DB_PATH) / "parquet" if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data/parquet")
+        )
+        if batch_id:
+            db_path = str(base_path / batch_id)
+        else:
+            db_path = str(base_path)
+
+    return db_path, query_mode
+
+
+def _get_engine(db_path: str, query_mode: str = "", batch_id: str = "") -> AgentEngine:
+    """获取或创建 AgentEngine，支持动态切换 Parquet batch。"""
+    cache_key = f"{db_path}:{query_mode}:{batch_id}"
+    logger.info("_get_engine cache_key=%s in_cache=%s", cache_key, cache_key in _engines)
+    if cache_key not in _engines:
+        # 确保 ETL 相关环境变量已注入（pydantic_settings 不会自动写入 os.environ）
+        if settings.ETL_BASE_PATH:
+            os.environ["ETL_BASE_PATH"] = settings.ETL_BASE_PATH
+            logger.info("Injected ETL_BASE_PATH=%s", settings.ETL_BASE_PATH)
+        if settings.ETL_BATCH_ID:
+            os.environ["ETL_BATCH_ID"] = settings.ETL_BATCH_ID
+        if query_mode == "parquet" and batch_id:
+            # 临时切换 Parquet batch：更新 ETL_BATCH_ID 并清除单例缓存
+            os.environ["ETL_BATCH_ID"] = batch_id
+            import agent.backend.app.services.etl.etl_manifest as em_module
+            em_module._default_manager = None
+            logger.info("Cleared etl_manifest singleton, ETL_BATCH_ID=%s", batch_id)
+        _engines[cache_key] = AgentEngine(db_path, query_mode=query_mode)
+    return _engines[cache_key]
+
+
+@router.get("/batches")
+def list_batches():
+    """列出 SQLITE_DB_PATH 下所有可用的 batch。"""
+    batches = []
+    base_path = Path(settings.SQLITE_DB_PATH) if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data")
+    sqlite_dbs_dir = base_path / "sqlite_dbs"
+    parquet_dir = base_path / "parquet"
+
+    if sqlite_dbs_dir.exists():
+        for batch_dir in sorted(sqlite_dbs_dir.iterdir()):
+            if batch_dir.is_dir():
+                db_count = len(list(batch_dir.glob("*.db")))
+                has_parquet = (parquet_dir / batch_dir.name / "manifest.yaml").exists()
+                batches.append({
+                    "batch_id": batch_dir.name,
+                    "sqlite_count": db_count,
+                    "has_parquet": has_parquet,
+                })
+
+    return batches
 
 
 @router.post("/query", response_model=AgentQueryResponse)
 async def agent_query(req: AgentQueryRequest):
-    db_path = req.db_path or settings.SQLITE_DB_PATH
+    db_path, query_mode = _resolve_db_path(req)
+
     if not db_path:
         return AgentQueryResponse(
             sql="",
@@ -53,7 +126,8 @@ async def agent_query(req: AgentQueryRequest):
                 error=str(e),
             )
 
-    if not os.path.exists(db_path):
+    # SQLite 模式下需要验证路径存在；Parquet 模式下路径可能不存在（直接读 manifest）
+    if query_mode == "sqlite" and not os.path.exists(db_path):
         return AgentQueryResponse(
             sql="",
             explanation="",
@@ -62,8 +136,8 @@ async def agent_query(req: AgentQueryRequest):
             error=f"DB path not found: {db_path}",
         )
 
-    logger.info("Agent query: %s | db: %s | limit: %s", req.question, db_path, req.result_limit)
-    engine = _get_engine(db_path)
+    logger.info("Agent query: %s | mode: %s | db: %s | limit: %s", req.question, query_mode, db_path, req.result_limit)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
     result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit)
 
     return AgentQueryResponse(
@@ -80,7 +154,8 @@ async def agent_query(req: AgentQueryRequest):
 @router.post("/query-stream")
 async def agent_query_stream(req: AgentQueryRequest):
     """SSE streaming endpoint for agent query progress."""
-    db_path = req.db_path or settings.SQLITE_DB_PATH
+    db_path, query_mode = _resolve_db_path(req)
+
     if not db_path:
         async def empty_err():
             yield f"data: {json.dumps({'stage': 'error', 'message': 'SQLITE_DB_PATH not configured'})}\n\n"
@@ -95,12 +170,12 @@ async def agent_query_stream(req: AgentQueryRequest):
                 yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
             return StreamingResponse(oss_err(), media_type="text/event-stream")
 
-    if not os.path.exists(db_path):
+    if query_mode == "sqlite" and not os.path.exists(db_path):
         async def not_found_err():
             yield f"data: {json.dumps({'stage': 'error', 'message': f'DB path not found: {db_path}'})}\n\n"
         return StreamingResponse(not_found_err(), media_type="text/event-stream")
 
-    engine = _get_engine(db_path)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
 
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
@@ -131,7 +206,9 @@ async def agent_query_stream(req: AgentQueryRequest):
         yield f"data: {json.dumps({'stage': 'executing', 'message': 'SQL 校验通过，正在执行查询...'})}\n\n"
 
         try:
-            if engine.is_dir:
+            if engine.query_mode == "parquet":
+                result = await engine._query_parquet(sql, result_limit=req.result_limit)
+            elif engine.is_dir:
                 result = await engine._query_batch(sql, result_limit=req.result_limit, db_limit=req.db_limit)
             else:
                 result = await engine._query_single(sql, result_limit=req.result_limit)

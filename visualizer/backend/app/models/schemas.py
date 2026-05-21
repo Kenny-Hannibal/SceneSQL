@@ -35,7 +35,9 @@ class VideoStatus(BaseModel):
 # Agent schemas
 class AgentQueryRequest(BaseModel):
     question: str
-    db_path: Optional[str] = None  # 可选，覆盖默认路径
+    db_path: Optional[str] = None  # 可选，留空则使用 batch_id + query_mode
+    batch_id: Optional[str] = None  # 批次 ID（db_path 为空时使用）
+    query_mode: Optional[str] = None  # "sqlite" | "parquet"（db_path 为空时使用）
     db_limit: int = 30  # 批量查询时最多扫描的 DB 数量
     result_limit: int = 100  # 单条 SQL 返回的最大行数
 

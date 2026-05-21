@@ -50,8 +50,8 @@ class AgentResult:
 
 
 class AgentEngine:
-    def __init__(self, db_path: str = ""):
-        self.query_mode = os.environ.get("QUERY_MODE", "sqlite")
+    def __init__(self, db_path: str = "", query_mode: str = ""):
+        self.query_mode = query_mode or os.environ.get("QUERY_MODE", "sqlite")
         self.db_path = db_path
         self.is_dir = os.path.isdir(db_path) if db_path else False
         self._parquet_conn = None

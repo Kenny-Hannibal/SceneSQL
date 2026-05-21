@@ -12,12 +12,49 @@ export default function AgentPanel() {
   const [error, setError] = useState('');
   const [progress, setProgress] = useState([]);
 
+  // 新增：查询模式 & batch 选择
+  const [queryMode, setQueryMode] = useState('sqlite');
+  const [batchId, setBatchId] = useState('');
+  const [batches, setBatches] = useState([]);
+
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
+
+  // 组件挂载时获取 batch 列表
+  useEffect(() => {
+    fetch(`${API_BASE}/api/agent/batches`)
+      .then((res) => res.json())
+      .then((data) => {
+        setBatches(data || []);
+        if (data && data.length > 0 && !batchId) {
+          setBatchId(data[0].batch_id);
+        }
+      })
+      .catch((e) => console.error('获取 batch 列表失败:', e));
+  }, []);
+
+  // 构建请求 payload
+  const buildPayload = () => {
+    const payload = {
+      question: question.trim(),
+      db_limit: Number(dbLimit) || 30,
+      result_limit: Number(resultLimit) || 100,
+    };
+
+    if (dbPath.trim()) {
+      // 手动路径优先
+      payload.db_path = dbPath.trim();
+    } else {
+      // 使用 batch_id + query_mode
+      payload.batch_id = batchId;
+      payload.query_mode = queryMode;
+    }
+    return payload;
+  };
 
   const handleSubmit = async () => {
     if (!question.trim()) return;
@@ -31,12 +68,7 @@ export default function AgentPanel() {
       const res = await fetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: question.trim(),
-          db_path: dbPath.trim() || undefined,
-          db_limit: Number(dbLimit) || 30,
-          result_limit: Number(resultLimit) || 100,
-        }),
+        body: JSON.stringify(buildPayload()),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -66,12 +98,7 @@ export default function AgentPanel() {
       const response = await fetch(`${API_BASE}/api/agent/query-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: question.trim(),
-          db_path: dbPath.trim() || undefined,
-          db_limit: Number(dbLimit) || 30,
-          result_limit: Number(resultLimit) || 100,
-        }),
+        body: JSON.stringify(buildPayload()),
       });
 
       const reader = response.body.getReader();
@@ -200,13 +227,65 @@ export default function AgentPanel() {
       <h2>🤖 NL2SQL Agent</h2>
 
       <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 查询模式切换 */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#555', fontWeight: 500 }}>查询模式:</span>
+          <button
+            onClick={() => setQueryMode('sqlite')}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              borderRadius: 4,
+              border: '1px solid #d9d9d9',
+              background: queryMode === 'sqlite' ? '#722ed1' : '#fff',
+              color: queryMode === 'sqlite' ? '#fff' : '#555',
+              cursor: 'pointer',
+            }}
+          >
+            🗃️ SQLite 原始查询
+          </button>
+          <button
+            onClick={() => setQueryMode('parquet')}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              borderRadius: 4,
+              border: '1px solid #d9d9d9',
+              background: queryMode === 'parquet' ? '#13c2c2' : '#fff',
+              color: queryMode === 'parquet' ? '#fff' : '#555',
+              cursor: 'pointer',
+            }}
+          >
+            📦 Parquet 聚合查询
+          </button>
+        </div>
+
+        {/* Batch 下拉选择 */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#555', fontWeight: 500 }}>数据批次:</span>
+          <select
+            value={batchId}
+            onChange={(e) => setBatchId(e.target.value)}
+            style={{ padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc', minWidth: 320 }}
+          >
+            {batches.length === 0 && <option value="">加载中...</option>}
+            {batches.map((b) => (
+              <option key={b.batch_id} value={b.batch_id}>
+                {b.batch_id} ({b.sqlite_count} DBs{b.has_parquet ? ' / 已有Parquet' : ''})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* 手动路径输入（可空） */}
         <input
           type="text"
           value={dbPath}
           onChange={(e) => setDbPath(e.target.value)}
-          placeholder="SQLite DB 路径或文件夹（支持 oss:// 路径，留空使用默认目录）"
+          placeholder="手动输入路径（留空使用上方选择的批次）"
           style={{ padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
         />
+
         <div style={{ display: 'flex', gap: 10 }}>
           <input
             type="number"

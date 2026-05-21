@@ -130,11 +130,6 @@ class EtlManifestManager:
                 CREATE OR REPLACE VIEW {table_name} AS
                 SELECT * FROM read_parquet('{parquet_path}')
             """)
-            # 可选：为 bag_id 列创建索引（DuckDB 自动优化，显式声明更稳妥）
-            conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{table_name}_bag_id
-                ON {table_name}(bag_id)
-            """)
 
         return conn
 

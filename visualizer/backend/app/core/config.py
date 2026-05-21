@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     SQLITE_DB_PATH: Optional[str] = None
     """SQLite DB 路径，支持本地路径或 oss:// 路径"""
 
+    ETL_BASE_PATH: Optional[str] = None
+    """Parquet ETL 输出根目录，默认从环境变量 / .env 读取"""
+
+    ETL_BATCH_ID: Optional[str] = None
+    """默认激活的 ETL 批次 ID"""
+
+    QUERY_MODE: str = "sqlite"
+    """Agent 默认查询模式: sqlite | parquet"""
+
     OSS_MOUNT_MAP: Optional[str] = None
     """OSS 挂载映射，格式：oss_prefix:local_path,oss_prefix2:local_path2"""
 
@@ -53,6 +62,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()
