@@ -7,6 +7,8 @@ class BagInfo(BaseModel):
     topics: List[Dict]
     duration_sec: float
     message_count: int
+    start_time_ns: Optional[int] = None
+    end_time_ns: Optional[int] = None
 
 
 class ExtractRequest(BaseModel):
@@ -50,3 +52,12 @@ class AgentQueryResponse(BaseModel):
     error: Optional[str] = None
     scanned_dbs: int = 0
     matched_dbs: int = 0
+
+
+class ExecuteSQLRequest(BaseModel):
+    sql: str
+    db_path: Optional[str] = None
+    batch_id: Optional[str] = None
+    query_mode: Optional[str] = None
+    db_limit: int = 30
+    result_limit: int = 100

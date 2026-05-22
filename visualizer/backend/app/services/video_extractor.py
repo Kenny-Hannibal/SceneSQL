@@ -34,6 +34,33 @@ def _update_task(task_id: str, **kwargs) -> None:
     _tasks[task_id].update(kwargs)
 
 
+def _get_bag_time_range(bag_path: str):
+    """从 metadata.yaml 读取 bag 的起止时间戳（纳秒），用于 clamp 视频提取范围。"""
+    import yaml
+    metadata_path = os.path.join(bag_path, "metadata.yaml")
+    if not os.path.exists(metadata_path):
+        return None, None
+    try:
+        with open(metadata_path, "r") as f:
+            meta = yaml.safe_load(f)
+        info = meta.get("gacbag_bagfile_information", {})
+        duration_sec = info.get("duration", {}).get("seconds", 0)
+        start_time_obj = info.get("start_time")
+        start_time_ns = None
+        end_time_ns = None
+        if start_time_obj and isinstance(start_time_obj, dict):
+            s = start_time_obj.get("seconds", 0) or 0
+            ns = start_time_obj.get("nanoseconds", 0) or 0
+            start_time_ns = int(s) * 1_000_000_000 + int(ns)
+        elif start_time_obj and isinstance(start_time_obj, (int, float)):
+            start_time_ns = int(start_time_obj)
+        if start_time_ns is not None:
+            end_time_ns = start_time_ns + int(duration_sec * 1_000_000_000)
+        return start_time_ns, end_time_ns
+    except Exception:
+        return None, None
+
+
 def extract_topic_to_mp4(
     bag_path: str,
     topic: str,
@@ -49,10 +76,28 @@ def extract_topic_to_mp4(
       - Single-pass bag read: frames are buffered in memory (HEVC payloads only).
       - Frames are piped directly into ffmpeg to skip temp-file I/O.
       - Input framerate -r 10 is set so ffmpeg treats raw HEVC correctly.
+
+    Time range clamping:
+      - If start_ts < bag start → clamp to bag start
+      - If end_ts > bag end → clamp to bag end
+      - Prevents "No frames found" when SQL result time range exceeds bag range
     """
+    # Clamp start_ts / end_ts to bag's actual time range
+    bag_start, bag_end = _get_bag_time_range(bag_path)
+    clamped = False
+    if start_ts is not None and bag_start is not None and start_ts < bag_start:
+        logger.info("[%s] start_ts %d < bag_start %d, clamping to bag_start", task_id, start_ts, bag_start)
+        start_ts = bag_start
+        clamped = True
+    if end_ts is not None and bag_end is not None and end_ts > bag_end:
+        logger.info("[%s] end_ts %d > bag_end %d, clamping to bag_end", task_id, end_ts, bag_end)
+        end_ts = bag_end
+        clamped = True
+
     logger.info(
-        "[%s] Starting extraction: bag=%s topic=%s range=[%s, %s]",
+        "[%s] Starting extraction: bag=%s topic=%s range=[%s, %s]%s",
         task_id, bag_path, topic, start_ts, end_ts,
+        " (clamped)" if clamped else "",
     )
     _update_task(task_id, status="processing", progress=0.0, message="Opening bag...")
 

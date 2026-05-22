@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from app.models.schemas import AgentQueryRequest, AgentQueryResponse
+from app.models.schemas import AgentQueryRequest, AgentQueryResponse, ExecuteSQLRequest
 from app.core.config import settings
 
 # Ensure agent path is available for import
@@ -97,6 +97,26 @@ def list_batches():
                 })
 
     return batches
+
+
+@router.get("/resolve-bag-path")
+async def resolve_bag_path(bag_id: str):
+    """根据 bag_id 解析 bag 本地路径（用于前端可视化）。"""
+    try:
+        from tools.rosbag_path_resolver import RosbagPathResolver
+        resolver = RosbagPathResolver()
+        info = resolver.resolve(bag_id)
+        return {
+            "bag_id": bag_id,
+            "origin_bag_id": info.origin_bag_id,
+            "bag_path": info.local_path or info.oss_path or "",
+            "oss_path": info.oss_path or "",
+            "local_path": info.local_path or "",
+        }
+    except ImportError:
+        return {"bag_id": bag_id, "bag_path": "", "error": "dm_sdk not installed"}
+    except Exception as e:
+        return {"bag_id": bag_id, "bag_path": "", "error": str(e)}
 
 
 @router.post("/query", response_model=AgentQueryResponse)
@@ -219,3 +239,102 @@ async def agent_query_stream(req: AgentQueryRequest):
         yield f"data: {json.dumps({'stage': 'completed', 'sql': result.sql, 'explanation': result.explanation, 'columns': result.columns, 'rows': result.rows, 'error': result.error, 'scanned_dbs': result.scanned_dbs, 'matched_dbs': result.matched_dbs})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/execute-sql", response_model=AgentQueryResponse)
+async def execute_sql(req: ExecuteSQLRequest):
+    """直接执行用户提供的 SQL（不经 LLM）。"""
+    db_path, query_mode = _resolve_db_path(AgentQueryRequest(
+        question="",
+        db_path=req.db_path,
+        batch_id=req.batch_id,
+        query_mode=req.query_mode,
+        db_limit=req.db_limit,
+        result_limit=req.result_limit,
+    ))
+
+    if not db_path:
+        return AgentQueryResponse(
+            sql=req.sql, explanation="", columns=[], rows=[],
+            error="SQLITE_DB_PATH not configured",
+        )
+
+    if db_path.startswith("oss://"):
+        from tools.rosbag_path_resolver import resolve_db_path
+        try:
+            db_path = resolve_db_path(db_path)
+        except ValueError as e:
+            return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
+
+    if query_mode == "sqlite" and not os.path.exists(db_path):
+        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=f"DB path not found: {db_path}")
+
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+
+    # SQL 校验
+    validation_error = engine._validate_sql(req.sql)
+    if validation_error:
+        return AgentQueryResponse(sql=req.sql, explanation="SQL 校验失败", columns=[], rows=[], error=validation_error)
+
+    try:
+        if query_mode == "parquet":
+            result = await engine._query_parquet(req.sql, result_limit=req.result_limit)
+        elif engine.is_dir:
+            result = await engine._query_batch(req.sql, result_limit=req.result_limit, db_limit=req.db_limit)
+        else:
+            result = await engine._query_single(req.sql, result_limit=req.result_limit)
+    except Exception as e:
+        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
+
+    return AgentQueryResponse(
+        sql=result.sql,
+        explanation=result.explanation,
+        columns=result.columns,
+        rows=result.rows,
+        error=result.error,
+        scanned_dbs=result.scanned_dbs,
+        matched_dbs=result.matched_dbs,
+    )
+
+
+@router.post("/generate-sql")
+async def generate_sql_only(req: AgentQueryRequest):
+    """仅生成 SQL，不执行。返回生成的 SQL 供用户审查/修改。"""
+    db_path, query_mode = _resolve_db_path(req)
+
+    if not db_path:
+        return {"sql": "", "error": "SQLITE_DB_PATH not configured"}
+
+    if query_mode == "sqlite" and not os.path.exists(db_path):
+        return {"sql": "", "error": f"DB path not found: {db_path}"}
+
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+
+    # 路由 + 分层注入（与 query 相同逻辑）
+    route = engine.router.route(req.question)
+    from agent.backend.app.core.schema_reader import format_schema_for_prompt
+    from agent.backend.app.core.tag_router import build_prompt
+
+    schema_text = format_schema_for_prompt(
+        engine.schema,
+        only_tables=route.involved_tables if route.involved_tables else None,
+    )
+    system_prompt, user_prompt = build_prompt(
+        question=req.question,
+        schema_text=schema_text,
+        route=route,
+    )
+
+    try:
+        raw_sql = await engine.llm.chat(system_prompt, user_prompt, temperature=0.1)
+        sql = engine._clean_sql(raw_sql)
+        validation_error = engine._validate_sql(sql)
+        return {
+            "sql": sql,
+            "validation_error": validation_error,
+            "route_method": route.method,
+            "matched_tags": [t.tag_name for t in route.matched_tags],
+            "involved_tables": sorted(route.involved_tables),
+        }
+    except Exception as e:
+        return {"sql": "", "error": str(e)}

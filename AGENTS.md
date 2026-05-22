@@ -46,8 +46,12 @@ text2sql/
 │   ├── run_backend.sh        # Backend launcher (handles env vars)
 │   ├── run_visualizer.sh     # Legacy Gradio launcher
 │   └── deploy.sh             # One-click build frontend + start backend
-├── agent/                    # NL2SQL Agent 服务（待建设）
-│   └── backend/              # FastAPI / gRPC Agent service
+├── agent/                    # NL2SQL Agent 核心服务
+│   └── backend/              # AgentEngine, LLMClient, TagRouter, ETL 工具
+│       ├── app/
+│       │   ├── core/         # Schema reader, LLM client, Tag router
+│       │   └── services/     # AgentEngine, ETL manifest & Parquet converter
+│       └── app/services/etl/ # EtlManifestManager, sqlite→parquet 转换
 ├── tools/                    # 共享工具库
 │   ├── rosbag_path_resolver.py  # dm_sdk 封装：bag_id → OSS path → local path
 │   ├── rosbag_image_visualizer.py
@@ -143,8 +147,22 @@ All backend config lives in `backend/app/core/config.py` (Pydantic Settings).
 | `CORS_ORIGINS` | `["*"]` | env |
 | `VIDEO_OUTPUT_DIR` | `/tmp/rosbag_videos` | `VIDEO_OUTPUT_DIR` env |
 | `LOG_LEVEL` | INFO | `LOG_LEVEL` env |
+| `SQLITE_DB_PATH` | `/mnt/gacrnd-oss/...` | `.env` |
+| `ETL_BASE_PATH` | `/mnt/gacrnd-oss/.../parquet` | `.env` |
+| `ETL_BATCH_ID` | — | `.env` |
+| `QUERY_MODE` | `sqlite` | `.env` (sqlite / parquet) |
+| `OSS_MOUNT_MAP` | — | `.env` |
+| `ROSBAG_MOUNT_BASE` | — | `.env` |
+| `DM_ACCESS_TOKEN` | — | `.env` |
+| `AGENT_MAIN_MODEL` | `gpt-4o` | `.env` |
+| `OPENAI_API_KEY` | — | `.env` |
+| `OPENAI_BASE_URL` | — | `.env` |
 
-No `.env` file is committed; you can create one at `backend/.env` if needed.
+**`.env` 文件位置**：项目根目录 `/root/data/text2sql/.env`（已加入 `.gitignore`）。
+`pydantic_settings` 在 `config.py` 中通过 `env_file = ".env"` 加载，uvicorn 必须从项目根目录启动才能正确定位。
+
+**⚠️ 重要：`pydantic_settings` 不会自动将读取到的变量写入 `os.environ`**。
+ETL 相关模块（如 `etl_manifest.py`）直接读取 `os.environ.get("ETL_BASE_PATH")`，因此启动脚本必须通过 `source .env` 或代码显式注入，否则 `EtlManifestManager` 会回退到 `/tmp/etl` 导致 "批次不存在" 错误。
 
 ---
 
@@ -154,7 +172,13 @@ No `.env` file is committed; you can create one at `backend/.env` if needed.
 |--------|------|-------------|
 | GET | `/` | Root message |
 | GET | `/health` | Health check |
-| POST | `/api/bag/info?bag_path={path}` | Load bag metadata + camera topics |
+| GET | `/api/agent/batches` | 列出所有可用的 ETL batch（SQLite/Parquet 状态） |
+| POST | `/api/agent/query` | Agent NL2SQL 查询（body: `question`, `batch_id`, `query_mode`, `db_path` 等） |
+| POST | `/api/agent/query-stream` | Agent NL2SQL SSE 流式查询 |
+| POST | `/api/agent/generate-sql` | 仅生成 SQL 不执行（返回 SQL + 路由信息，供用户审查） |
+| POST | `/api/agent/execute-sql` | 直接执行用户提供的 SQL（不经 LLM） |
+| GET | `/api/agent/resolve-bag-path?bag_id=xxx` | 根据 bag_id 解析 bag 本地路径 |
+| POST | `/api/bag/info?bag_path={path}` | Load bag metadata + camera topics + start/end timestamps |
 | POST | `/api/video/extract` | Start background video extraction (body: `bag_path`, `topic`, optional `start_ts`/`end_ts` in nanoseconds) |
 | GET | `/api/video/status/{task_id}` | Poll extraction progress |
 | GET | `/api/video/file/{task_id}` | Download completed MP4 |
@@ -183,10 +207,24 @@ No `.env` file is committed; you can create one at `backend/.env` if needed.
 2. **Single-pass read** — Frames are buffered in memory as HEVC payloads (typically tens to hundreds of MB).
 3. **Pipe to ffmpeg** — No temporary `.265` file is written; frames stream directly into ffmpeg `stdin`.
 4. **Time-range slicing** — Optional `start_ts`/`end_ts` (nanoseconds) allow extracting only a segment instead of the full topic.
+5. **Time-range clamping** — If `start_ts` < bag start or `end_ts` > bag end, automatically clamp to bag's actual time range (read from `metadata.yaml`). Prevents "No frames found" when SQL result time range exceeds bag range. Both frontend and backend perform this clamp (dual safeguard).
 
 If you change the extraction pipeline, keep the framerate fix and do not reintroduce temp-file I/O unless profiling shows a benefit.
 
-### 8.4 Frontend API_BASE
+### 8.4 SQL Editor & LLM Behavior Modes
+Frontend `AgentPanel.jsx` supports two LLM behavior modes:
+- **⚡ Auto-execute**: LLM generates SQL and immediately executes the query (default, original behavior).
+- **✏️ Preview only**: LLM generates SQL and fills it into the SQL editor, letting the user review/modify before manually executing.
+
+The SQL editor (`<textarea>`) is a shared component for both modes:
+- In auto-execute mode, the generated SQL is displayed in the editor after execution (read-only reference).
+- In preview mode, the generated SQL is placed in the editor for editing before execution.
+- Users can also manually type SQL and click "▶ 执行 SQL" at any time, bypassing LLM entirely.
+
+### 8.5 Parquet Mode bag_id/bag_path Injection
+In Parquet query mode, `agent_engine.py._query_parquet()` injects `bag_id`, `bag_path`, and `db_file` into each result row, ensuring parity with SQLite mode. The `bag_path` is resolved via `RosbagPathResolver` (dm_sdk). If the resolver is unavailable, `bag_path` falls back to empty string and the frontend offers manual path input.
+
+### 8.6 Frontend API_BASE
 - `frontend/src/App.js` uses `process.env.REACT_APP_API_BASE || ''`.
 - Empty string means relative URLs, which works with both proxy (dev) and backend static serving (prod).
 
@@ -197,11 +235,16 @@ If you change the extraction pipeline, keep the framerate fix and do not reintro
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `No module named 'j6'` | Proto path wrong | Check `_PROTO_BASE` points to `/root/data/data_mining/...` |
-| `libgacbag_storage.so: cannot open` | Missing `LD_LIBRARY_PATH` | Run via `./run_backend.sh` |
+| `libgacbag_storage.so: cannot open` | Missing `LD_LIBRARY_PATH` | Run via `./run_backend.sh` or `./visualizer/deploy.sh` |
+| `libpython3.10.so.1.0: cannot open` | Missing `LD_LIBRARY_PATH` (Python lib) | Same as above |
+| `ValueError: 批次 xxx 不存在，请先执行 ETL` | `ETL_BASE_PATH` 未正确注入 `os.environ` | 检查 `deploy.sh` 是否 `source .env`；或确认 `config.py` 已添加 `ETL_BASE_PATH` 字段 |
 | `ModuleNotFoundError: app` | Missing `__init__.py` | Ensure every Python package dir has one |
 | `No module named 'pydantic_settings'` | Dependency missing | `uv pip install pydantic-settings` |
 | `ffmpeg failed` | ffmpeg not installed or HEVC stream corrupt | Check `ffmpeg` on PATH; inspect log stderr from `video_extractor.py` |
 | Video plays too fast (e.g. 1182 frames in 47s) | Missing input framerate `-r 10` for raw HEVC | Ensure ffmpeg command sets `-r 10` before `-i -` |
+| `No frames found` during video extraction | `start_ts`/`end_ts` outside bag's actual time range | Frontend/backend auto-clamp should handle this; if still occurring, check `metadata.yaml` `start_time` format (dict vs number) |
+| Parquet query result missing `bag_id`/`bag_path` | `_query_parquet` injection depends on SQL including `bag_id` column | LLM must generate SQL with `SELECT bag_id`; otherwise injection cannot work |
+| `bag_path` empty in visualization | `RosbagPathResolver` failed (dm_sdk unavailable or OSS not mounted) | Frontend offers manual bag_path input as fallback |
 
 ---
 
@@ -212,10 +255,12 @@ If you change the extraction pipeline, keep the framerate fix and do not reintro
 1. **Port policy**: Keep the backend on **30001** to match the legacy Gradio service. Do not change without explicit user approval.
 2. **Path policy**: `gsbag` SDK and proto paths are absolute and shared with sibling `data_mining/` repo. Do not assume they live under `text2sql/`.
 3. **Environment policy**: Never launch backend with bare `python` or system Python. Always use `.venv/bin/python` with `run_backend.sh` or replicate its env exports.
-4. **Adding new endpoints**: Place routes in `backend/app/api/`, schemas in `backend/app/models/`, business logic in `backend/app/services/`.
-5. **Frontend changes**: Update `frontend/src/App.js` or add components under `frontend/src/components/`. Run `npm run build` before testing static serving.
-6. **One-click deploy**: Prefer `./visualizer/deploy.sh` for full-stack deployment (builds frontend + starts backend).
-7. **Before committing changes**: Verify `./run_backend.sh` starts without import errors and `curl http://localhost:30001/health` returns `{"status":"ok"}`.
+4. **Adding new endpoints**: Place routes in `visualizer/backend/app/api/`, schemas in `visualizer/backend/app/models/`, business logic in `visualizer/backend/app/services/`.
+5. **Agent changes**: Agent 逻辑位于 `agent/backend/app/services/`（`agent_engine.py`, `etl/` 等）。注意 `sys.path` 注入在 `visualizer/backend/app/api/agent.py` 中完成。
+6. **Frontend changes**: Update `visualizer/frontend/src/App.js` or add components under `visualizer/frontend/src/components/`. Run `npm run build` before testing static serving.
+7. **One-click deploy**: Prefer `./visualizer/deploy.sh` for full-stack deployment (builds frontend + starts backend). **必须从项目根目录启动**，确保 `.env` 被正确加载。
+8. **Before committing changes**: Verify `./run_backend.sh` or `./visualizer/deploy.sh` starts without import errors and `curl http://localhost:30001/health` returns `{"status":"ok"}`.
+9. **ETL 环境变量陷阱**：修改 `config.py` 新增字段后，若 ETL 模块仍读 `os.environ`，需在 `_get_engine` 或启动脚本中显式注入。
 
 ---
 

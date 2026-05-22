@@ -423,7 +423,7 @@ metadata:
 │  [Schema浏览器]  [历史查询]                                   │
 ├────────────────┬───────────────────────────────────────────┤
 │                │                                           │
-│  自然语言输入    │   SQL 展示 (只读)                         │
+│  自然语言输入    │   SQL 编辑器 (可编辑/可手动执行)            │
 │                │                                           │
 │  ┌──────────┐  │   ┌─────────────────────────────────────┐ │
 │  │ 行人出现在│  │   │ SELECT rosbag_id, start_time,       │ │
@@ -447,7 +447,7 @@ metadata:
 └────────────────┴───────────────────────────────────────────┘
 ```
 
-> **MVP 阶段 SQL 编辑器降级为只读展示**。用户的核心诉求是"说人话→看结果→点播放"，手动修改 SQL 是高级功能，后续按需添加。
+> **SQL 编辑器已从只读升级为可编辑**。用户可在 SQL 编辑器中修改 LLM 生成的 SQL，或手动输入 SQL 直接执行。LLM 行为支持 ⚡直接执行 和 ✏️仅生成SQL 两种模式切换。
 
 ### 7.2 与现有 ROS 可视化的桥接
 
@@ -593,23 +593,35 @@ Agent 生成 SQL
 
 ## 10. 实施路线图
 
-### Phase 0：当前已完成（基础可视化）
+### Phase 0：当前已完成（基础可视化 + Agent MVP）
 - ✅ FastAPI 后端工业化（config, logging, exception handlers）
 - ✅ React 前端基础（Bag 加载、Topic 选择、视频播放）
 - ✅ 视频提取优化（set_topic_filter, pipe 直传 ffmpeg, start_ts/end_ts 支持）
 - ✅ 一键部署脚本（deploy.sh）
+- ✅ **Schema 分层设计**：`schema_structure.yaml` + `schema_dictionary.yaml` + `schema_master_raw.yaml`
+- ✅ **Schema 自动同步 Skill**：`sync_schema.py` 追踪 `data_mining/master` 变更
+- ✅ **SQLite → Parquet ETL**：全量转换 14,466 DBs，支持 ossutil 同步、schema 不一致自动 UNION、多 worker 并行
+- ✅ **ETL Manifest 管理**：`EtlManifestManager` + DuckDB VIEW 聚合查询
+- ✅ **Agent 双模式查询**：SQLite 逐个查询 + Parquet 聚合查询（`query_mode` 切换）
 
-### Phase 1：MVP 端到端跑通（1-2 周）
-- [ ] 后端：接入 SQLite，用 `PRAGMA table_info()` 动态拉取 Layer 2 Schema
-- [ ] 后端：`/api/agent/query` 接口（GPT-4o + 单层全量 Schema + 硬编码 Prompt）
-- [ ] 后端：SQL 只读执行（`mode=ro` 或临时副本）
-- [ ] 前端：左栏聊天面板（SSE 流式展示推理进度）
-- [ ] 前端：右栏结果表格 + ▶️ 按钮调用现有视频提取（传入 start_ts/end_ts）
+### Phase 1：MVP 端到端跑通（已完成核心链路，待质量加固）
+- ✅ 后端：接入 SQLite，用 `PRAGMA table_info()` 动态拉取 Layer 2 Schema
+- ✅ 后端：`/api/agent/query` 与 `/api/agent/query-stream` 接口（GLM-5.1-AWQ + 分层 Schema Prompt + TagRouter）
+- ✅ 后端：SQL 只读执行（`mode=ro`）+ 危险操作拦截（DROP/DELETE/INSERT/UPDATE/ALTER/CREATE）
+- ✅ 前端：左栏 AgentPanel（SSE 流式展示推理进度、模式切换、Batch 选择）
+- ✅ 前端：右栏结果表格
+- ✅ 前端：右栏 ▶️ 按钮调用视频提取（传入 start_ts/end_ts，支持时间戳自动 clamp）
+- ✅ 后端：Parquet 模式 bag_id/bag_path 注入（`_query_parquet` 中 resolver 批量解析）
+- ✅ 后端：新增 API — `/api/agent/generate-sql`（仅生成）、`/api/agent/execute-sql`（直接执行）、`/api/agent/resolve-bag-path`（bag 路径解析）
+- ✅ 前端：SQL 编辑器 + LLM 行为切换（⚡直接执行 / ✏️仅生成SQL）
+- ✅ 前端/后端：时间戳超出 bag 范围时自动 clamp（前端 alert 提示 + 后端兜底）
+- ✅ 前端：bag_path 为空时降级处理（允许手动输入路径）
 - [ ] 目标：用户 Week 1 就能输入自然语言、看到视频播放
 
-### Phase 2：质量加固（1 周）
-- [ ] 后端：Layer 1 Domain 目录 + 动态 Schema 加载
-- [ ] 后端：SQL 验证层（语法校验、字段存在性、危险操作检测）
+### Phase 2：质量加固（进行中）
+- ✅ 后端：SQL 验证层（语法校验、字段存在性、危险操作检测）
+- ✅ 后端：TagRouter 关键词路由（Layer 0 Schema Card + Layer 2 标签语义 + few-shot）
+- [ ] 后端：Layer 1 Domain 目录 + 动态 Schema 加载（当前为全量 Schema 注入）
 - [ ] 后端：错误反馈重试（弱模型 1 轮修正）
 - [ ] 后端：Query 结果缓存 + 生成过程缓存
 
@@ -620,7 +632,6 @@ Agent 生成 SQL
 - [ ] 后端：审计日志 + 成本熔断
 
 ### Phase 4：可视化深度集成（1-2 周）
-- [ ] 前端：SQL 只读展示（从隐藏改为可展开）
 - [ ] 前端：历史查询面板
 - [ ] 后端：视频预提取（常见片段后台转码缓存）
 - [ ] 后端：HEVC 流式传输（Safari/Chrome 按需启用）
@@ -694,3 +705,5 @@ Agent 生成 SQL
 |------|---------|------|
 | 2026-05-09 | 初始架构设计：Schema 分层、MCP 设计、Skill 系统、前端集成 | AI |
 | 2026-05-17 | 融合架构评审意见：Agent 解耦、gRPC 协议、Schema 同步机制、先强后弱策略、工业级补充能力（可观测性/安全/熔断/数据飞轮）、实施路线图调整 | AI |
+| 2026-05-21 | **Agent Parquet 聚合查询上线**：双模式查询（SQLite/Parquet）、Batch 自动发现、前端模式切换、ETL 环境变量修复、Schema 同步至 data_mining@6db12faf | AI |
+| 2026-05-22 | **Parquet bag_id 注入 + SQL 编辑器 + 可视化加固**：Parquet 模式注入 bag_id/bag_path/db_file；新增 generate-sql/execute-sql/resolve-bag-path 三个 API；SQL 编辑器从只读升级为可编辑（⚡直接执行/✏️仅生成SQL 两种模式）；bag_path 空值降级处理；时间戳超出 bag 范围自动 clamp（前端 alert + 后端兜底双保障） | AI |

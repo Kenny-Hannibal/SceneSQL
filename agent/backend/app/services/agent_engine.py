@@ -190,7 +190,7 @@ class AgentEngine:
             return [{"_error": str(exc), "db_file": db_file}]
 
     def _execute_parquet(self, sql: str, result_limit: int) -> List[Dict[str, Any]]:
-        """在 Parquet 聚合数据上执行 SQL（DuckDB），返回带 bag_id 的结果。"""
+        """在 Parquet 聚合数据上执行 SQL（DuckDB），返回原始行。"""
         try:
             if self._parquet_conn is None:
                 raise RuntimeError("Parquet 连接未初始化")
@@ -201,9 +201,6 @@ class AgentEngine:
             result = []
             for row in rows:
                 d = dict(zip(columns, row))
-                # Parquet 中已有 bag_id 列，无需额外解析
-                if "bag_id" not in d:
-                    d["bag_id"] = ""
                 result.append(d)
             return result
         except Exception as exc:
@@ -262,27 +259,51 @@ class AgentEngine:
         )
 
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
-        """Parquet 模式：在聚合后的 Parquet 上执行单次查询。"""
+        """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
         sql = self._inject_limit(sql, result_limit)
         rows = self._execute_parquet(sql, result_limit)
         errors = [r for r in rows if "_error" in r]
         good_rows = [r for r in rows if "_error" not in r]
-        columns = list(good_rows[0].keys()) if good_rows else []
 
-        # 去重统计 bag_id
-        bag_ids = set()
+        # 收集所有唯一 bag_id
+        bag_id_set = set()
         for r in good_rows:
-            if "bag_id" in r and r["bag_id"]:
-                bag_ids.add(r["bag_id"])
+            bid = r.get("bag_id")
+            if bid:
+                bag_id_set.add(bid)
+
+        # 批量解析 bag_path（利用 async resolver）
+        bag_path_map: Dict[str, str] = {}
+        if bag_id_set:
+            try:
+                resolver = await self._get_resolver()
+                for bid in bag_id_set:
+                    try:
+                        info = resolver.resolve(bid)
+                        bag_path_map[bid] = info.local_path or info.oss_path or ""
+                    except Exception as exc:
+                        logger.debug("Parquet resolver failed for %s: %s", bid, exc)
+                        bag_path_map[bid] = ""
+            except Exception as exc:
+                logger.warning("Resolver init failed, bag_path will be empty: %s", exc)
+
+        # 注入 bag_id / bag_path / db_file 到每行
+        for r in good_rows:
+            bid = r.get("bag_id", "")
+            r["bag_id"] = bid
+            r["bag_path"] = bag_path_map.get(bid, "")
+            r["db_file"] = f"{bid}.db" if bid else ""
+
+        columns = list(good_rows[0].keys()) if good_rows else []
 
         return AgentResult(
             sql=sql,
-            explanation=f"Parquet 聚合查询，命中 {len(bag_ids)} 个 bag，返回 {len(good_rows)} 条记录",
+            explanation=f"Parquet 聚合查询，命中 {len(bag_id_set)} 个 bag，返回 {len(good_rows)} 条记录",
             rows=good_rows,
             columns=columns,
             error=f"{len(errors)} 个错误" if errors else None,
-            scanned_dbs=len(bag_ids),
-            matched_dbs=len(bag_ids),
+            scanned_dbs=len(bag_id_set),
+            matched_dbs=len(bag_id_set),
         )
 
     async def _query_single(self, sql: str, result_limit: int = 100) -> AgentResult:

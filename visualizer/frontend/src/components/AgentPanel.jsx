@@ -12,10 +12,14 @@ export default function AgentPanel() {
   const [error, setError] = useState('');
   const [progress, setProgress] = useState([]);
 
-  // 新增：查询模式 & batch 选择
+  // 查询模式 & batch 选择
   const [queryMode, setQueryMode] = useState('sqlite');
   const [batchId, setBatchId] = useState('');
   const [batches, setBatches] = useState([]);
+
+  // SQL 编辑器
+  const [sqlEditor, setSqlEditor] = useState('');
+  const [sqlEditMode, setSqlEditMode] = useState('auto'); // 'auto' | 'preview'
 
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
@@ -46,18 +50,18 @@ export default function AgentPanel() {
     };
 
     if (dbPath.trim()) {
-      // 手动路径优先
       payload.db_path = dbPath.trim();
     } else {
-      // 使用 batch_id + query_mode
       payload.batch_id = batchId;
       payload.query_mode = queryMode;
     }
     return payload;
   };
 
-  const handleSubmit = async () => {
-    if (!question.trim()) return;
+  // 执行 SQL 编辑器中的 SQL
+  const handleExecuteSql = async () => {
+    const sql = sqlEditor.trim();
+    if (!sql) return;
     setLoading(true);
     setError('');
     setResult(null);
@@ -65,10 +69,22 @@ export default function AgentPanel() {
     setVideoRows([]);
 
     try {
-      const res = await fetch(`${API_BASE}/api/agent/query`, {
+      const payload = {
+        sql,
+        db_limit: Number(dbLimit) || 30,
+        result_limit: Number(resultLimit) || 100,
+      };
+      if (dbPath.trim()) {
+        payload.db_path = dbPath.trim();
+      } else {
+        payload.batch_id = batchId;
+        payload.query_mode = queryMode;
+      }
+
+      const res = await fetch(`${API_BASE}/api/agent/execute-sql`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -86,6 +102,68 @@ export default function AgentPanel() {
     }
   };
 
+  // LLM 查询（auto 模式：直接执行，preview 模式：仅填入编辑器）
+  const handleSubmit = async () => {
+    if (!question.trim()) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    clearProgress();
+    setVideoRows([]);
+
+    if (sqlEditMode === 'preview') {
+      // 仅生成 SQL，填入编辑器
+      try {
+        const res = await fetch(`${API_BASE}/api/agent/generate-sql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildPayload()),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setSqlEditor(data.sql || '');
+          if (data.validation_error) {
+            setError('SQL 校验警告: ' + data.validation_error);
+          }
+        }
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // auto 模式：直接执行（原有逻辑）
+    try {
+      const res = await fetch(`${API_BASE}/api/agent/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload()),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setResult(data);
+      setSqlEditor(data.sql || '');
+      if (data.error && !data.rows?.length) {
+        setError(data.error);
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmitStream = async () => {
     if (!question.trim()) return;
     setLoading(true);
@@ -93,6 +171,35 @@ export default function AgentPanel() {
     setResult(null);
     clearProgress();
     setVideoRows([]);
+
+    if (sqlEditMode === 'preview') {
+      // Stream 模式下 preview 也走 generate-sql
+      try {
+        const res = await fetch(`${API_BASE}/api/agent/generate-sql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildPayload()),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setSqlEditor(data.sql || '');
+          if (data.validation_error) {
+            setError('SQL 校验警告: ' + data.validation_error);
+          }
+        }
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     try {
       const response = await fetch(`${API_BASE}/api/agent/query-stream`, {
@@ -128,6 +235,7 @@ export default function AgentPanel() {
                   scanned_dbs: data.scanned_dbs,
                   matched_dbs: data.matched_dbs,
                 });
+                setSqlEditor(data.sql || '');
               } else {
                 addProgress(data.message || data.stage);
               }
@@ -145,20 +253,69 @@ export default function AgentPanel() {
   };
 
   const startVisualization = async (row) => {
+    // 如果 bag_path 为空，让用户手动输入或尝试解析
+    let bagPath = row.bag_path;
+    if (!bagPath) {
+      if (row.bag_id) {
+        try {
+          const resolveRes = await fetch(`${API_BASE}/api/agent/resolve-bag-path?bag_id=${encodeURIComponent(row.bag_id)}`);
+          if (resolveRes.ok) {
+            const resolveData = await resolveRes.json();
+            if (resolveData.bag_path) {
+              bagPath = resolveData.bag_path;
+            }
+          }
+        } catch (e) {
+          // resolve API 不可用，降级
+        }
+      }
+      if (!bagPath) {
+        bagPath = window.prompt(
+          `无法自动解析 bag 本地路径（bag_id: ${row.bag_id || '未知'}）。\n请手动输入 bag 的本地路径：`,
+          ''
+        );
+        if (!bagPath) return;
+      }
+    }
+
+    // 获取 bag 实际时间范围，用于 clamp
+    let bagStartNs = null;
+    let bagEndNs = null;
+    let clampedMsg = '';
+    try {
+      const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
+      if (bagInfoRes.ok) {
+        const bagInfo = await bagInfoRes.json();
+        bagStartNs = bagInfo.start_time_ns;
+        bagEndNs = bagInfo.end_time_ns;
+      }
+    } catch (e) {
+      // bag info 不可用，跳过 clamp
+    }
+
     const topic = window.prompt(
-      `请输入该 bag 的 camera topic 名称来提取视频：\nbag_path: ${row.bag_path || '未知'}\n时间范围: ${row.start_ts} ~ ${row.end_ts} (秒)`,
+      `请输入该 bag 的 camera topic 名称来提取视频：\nbag_path: ${bagPath}\n时间范围: ${row.start_ts} ~ ${row.end_ts} (秒)`,
       '/camera/front_center'
     );
     if (!topic) return;
 
-    const bagPath = row.bag_path;
-    if (!bagPath) {
-      alert('无法获取该场景的 bag 本地路径，可能 OSS 映射未配置');
-      return;
+    let startTs = row.start_ts ? Math.round(row.start_ts * 1e9) : null;
+    let endTs = row.end_ts ? Math.round(row.end_ts * 1e9) : null;
+
+    // Clamp: start_ts 不能小于 bag 起始时间
+    if (startTs !== null && bagStartNs !== null && startTs < bagStartNs) {
+      clampedMsg += `start_ts ${row.start_ts}s 早于 bag 起始时间 ${Number(bagStartNs / 1e9).toFixed(1)}s，已自动调整\n`;
+      startTs = bagStartNs;
+    }
+    // Clamp: end_ts 不能大于 bag 结束时间
+    if (endTs !== null && bagEndNs !== null && endTs > bagEndNs) {
+      clampedMsg += `end_ts ${row.end_ts}s 晚于 bag 结束时间 ${Number(bagEndNs / 1e9).toFixed(1)}s，已自动调整\n`;
+      endTs = bagEndNs;
     }
 
-    const startTs = row.start_ts ? Math.round(row.start_ts * 1e9) : null;
-    const endTs = row.end_ts ? Math.round(row.end_ts * 1e9) : null;
+    if (clampedMsg) {
+      alert('⏱️ 时间范围已自动调整：\n\n' + clampedMsg + '\n将按调整后的范围播放视频。');
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/video/extract`, {
@@ -233,13 +390,9 @@ export default function AgentPanel() {
           <button
             onClick={() => setQueryMode('sqlite')}
             style={{
-              padding: '6px 14px',
-              fontSize: 13,
-              borderRadius: 4,
-              border: '1px solid #d9d9d9',
+              padding: '6px 14px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9',
               background: queryMode === 'sqlite' ? '#722ed1' : '#fff',
-              color: queryMode === 'sqlite' ? '#fff' : '#555',
-              cursor: 'pointer',
+              color: queryMode === 'sqlite' ? '#fff' : '#555', cursor: 'pointer',
             }}
           >
             🗃️ SQLite 原始查询
@@ -247,17 +400,41 @@ export default function AgentPanel() {
           <button
             onClick={() => setQueryMode('parquet')}
             style={{
-              padding: '6px 14px',
-              fontSize: 13,
-              borderRadius: 4,
-              border: '1px solid #d9d9d9',
+              padding: '6px 14px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9',
               background: queryMode === 'parquet' ? '#13c2c2' : '#fff',
-              color: queryMode === 'parquet' ? '#fff' : '#555',
-              cursor: 'pointer',
+              color: queryMode === 'parquet' ? '#fff' : '#555', cursor: 'pointer',
             }}
           >
             📦 Parquet 聚合查询
           </button>
+        </div>
+
+        {/* LLM 行为切换：直接执行 vs 仅生成 */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#555', fontWeight: 500 }}>LLM 行为:</span>
+          <button
+            onClick={() => setSqlEditMode('auto')}
+            style={{
+              padding: '6px 14px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9',
+              background: sqlEditMode === 'auto' ? '#fa8c16' : '#fff',
+              color: sqlEditMode === 'auto' ? '#fff' : '#555', cursor: 'pointer',
+            }}
+          >
+            ⚡ 直接执行
+          </button>
+          <button
+            onClick={() => setSqlEditMode('preview')}
+            style={{
+              padding: '6px 14px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9',
+              background: sqlEditMode === 'preview' ? '#52c41a' : '#fff',
+              color: sqlEditMode === 'preview' ? '#fff' : '#555', cursor: 'pointer',
+            }}
+          >
+            ✏️ 仅生成 SQL
+          </button>
+          <span style={{ fontSize: 12, color: '#999' }}>
+            {sqlEditMode === 'auto' ? 'LLM 生成 SQL 后自动执行查询' : 'LLM 生成 SQL 后填入下方编辑器，手动审查后执行'}
+          </span>
         </div>
 
         {/* Batch 下拉选择 */}
@@ -308,6 +485,8 @@ export default function AgentPanel() {
             style={{ width: 100, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
           />
         </div>
+
+        {/* 自然语言输入 + 提交按钮 */}
         <div style={{ display: 'flex', gap: 10 }}>
           <input
             type="text"
@@ -321,28 +500,20 @@ export default function AgentPanel() {
             onClick={handleSubmit}
             disabled={loading || !question.trim()}
             style={{
-              padding: '10px 20px',
-              fontSize: 14,
-              borderRadius: 4,
-              border: 'none',
-              background: loading ? '#ccc' : '#722ed1',
-              color: '#fff',
-              cursor: loading ? 'not-allowed' : 'pointer',
+              padding: '10px 20px', fontSize: 14, borderRadius: 4, border: 'none',
+              background: loading ? '#ccc' : (sqlEditMode === 'preview' ? '#52c41a' : '#722ed1'),
+              color: '#fff', cursor: loading ? 'not-allowed' : 'pointer',
             }}
           >
-            {loading ? 'Thinking...' : 'Query'}
+            {loading ? 'Thinking...' : (sqlEditMode === 'preview' ? '✏️ 生成 SQL' : '⚡ Query')}
           </button>
           <button
             onClick={handleSubmitStream}
             disabled={loading || !question.trim()}
             style={{
-              padding: '10px 20px',
-              fontSize: 14,
-              borderRadius: 4,
-              border: 'none',
+              padding: '10px 20px', fontSize: 14, borderRadius: 4, border: 'none',
               background: loading ? '#ccc' : '#13c2c2',
-              color: '#fff',
-              cursor: loading ? 'not-allowed' : 'pointer',
+              color: '#fff', cursor: loading ? 'not-allowed' : 'pointer',
             }}
           >
             {loading ? 'Streaming...' : 'Stream Query'}
@@ -364,15 +535,36 @@ export default function AgentPanel() {
         </div>
       )}
 
+      {/* SQL 编辑器 */}
+      <div style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>SQL 编辑器</div>
+          <button
+            onClick={handleExecuteSql}
+            disabled={loading || !sqlEditor.trim()}
+            style={{
+              padding: '6px 16px', fontSize: 13, borderRadius: 4, border: 'none',
+              background: (loading || !sqlEditor.trim()) ? '#ccc' : '#1890ff',
+              color: '#fff', cursor: (loading || !sqlEditor.trim()) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            ▶ 执行 SQL
+          </button>
+        </div>
+        <textarea
+          value={sqlEditor}
+          onChange={(e) => setSqlEditor(e.target.value)}
+          placeholder="在此输入或编辑 SQL，也可以由 LLM 生成后填入...&#10;&#10;例如：SELECT bag_id, tag_name, start_ts, end_ts FROM range_tag WHERE tag_name = 'intersection_left_turn' LIMIT 100;"
+          spellCheck={false}
+          style={{
+            width: '100%', minHeight: 120, padding: 12, fontSize: 13, fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+            borderRadius: 4, border: '1px solid #d9d9d9', background: '#fafafa', resize: 'vertical', lineHeight: 1.6,
+          }}
+        />
+      </div>
+
       {result && (
         <div style={{ marginTop: 16 }}>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Generated SQL</div>
-            <pre style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 4, padding: 10, overflowX: 'auto', fontSize: 13 }}>
-              {result.sql}
-            </pre>
-          </div>
-
           {result.explanation && (
             <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
               {result.explanation}
@@ -413,13 +605,8 @@ export default function AgentPanel() {
                           <button
                             onClick={() => startVisualization(row)}
                             style={{
-                              padding: '4px 10px',
-                              fontSize: 12,
-                              borderRadius: 4,
-                              border: 'none',
-                              background: '#1890ff',
-                              color: '#fff',
-                              cursor: 'pointer',
+                              padding: '4px 10px', fontSize: 12, borderRadius: 4, border: 'none',
+                              background: '#1890ff', color: '#fff', cursor: 'pointer',
                             }}
                           >
                             📹 播包可视化
