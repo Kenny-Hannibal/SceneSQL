@@ -650,6 +650,8 @@ def main():
             cleanup_staging(local_source_dir, original_source_dir)
         else:
             print(f"[INFO] 保留暂存目录: {local_source_dir}")
+        
+        print("sqlite db 转换任务已完成！")
 
 
 if __name__ == "__main__":

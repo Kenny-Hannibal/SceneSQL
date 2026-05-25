@@ -25,21 +25,63 @@ export default function AgentPanel() {
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
 
+  // Visualization modals
+  const [topicModalOpen, setTopicModalOpen] = useState(false);
+  const [topicModalData, setTopicModalData] = useState(null);
+  const [selectedTopic, setSelectedTopic] = useState('');
+  const [playerModalOpen, setPlayerModalOpen] = useState(false);
+  const [playerData, setPlayerData] = useState(null);
+
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
+
+  // 监听手动路径输入，自动推断 queryMode
+  useEffect(() => {
+    if (!dbPath.trim()) return;
+    const path = dbPath.trim().toLowerCase();
+    if (path.endsWith('.db')) {
+      setQueryMode('sqlite');
+    } else if (path.includes('/parquet/') || path.includes('manifest.yaml') || path.includes('.parquet')) {
+      setQueryMode('parquet');
+    }
+  }, [dbPath]);
 
   // 组件挂载时获取 batch 列表
   useEffect(() => {
     fetch(`${API_BASE}/api/agent/batches`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
-        setBatches(data || []);
-        if (data && data.length > 0 && !batchId) {
-          setBatchId(data[0].batch_id);
+        const arr = Array.isArray(data) ? data : [];
+        setBatches(arr);
+        if (arr.length > 0 && !batchId) {
+          const defaultBatch = queryMode === 'parquet'
+            ? arr.find((b) => b.has_parquet)
+            : arr[0];
+          setBatchId(defaultBatch ? defaultBatch.batch_id : arr[0].batch_id);
         }
       })
-      .catch((e) => console.error('获取 batch 列表失败:', e));
+      .catch((e) => {
+        console.error('获取 batch 列表失败:', e);
+        setBatches([]);
+        setError('获取数据批次列表失败: ' + e.message);
+      });
   }, []);
+
+  // 切换 queryMode 时自动切换到对应模式可用的 batch
+  useEffect(() => {
+    if (batches.length === 0 || !batchId) return;
+    const current = batches.find((b) => b.batch_id === batchId);
+    if (queryMode === 'parquet' && current && !current.has_parquet) {
+      const firstParquet = batches.find((b) => b.has_parquet);
+      if (firstParquet) setBatchId(firstParquet.batch_id);
+    }
+  }, [queryMode, batches]);
 
   // 构建请求 payload
   const buildPayload = () => {
@@ -253,7 +295,7 @@ export default function AgentPanel() {
   };
 
   const startVisualization = async (row) => {
-    // 如果 bag_path 为空，让用户手动输入或尝试解析
+    // 如果 bag_path 为空，尝试解析
     let bagPath = row.bag_path;
     if (!bagPath) {
       if (row.bag_id) {
@@ -278,40 +320,43 @@ export default function AgentPanel() {
       }
     }
 
-    // 获取 bag 实际时间范围，用于 clamp
+    // 获取 bag 实际时间范围 + camera topics
     let bagStartNs = null;
     let bagEndNs = null;
     let clampedMsg = '';
+    let cameraTopics = [];
     try {
       const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
       if (bagInfoRes.ok) {
         const bagInfo = await bagInfoRes.json();
         bagStartNs = bagInfo.start_time_ns;
         bagEndNs = bagInfo.end_time_ns;
+        cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
       }
     } catch (e) {
-      // bag info 不可用，跳过 clamp
+      // bag info 不可用，跳过
     }
-
-    const topic = window.prompt(
-      `请输入该 bag 的 camera topic 名称来提取视频：\nbag_path: ${bagPath}\n时间范围: ${row.start_ts} ~ ${row.end_ts} (秒)`,
-      '/camera/front_center'
-    );
-    if (!topic) return;
 
     let startTs = row.start_ts ? Math.round(row.start_ts * 1e9) : null;
     let endTs = row.end_ts ? Math.round(row.end_ts * 1e9) : null;
 
-    // Clamp: start_ts 不能小于 bag 起始时间
     if (startTs !== null && bagStartNs !== null && startTs < bagStartNs) {
       clampedMsg += `start_ts ${row.start_ts}s 早于 bag 起始时间 ${Number(bagStartNs / 1e9).toFixed(1)}s，已自动调整\n`;
       startTs = bagStartNs;
     }
-    // Clamp: end_ts 不能大于 bag 结束时间
     if (endTs !== null && bagEndNs !== null && endTs > bagEndNs) {
       clampedMsg += `end_ts ${row.end_ts}s 晚于 bag 结束时间 ${Number(bagEndNs / 1e9).toFixed(1)}s，已自动调整\n`;
       endTs = bagEndNs;
     }
+
+    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg });
+    setSelectedTopic(cameraTopics.length > 0 ? cameraTopics[0] : '');
+    setTopicModalOpen(true);
+  };
+
+  const handleExtractVideo = async () => {
+    if (!topicModalData || !selectedTopic) return;
+    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
 
     if (clampedMsg) {
       alert('⏱️ 时间范围已自动调整：\n\n' + clampedMsg + '\n将按调整后的范围播放视频。');
@@ -321,7 +366,7 @@ export default function AgentPanel() {
       const res = await fetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bag_path: bagPath, topic, start_ts: startTs, end_ts: endTs }),
+        body: JSON.stringify({ bag_path: bagPath, topic: selectedTopic, start_ts: startTs, end_ts: endTs }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -330,8 +375,10 @@ export default function AgentPanel() {
       const data = await res.json();
       setVideoRows((prev) => [
         ...prev.filter((v) => v.task_id !== data.task_id),
-        { task_id: data.task_id, row, topic, status: data.status, video_url: '', progress: 0, message: data.message },
+        { task_id: data.task_id, row, topic: selectedTopic, status: data.status, video_url: '', progress: 0, message: data.message },
       ]);
+      setTopicModalOpen(false);
+      setTopicModalData(null);
     } catch (e) {
       alert('启动视频提取失败: ' + e.message);
     }
@@ -350,6 +397,7 @@ export default function AgentPanel() {
     }
 
     intervalRef.current = setInterval(async () => {
+      let newlyCompleted = null;
       const currentRows = [];
       for (const v of videoRows) {
         if (v.status !== 'pending' && v.status !== 'processing') {
@@ -363,12 +411,20 @@ export default function AgentPanel() {
             continue;
           }
           const data = await res.json();
-          currentRows.push({ ...v, status: data.status, video_url: data.video_url || '', progress: data.progress || 0, message: data.message || '' });
+          const updated = { ...v, status: data.status, video_url: data.video_url || '', progress: data.progress || 0, message: data.message || '' };
+          currentRows.push(updated);
+          if (data.status === 'completed' && data.video_url && !playerModalOpen) {
+            newlyCompleted = updated;
+          }
         } catch (e) {
           currentRows.push({ ...v, status: 'failed', message: String(e) });
         }
       }
       setVideoRows(currentRows);
+      if (newlyCompleted) {
+        setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic });
+        setPlayerModalOpen(true);
+      }
     }, 1500);
 
     return () => {
@@ -447,21 +503,37 @@ export default function AgentPanel() {
           >
             {batches.length === 0 && <option value="">加载中...</option>}
             {batches.map((b) => (
-              <option key={b.batch_id} value={b.batch_id}>
-                {b.batch_id} ({b.sqlite_count} DBs{b.has_parquet ? ' / 已有Parquet' : ''})
+              <option
+                key={b.batch_id}
+                value={b.batch_id}
+                disabled={queryMode === 'parquet' && !b.has_parquet}
+              >
+                {queryMode === 'parquet'
+                  ? `${b.batch_id} (${b.bag_count ?? 0} bags${b.has_parquet ? '' : ' / 无Parquet'})`
+                  : `${b.batch_id} (${b.sqlite_count} DBs${b.has_parquet ? ' / 已有Parquet' : ' / 无Parquet'})`}
               </option>
             ))}
           </select>
         </div>
 
         {/* 手动路径输入（可空） */}
-        <input
-          type="text"
-          value={dbPath}
-          onChange={(e) => setDbPath(e.target.value)}
-          placeholder="手动输入路径（留空使用上方选择的批次）"
-          style={{ padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
-        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={dbPath}
+            onChange={(e) => setDbPath(e.target.value)}
+            placeholder="手动输入路径（留空使用上方选择的批次）"
+            style={{ flex: 1, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
+          />
+          {dbPath.trim() && (
+            <button
+              onClick={() => setDbPath('')}
+              style={{ padding: '10px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              清空路径
+            </button>
+          )}
+        </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <input
@@ -652,6 +724,93 @@ export default function AgentPanel() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Topic 选择弹窗 */}
+      {topicModalOpen && topicModalData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 400, maxWidth: 500 }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>📹 播包可视化</h3>
+            <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
+              <b>Bag:</b> {topicModalData.bagPath}<br/>
+              <b>时间范围:</b> {topicModalData.row.start_ts} ~ {topicModalData.row.end_ts} (秒)
+            </div>
+            {topicModalData.cameraTopics.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>选择 Camera Topic:</label>
+                <select
+                  value={selectedTopic}
+                  onChange={(e) => setSelectedTopic(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                >
+                  {topicModalData.cameraTopics.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
+                <input
+                  type="text"
+                  value={selectedTopic}
+                  onChange={(e) => setSelectedTopic(e.target.value)}
+                  placeholder="/camera/front_center"
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                />
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
+                style={{ padding: '8px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleExtractVideo}
+                disabled={!selectedTopic}
+                style={{
+                  padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
+                  background: !selectedTopic ? '#ccc' : '#1890ff', color: '#fff', cursor: !selectedTopic ? 'not-allowed' : 'pointer',
+                }}
+              >
+                确认提取
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 视频播放弹窗 */}
+      {playerModalOpen && playerData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001,
+        }}>
+          <div style={{ background: '#000', borderRadius: 8, padding: 16, maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ color: '#fff', fontSize: 14 }}>
+                📹 {playerData.row.bag_id || '未知'} | {playerData.topic}
+              </span>
+              <button
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); }}
+                style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
+              >
+                ✕ 关闭
+              </button>
+            </div>
+            <video
+              src={playerData.video_url}
+              controls
+              autoPlay
+              style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
+            />
+          </div>
         </div>
       )}
     </div>

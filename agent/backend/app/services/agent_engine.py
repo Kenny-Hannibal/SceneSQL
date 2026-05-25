@@ -258,8 +258,22 @@ class AgentEngine:
             matched_dbs=matched,
         )
 
+    @staticmethod
+    def _ensure_bag_id_in_select(sql: str) -> str:
+        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * 和纯聚合查询）。"""
+        upper = sql.upper()
+        if "BAG_ID" in upper or "SELECT *" in upper:
+            return sql
+        # 纯聚合查询（无 GROUP BY 但有聚合函数）不添加 bag_id，避免语法错误
+        has_aggregate = any(agg in upper for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN("])
+        has_group_by = "GROUP BY" in upper
+        if has_aggregate and not has_group_by:
+            return sql
+        return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\1bag_id, ", sql)
+
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
         """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
+        sql = self._ensure_bag_id_in_select(sql)
         sql = self._inject_limit(sql, result_limit)
         rows = self._execute_parquet(sql, result_limit)
         errors = [r for r in rows if "_error" in r]
@@ -296,12 +310,17 @@ class AgentEngine:
 
         columns = list(good_rows[0].keys()) if good_rows else []
 
+        error_msg = None
+        if errors:
+            error_details = "; ".join(r.get("_error", "unknown") for r in errors)
+            error_msg = f"{len(errors)} 个错误: {error_details}"
+
         return AgentResult(
             sql=sql,
             explanation=f"Parquet 聚合查询，命中 {len(bag_id_set)} 个 bag，返回 {len(good_rows)} 条记录",
             rows=good_rows,
             columns=columns,
-            error=f"{len(errors)} 个错误" if errors else None,
+            error=error_msg,
             scanned_dbs=len(bag_id_set),
             matched_dbs=len(bag_id_set),
         )

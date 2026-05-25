@@ -10,14 +10,14 @@ class LLMClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        model: str = "qwen3.5",
+        model: Optional[str] = None,
     ):
         from openai import AsyncOpenAI
         self.client = AsyncOpenAI(
             api_key=api_key or os.getenv("OPENAI_API_KEY", "vllm-local"),
             base_url=base_url or os.getenv("OPENAI_BASE_URL", "http://localhost:30000/v1"),
         )
-        self.model = model
+        self.model = model or os.getenv("AGENT_MAIN_MODEL", "qwen3.5")
 
     async def chat(
         self,

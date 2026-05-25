@@ -1,7 +1,9 @@
 import os
 import logging
 import json
+import re
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from app.models.schemas import AgentQueryRequest, AgentQueryResponse, ExecuteSQLRequest
@@ -22,17 +24,85 @@ logger = logging.getLogger(__name__)
 _engines: dict = {}
 
 
+def _detect_path_type(path: str) -> tuple[str, str]:
+    """探测路径类型，返回 (detected_mode, batch_id_from_path)。
+
+    规则：
+    - 文件且以 .db 结尾  → ("sqlite", "")
+    - 文件夹含 .db 文件   → ("sqlite", "")
+    - 文件夹含 manifest.yaml 或 .parquet → ("parquet", 文件夹名)
+    - 明显不是路径（含空格、中文标点等） → ("invalid", "")
+    - 其他               → ("", "")
+    """
+    p = Path(path)
+
+    # 明显不是路径的字符串（含空格、中文标点、中文字符且无路径分隔符）
+    if any(c in path for c in [" ", "，", "。", "？", "！", "\n", "\t"]):
+        return "invalid", ""
+    if re.search(r'[\u4e00-\u9fff]', path) and "/" not in path and "\\" not in path and p.suffix != ".db":
+        return "invalid", ""
+
+    # 路径后缀强暗示类型（即使文件不存在）
+    if p.suffix == ".db":
+        return "sqlite", ""
+
+    if not p.exists():
+        return "", ""
+
+    if p.is_file():
+        return "", ""
+
+    # 目录
+    has_db = False
+    try:
+        has_db = any(p.glob("*.db"))
+    except (OSError, PermissionError):
+        pass
+
+    has_manifest = (p / "manifest.yaml").exists()
+    has_parquet = False
+    try:
+        has_parquet = any(p.glob("*.parquet"))
+    except (OSError, PermissionError):
+        pass
+
+    if has_manifest or has_parquet:
+        return "parquet", p.name
+    if has_db:
+        return "sqlite", ""
+    return "", ""
+
+
 def _resolve_db_path(req: AgentQueryRequest):
-    """根据请求参数解析最终 db_path 和 query_mode。
+    """根据请求参数解析最终 db_path、query_mode 和 batch_id。
+
+    返回值: (db_path, query_mode, resolved_batch_id)
 
     优先级：
-    1. 手动填写的 db_path（向后兼容）
+    1. 手动填写的 db_path（向后兼容，自动探测类型）
     2. batch_id + query_mode（新逻辑）
     3. .env 默认值
     """
     # P1: 手动路径
     if req.db_path and req.db_path.strip():
-        return req.db_path.strip(), req.query_mode or settings.QUERY_MODE or "sqlite"
+        raw_path = req.db_path.strip()
+        detected_mode, detected_batch_id = _detect_path_type(raw_path)
+
+        if detected_mode == "invalid":
+            # 用户把自然语言误填入了 db_path 框
+            return raw_path, "invalid", ""
+
+        # 用户显式指定的 query_mode 优先；否则自动探测；最后用默认值
+        query_mode = (req.query_mode or detected_mode or settings.QUERY_MODE or "sqlite").lower()
+
+        if query_mode == "parquet" and detected_batch_id:
+            # 用户输入的是完整 parquet batch 路径，如 .../parquet/BATCH_ID
+            # db_path 指向 base_dir（parquet 的父目录），batch_id 为文件夹名
+            p = Path(raw_path)
+            db_path = str(p.parent)
+            return db_path, query_mode, detected_batch_id
+        else:
+            return raw_path, query_mode, ""
 
     # P2: batch_id + query_mode
     query_mode = (req.query_mode or settings.QUERY_MODE or "sqlite").lower()
@@ -45,15 +115,48 @@ def _resolve_db_path(req: AgentQueryRequest):
         else:
             db_path = str(base_path)
     else:  # parquet
+        # Parquet 模式使用 ETL_BASE_PATH（转换脚本的输出目录）
         base_path = Path(settings.ETL_BASE_PATH) if settings.ETL_BASE_PATH else (
             Path(settings.SQLITE_DB_PATH) / "parquet" if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data/parquet")
         )
-        if batch_id:
-            db_path = str(base_path / batch_id)
-        else:
-            db_path = str(base_path)
+        # db_path 始终是 base_dir（parquet 的父目录），batch_id 单独传递
+        db_path = str(base_path)
 
-    return db_path, query_mode
+    return db_path, query_mode, batch_id or ""
+
+
+def _validate_db_path(db_path: str, query_mode: str, batch_id: str = "") -> Optional[str]:
+    """校验 db_path 是否有效，返回错误消息或 None。"""
+    if query_mode == "invalid":
+        return f"路径格式无效，疑似自然语言被误填入路径输入框: '{db_path}'。请清空路径框或输入有效的文件/文件夹路径。"
+
+    if not db_path:
+        return "SQLITE_DB_PATH not configured"
+
+    if db_path.startswith("oss://"):
+        return None  # 后续由 resolve_db_path 处理
+
+    if query_mode == "sqlite":
+        if not os.path.exists(db_path):
+            return f"DB path not found: {db_path}"
+        if os.path.isfile(db_path):
+            if not db_path.endswith(".db"):
+                return f"SQLite 文件必须以 .db 结尾: {db_path}"
+        else:
+            # 批量文件夹：检查是否有 .db 文件
+            try:
+                has_db = any(Path(db_path).glob("*.db"))
+            except (OSError, PermissionError) as e:
+                return f"无法读取目录 {db_path}: {e}"
+            if not has_db:
+                return f"目录 {db_path} 下没有找到 .db 文件"
+    else:  # parquet
+        # 检查 manifest.yaml 是否存在
+        manifest_path = Path(db_path) / batch_id / "manifest.yaml" if batch_id else Path(db_path) / "manifest.yaml"
+        if not manifest_path.exists():
+            return f"Parquet manifest 未找到: {manifest_path}"
+
+    return None
 
 
 def _get_engine(db_path: str, query_mode: str = "", batch_id: str = "") -> AgentEngine:
@@ -62,41 +165,83 @@ def _get_engine(db_path: str, query_mode: str = "", batch_id: str = "") -> Agent
     logger.info("_get_engine cache_key=%s in_cache=%s", cache_key, cache_key in _engines)
     if cache_key not in _engines:
         # 确保 ETL 相关环境变量已注入（pydantic_settings 不会自动写入 os.environ）
-        if settings.ETL_BASE_PATH:
+        if query_mode == "parquet":
+            # parquet 模式下 db_path 是 base_dir，必须注入到 ETL_BASE_PATH
+            os.environ["ETL_BASE_PATH"] = db_path
+            logger.info("Injected ETL_BASE_PATH=%s (from db_path)", db_path)
+        elif settings.ETL_BASE_PATH:
             os.environ["ETL_BASE_PATH"] = settings.ETL_BASE_PATH
-            logger.info("Injected ETL_BASE_PATH=%s", settings.ETL_BASE_PATH)
+            logger.info("Injected ETL_BASE_PATH=%s (from settings)", settings.ETL_BASE_PATH)
+
         if settings.ETL_BATCH_ID:
             os.environ["ETL_BATCH_ID"] = settings.ETL_BATCH_ID
+
         if query_mode == "parquet" and batch_id:
             # 临时切换 Parquet batch：更新 ETL_BATCH_ID 并清除单例缓存
             os.environ["ETL_BATCH_ID"] = batch_id
             import agent.backend.app.services.etl.etl_manifest as em_module
             em_module._default_manager = None
             logger.info("Cleared etl_manifest singleton, ETL_BATCH_ID=%s", batch_id)
+
         _engines[cache_key] = AgentEngine(db_path, query_mode=query_mode)
     return _engines[cache_key]
 
 
 @router.get("/batches")
 def list_batches():
-    """列出 SQLITE_DB_PATH 下所有可用的 batch。"""
-    batches = []
-    base_path = Path(settings.SQLITE_DB_PATH) if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data")
-    sqlite_dbs_dir = base_path / "sqlite_dbs"
-    parquet_dir = base_path / "parquet"
+    """列出所有可用的 batch（同时扫描 sqlite_dbs/ 和 parquet/ 目录）。"""
+    sqlite_base = Path(settings.SQLITE_DB_PATH) if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data")
+    sqlite_dbs_dir = sqlite_base / "sqlite_dbs"
+    # Parquet 目录使用 ETL_BASE_PATH（转换脚本的输出目录）
+    parquet_base = Path(settings.ETL_BASE_PATH) if settings.ETL_BASE_PATH else (
+        sqlite_base / "parquet" if settings.SQLITE_DB_PATH else Path("/mnt/gacrnd-oss/gac_liulian/common_data/parquet")
+    )
+    parquet_dir = parquet_base
 
-    if sqlite_dbs_dir.exists():
-        for batch_dir in sorted(sqlite_dbs_dir.iterdir()):
-            if batch_dir.is_dir():
-                db_count = len(list(batch_dir.glob("*.db")))
-                has_parquet = (parquet_dir / batch_dir.name / "manifest.yaml").exists()
-                batches.append({
-                    "batch_id": batch_dir.name,
-                    "sqlite_count": db_count,
-                    "has_parquet": has_parquet,
-                })
+    batch_map: dict[str, dict] = {}
 
-    return batches
+    # 扫描 sqlite_dbs 目录
+    try:
+        if sqlite_dbs_dir.exists():
+            for batch_dir in sorted(sqlite_dbs_dir.iterdir()):
+                if batch_dir.is_dir():
+                    db_count = len(list(batch_dir.glob("*.db")))
+                    has_parquet = (parquet_dir / batch_dir.name / "manifest.yaml").exists()
+                    batch_map[batch_dir.name] = {
+                        "batch_id": batch_dir.name,
+                        "sqlite_count": db_count,
+                        "has_parquet": has_parquet,
+                    }
+    except OSError as e:
+        logger.warning("sqlite_dbs 目录扫描失败（可能是 OSS FUSE 挂载断开）: %s", e)
+
+    # 扫描 parquet 目录，补充只有 Parquet 没有 SQLite 的 batch
+    try:
+        if parquet_dir.exists():
+            for batch_dir in sorted(parquet_dir.iterdir()):
+                if batch_dir.is_dir() and (batch_dir / "manifest.yaml").exists():
+                    bag_count = 0
+                    try:
+                        import yaml
+                        with open(batch_dir / "manifest.yaml", "r", encoding="utf-8") as f:
+                            manifest = yaml.safe_load(f)
+                        bag_count = manifest.get("bag_count", 0)
+                    except Exception:
+                        pass
+                    if batch_dir.name not in batch_map:
+                        batch_map[batch_dir.name] = {
+                            "batch_id": batch_dir.name,
+                            "sqlite_count": 0,
+                            "has_parquet": True,
+                            "bag_count": bag_count,
+                        }
+                    else:
+                        batch_map[batch_dir.name]["has_parquet"] = True
+                        batch_map[batch_dir.name]["bag_count"] = bag_count
+    except OSError as e:
+        logger.warning("parquet 目录扫描失败（可能是 OSS FUSE 挂载断开）: %s", e)
+
+    return list(batch_map.values())
 
 
 @router.get("/resolve-bag-path")
@@ -121,16 +266,11 @@ async def resolve_bag_path(bag_id: str):
 
 @router.post("/query", response_model=AgentQueryResponse)
 async def agent_query(req: AgentQueryRequest):
-    db_path, query_mode = _resolve_db_path(req)
+    db_path, query_mode, resolved_batch_id = _resolve_db_path(req)
 
-    if not db_path:
-        return AgentQueryResponse(
-            sql="",
-            explanation="",
-            columns=[],
-            rows=[],
-            error="SQLITE_DB_PATH not configured",
-        )
+    validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
+    if validation_err:
+        return AgentQueryResponse(sql="", explanation="", columns=[], rows=[], error=validation_err)
 
     # Handle oss:// paths
     if db_path.startswith("oss://"):
@@ -138,26 +278,11 @@ async def agent_query(req: AgentQueryRequest):
         try:
             db_path = resolve_db_path(db_path)
         except ValueError as e:
-            return AgentQueryResponse(
-                sql="",
-                explanation="",
-                columns=[],
-                rows=[],
-                error=str(e),
-            )
+            return AgentQueryResponse(sql="", explanation="", columns=[], rows=[], error=str(e))
 
-    # SQLite 模式下需要验证路径存在；Parquet 模式下路径可能不存在（直接读 manifest）
-    if query_mode == "sqlite" and not os.path.exists(db_path):
-        return AgentQueryResponse(
-            sql="",
-            explanation="",
-            columns=[],
-            rows=[],
-            error=f"DB path not found: {db_path}",
-        )
-
-    logger.info("Agent query: %s | mode: %s | db: %s | limit: %s", req.question, query_mode, db_path, req.result_limit)
-    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+    logger.info("Agent query: %s | mode: %s | db: %s | batch_id: %s | limit: %s",
+                req.question, query_mode, db_path, resolved_batch_id, req.result_limit)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
     result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit)
 
     return AgentQueryResponse(
@@ -174,12 +299,13 @@ async def agent_query(req: AgentQueryRequest):
 @router.post("/query-stream")
 async def agent_query_stream(req: AgentQueryRequest):
     """SSE streaming endpoint for agent query progress."""
-    db_path, query_mode = _resolve_db_path(req)
+    db_path, query_mode, resolved_batch_id = _resolve_db_path(req)
 
-    if not db_path:
-        async def empty_err():
-            yield f"data: {json.dumps({'stage': 'error', 'message': 'SQLITE_DB_PATH not configured'})}\n\n"
-        return StreamingResponse(empty_err(), media_type="text/event-stream")
+    validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
+    if validation_err:
+        async def err_gen():
+            yield f"data: {json.dumps({'stage': 'error', 'message': validation_err})}\n\n"
+        return StreamingResponse(err_gen(), media_type="text/event-stream")
 
     if db_path.startswith("oss://"):
         from tools.rosbag_path_resolver import resolve_db_path
@@ -190,12 +316,7 @@ async def agent_query_stream(req: AgentQueryRequest):
                 yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
             return StreamingResponse(oss_err(), media_type="text/event-stream")
 
-    if query_mode == "sqlite" and not os.path.exists(db_path):
-        async def not_found_err():
-            yield f"data: {json.dumps({'stage': 'error', 'message': f'DB path not found: {db_path}'})}\n\n"
-        return StreamingResponse(not_found_err(), media_type="text/event-stream")
-
-    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
 
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
@@ -244,7 +365,7 @@ async def agent_query_stream(req: AgentQueryRequest):
 @router.post("/execute-sql", response_model=AgentQueryResponse)
 async def execute_sql(req: ExecuteSQLRequest):
     """直接执行用户提供的 SQL（不经 LLM）。"""
-    db_path, query_mode = _resolve_db_path(AgentQueryRequest(
+    db_path, query_mode, resolved_batch_id = _resolve_db_path(AgentQueryRequest(
         question="",
         db_path=req.db_path,
         batch_id=req.batch_id,
@@ -253,11 +374,9 @@ async def execute_sql(req: ExecuteSQLRequest):
         result_limit=req.result_limit,
     ))
 
-    if not db_path:
-        return AgentQueryResponse(
-            sql=req.sql, explanation="", columns=[], rows=[],
-            error="SQLITE_DB_PATH not configured",
-        )
+    validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
+    if validation_err:
+        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=validation_err)
 
     if db_path.startswith("oss://"):
         from tools.rosbag_path_resolver import resolve_db_path
@@ -266,10 +385,7 @@ async def execute_sql(req: ExecuteSQLRequest):
         except ValueError as e:
             return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
 
-    if query_mode == "sqlite" and not os.path.exists(db_path):
-        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=f"DB path not found: {db_path}")
-
-    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
 
     # SQL 校验
     validation_error = engine._validate_sql(req.sql)
@@ -300,15 +416,13 @@ async def execute_sql(req: ExecuteSQLRequest):
 @router.post("/generate-sql")
 async def generate_sql_only(req: AgentQueryRequest):
     """仅生成 SQL，不执行。返回生成的 SQL 供用户审查/修改。"""
-    db_path, query_mode = _resolve_db_path(req)
+    db_path, query_mode, resolved_batch_id = _resolve_db_path(req)
 
-    if not db_path:
-        return {"sql": "", "error": "SQLITE_DB_PATH not configured"}
+    validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
+    if validation_err:
+        return {"sql": "", "error": validation_err}
 
-    if query_mode == "sqlite" and not os.path.exists(db_path):
-        return {"sql": "", "error": f"DB path not found: {db_path}"}
-
-    engine = _get_engine(db_path, query_mode=query_mode, batch_id=req.batch_id)
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
 
     # 路由 + 分层注入（与 query 相同逻辑）
     route = engine.router.route(req.question)

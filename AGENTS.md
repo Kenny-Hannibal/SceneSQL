@@ -34,24 +34,28 @@ text2sql/
 │   │   ├── app/
 │   │   │   ├── main.py       # App factory, CORS, static files, routers
 │   │   │   ├── core/         # Config, logging, exception handlers
-│   │   │   ├── api/          # Route modules (bag, video)
+│   │   │   ├── api/          # Route modules (bag, video, agent)
+│   │   │   │   └── agent.py         # Path auto-detection, batch list, query endpoints
 │   │   │   ├── models/       # Pydantic schemas
 │   │   │   └── services/     # Business logic (bag_parser, video_extractor)
 │   │   └── requirements.txt
 │   ├── frontend/             # React SPA
 │   │   ├── src/
-│   │   │   ├── App.js        # Main UI: bag loader, topic grid, video player
-│   │   │   └── components/   # BagLoader.jsx, VideoPlayer.jsx
+│   │   │   ├── App.js        # Main UI shell
+│   │   │   └── components/   # Reusable components
+│   │   │       └── AgentPanel.jsx   # NL2SQL panel with video modals
 │   │   └── package.json
 │   ├── run_backend.sh        # Backend launcher (handles env vars)
 │   ├── run_visualizer.sh     # Legacy Gradio launcher
 │   └── deploy.sh             # One-click build frontend + start backend
 ├── agent/                    # NL2SQL Agent 核心服务
-│   └── backend/              # AgentEngine, LLMClient, TagRouter, ETL 工具
+│   └── backend/
 │       ├── app/
 │       │   ├── core/         # Schema reader, LLM client, Tag router
-│       │   └── services/     # AgentEngine, ETL manifest & Parquet converter
-│       └── app/services/etl/ # EtlManifestManager, sqlite→parquet 转换
+│       │   └── services/
+│       │       ├── agent_engine.py   # SQLite batch / Parquet / Single DB query engine
+│       │       └── etl/              # ETL manifest & Parquet converter
+│       │           ├── etl_manifest.py      # EtlManifestManager + path migration
 ├── tools/                    # 共享工具库
 │   ├── rosbag_path_resolver.py  # dm_sdk 封装：bag_id → OSS path → local path
 │   ├── rosbag_image_visualizer.py
@@ -151,6 +155,13 @@ All backend config lives in `backend/app/core/config.py` (Pydantic Settings).
 | `ETL_BASE_PATH` | `/mnt/gacrnd-oss/.../parquet` | `.env` |
 | `ETL_BATCH_ID` | — | `.env` |
 | `QUERY_MODE` | `sqlite` | `.env` (sqlite / parquet) |
+
+**Path Resolution Priority (Parquet mode):**
+When resolving batch paths via `batch_id` (frontend dropdown selection), the system uses this priority:
+1. `SQLITE_DB_PATH/parquet` — if `SQLITE_DB_PATH` is set
+2. `ETL_BASE_PATH` — fallback if `SQLITE_DB_PATH` is not set
+
+**Recommendation**: Set only `SQLITE_DB_PATH` to your local data root (e.g. `/root/data/text2sql/test_data`), and place parquet batches under `test_data/parquet/`. Remove or comment out `ETL_BASE_PATH` in `.env` to avoid accidentally pointing to an unreachable OSS path.
 | `OSS_MOUNT_MAP` | — | `.env` |
 | `ROSBAG_MOUNT_BASE` | — | `.env` |
 | `DM_ACCESS_TOKEN` | — | `.env` |
@@ -182,6 +193,20 @@ ETL 相关模块（如 `etl_manifest.py`）直接读取 `os.environ.get("ETL_BAS
 | POST | `/api/video/extract` | Start background video extraction (body: `bag_path`, `topic`, optional `start_ts`/`end_ts` in nanoseconds) |
 | GET | `/api/video/status/{task_id}` | Poll extraction progress |
 | GET | `/api/video/file/{task_id}` | Download completed MP4 |
+
+**Agent Path Auto-Detection (`_resolve_db_path`):**
+When `db_path` is provided manually (frontend text input), the backend auto-detects the path type:
+| Input pattern | Detected `query_mode` | Behavior |
+|---------------|----------------------|----------|
+| File ending with `.db` | `sqlite` | Single SQLite DB query |
+| Directory containing `.db` files | `sqlite` | Batch SQLite folder query |
+| Directory containing `manifest.yaml` or `.parquet` | `parquet` | Parquet aggregation query; `batch_id` inferred from folder name |
+| User explicitly sets `query_mode` | User's choice | Overrides auto-detection |
+
+**P2 (batch_id selection) path semantics:**
+- `db_path` is always the **base_dir** (parquet parent directory), never `base_dir/batch_id`.
+- `batch_id` is passed separately.
+- `_get_engine` injects `db_path` into `ETL_BASE_PATH` and passes `batch_id` to `EtlManifestManager`.
 
 ---
 
@@ -224,6 +249,52 @@ The SQL editor (`<textarea>`) is a shared component for both modes:
 ### 8.5 Parquet Mode bag_id/bag_path Injection
 In Parquet query mode, `agent_engine.py._query_parquet()` injects `bag_id`, `bag_path`, and `db_file` into each result row, ensuring parity with SQLite mode. The `bag_path` is resolved via `RosbagPathResolver` (dm_sdk). If the resolver is unavailable, `bag_path` falls back to empty string and the frontend offers manual path input.
 
+### 8.6 Parquet Path Migration (`_resolve_parquet_path`)
+`etl_manifest.py` records absolute parquet paths in `manifest.yaml` (often OSS paths). When data is copied to a new location, `EtlManifestManager._resolve_parquet_path()`:
+1. Tries the original path first.
+2. If unavailable (or `OSError` from a dead FUSE mount), falls back to `current_base_dir/batch_id/filename.parquet`.
+3. This allows moving parquet batches between machines or from OSS to local disk without regenerating `manifest.yaml`.
+
+### 8.7 Batch List (`/api/agent/batches`)
+Returns an array of batch objects:
+```json
+[
+  {
+    "batch_id": "20260515_T68_1131_5bb5ec_1.5w",
+    "sqlite_count": 0,
+    "has_parquet": true,
+    "bag_count": 12898
+  }
+]
+```
+- `sqlite_count`: number of `.db` files in `sqlite_dbs/{batch_id}/`
+- `bag_count`: read from `parquet/{batch_id}/manifest.yaml` (`bag_count` field)
+- Frontend displays `sqlite_count` in SQLite mode and `bag_count` in Parquet mode.
+
+### 8.8 Global Exception Handling
+The generic 500 handler (`exceptions.py`) now returns structured debug info:
+```json
+{
+  "detail": "Internal server error",
+  "error_type": "OSError",
+  "error_message": "[Errno 107] Transport endpoint is not connected",
+  "traceback": ["Traceback (most recent call last):", "  File ...", "  ..."]
+}
+```
+
+### 8.9 Visualization Modal Interaction
+Frontend `AgentPanel.jsx` uses a two-modal flow for video playback:
+1. **Topic Selection Modal**: After clicking "播包可视化", a modal opens showing:
+   - Bag path and time range
+   - Dropdown list of camera topics (fetched from `/api/bag/info`)
+   - "确认提取" / "取消" buttons
+2. **Video Player Modal**: When extraction completes (`status === 'completed' && video_url`), a fullscreen modal auto-opens with:
+   - `<video autoPlay controls>`
+   - Bag ID + topic name in the header
+   - "✕ 关闭" button to dismiss
+
+The old `window.prompt()` flow for topic selection has been removed.
+
 ### 8.6 Frontend API_BASE
 - `frontend/src/App.js` uses `process.env.REACT_APP_API_BASE || ''`.
 - Empty string means relative URLs, which works with both proxy (dev) and backend static serving (prod).
@@ -238,6 +309,10 @@ In Parquet query mode, `agent_engine.py._query_parquet()` injects `bag_id`, `bag
 | `libgacbag_storage.so: cannot open` | Missing `LD_LIBRARY_PATH` | Run via `./run_backend.sh` or `./visualizer/deploy.sh` |
 | `libpython3.10.so.1.0: cannot open` | Missing `LD_LIBRARY_PATH` (Python lib) | Same as above |
 | `ValueError: 批次 xxx 不存在，请先执行 ETL` | `ETL_BASE_PATH` 未正确注入 `os.environ` | 检查 `deploy.sh` 是否 `source .env`；或确认 `config.py` 已添加 `ETL_BASE_PATH` 字段 |
+| P2 选择 batch 后 parquet 查询报 "批次不存在" | `.env` 中 `ETL_BASE_PATH` 指向了不可用的 OSS 路径 | 注释掉 `ETL_BASE_PATH`，只保留 `SQLITE_DB_PATH` 指向本地根目录，代码会自动推断 `SQLITE_DB_PATH/parquet` |
+| Parquet 查询报 `Catalog Error: Table with name range_tag does not exist` | 该 parquet batch 的 `manifest.yaml` 中确实没有这个表 | 检查 `manifest.yaml` 的 `tables` 字段；ETL 阶段可能只转存了部分表 |
+| `Transport endpoint is not connected` in `list_batches()` | OSS FUSE mount died | `list_batches()` now catches `OSError` and skips the dead directory; restart the FUSE mount from the host side |
+| Video extraction modal doesn't open | `bag_path` is empty and `RosbagPathResolver` failed | Frontend falls back to manual path input; ensure `bag_id` is present in SQL result rows |
 | `ModuleNotFoundError: app` | Missing `__init__.py` | Ensure every Python package dir has one |
 | `No module named 'pydantic_settings'` | Dependency missing | `uv pip install pydantic-settings` |
 | `ffmpeg failed` | ffmpeg not installed or HEVC stream corrupt | Check `ffmpeg` on PATH; inspect log stderr from `video_extractor.py` |

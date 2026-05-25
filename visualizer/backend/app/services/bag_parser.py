@@ -39,7 +39,7 @@ def get_bag_info(bag_path: str) -> Dict:
             "freq": t.get("message_freq", 0),
         })
 
-    camera_topics = [t for t in topics if "/cam/" in t["name"]]
+    camera_topics = [t for t in topics if "/camera" in t["name"] or "/cam/" in t["name"]]
     logger.info("Bag %s loaded: %d camera topics, %d total messages", bag_path, len(camera_topics), info.get("message_count", 0))
 
     # 解析 bag 起止时间戳（纳秒），用于 clamp 视频提取范围

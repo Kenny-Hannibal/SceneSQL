@@ -109,7 +109,7 @@ class EtlManifestManager:
     def get_connection(self, batch_id: Optional[str] = None) -> duckdb.DuckDBPyConnection:
         """
         获取 DuckDB 连接，已配置好当前批次的 Parquet 视图。
-        
+
         使用方式：
             conn = manager.get_connection()
             conn.execute("SELECT * FROM range_tag WHERE bag_id = 'xxx'")
@@ -126,12 +126,33 @@ class EtlManifestManager:
 
         # 为每张表创建视图
         for table_name, parquet_path in batch.tables.items():
+            resolved_path = self._resolve_parquet_path(parquet_path, batch_id)
             conn.execute(f"""
                 CREATE OR REPLACE VIEW {table_name} AS
-                SELECT * FROM read_parquet('{parquet_path}')
+                SELECT * FROM read_parquet('{resolved_path}')
             """)
 
         return conn
+
+    def _resolve_parquet_path(self, parquet_path: str, batch_id: str) -> str:
+        """修复 manifest.yaml 中记录的绝对路径，支持数据迁移到新的 base_dir。"""
+        p = Path(parquet_path)
+        try:
+            if p.exists():
+                return str(p)
+        except OSError:
+            pass  # FUSE 挂载断开等情况，继续尝试 fallback
+
+        # 尝试用当前 base_dir 重新拼接路径
+        fallback = self.base_dir / batch_id / p.name
+        try:
+            if fallback.exists():
+                return str(fallback)
+        except OSError:
+            pass
+
+        # 如果都找不到，返回 fallback 路径（优先使用当前 base_dir）
+        return str(fallback)
 
 
 # 全局单例（方便直接导入使用）
