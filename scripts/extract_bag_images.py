@@ -54,6 +54,33 @@ except ImportError:
     pass
 
 
+# ─── Proto sys.path 注入 ─────────────────────────────────────────────
+# gsbag 反序列化需要 j6.image_encode.boleidl_pb2
+# bash 包装脚本会设置 PROTO_BASE 环境变量
+_proto_base = os.getenv("PROTO_BASE", "")
+if not _proto_base:
+    # 自动探测
+    for _candidate in [
+        os.path.join(os.path.dirname(__file__), "..", "data_mining", "UBM_mining", "ubm_data_mining", "gsbag_parser", "proto", "v4.8.3"),
+        "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3",
+        "/data/var/workspace/projects/projects/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3",
+    ]:
+        _candidate = os.path.normpath(_candidate)
+        if os.path.isdir(os.path.join(_candidate, "j6")):
+            _proto_base = _candidate
+            break
+
+if _proto_base and os.path.isdir(_proto_base):
+    if _proto_base not in sys.path:
+        sys.path.append(_proto_base)
+    _j6 = os.path.join(_proto_base, "j6")
+    if os.path.isdir(_j6) and _j6 not in sys.path:
+        sys.path.append(_j6)
+    logger.info("Proto 路径: %s", _proto_base)
+else:
+    logger.warning("未找到 proto 文件 (boleidl_pb2)，请设置 PROTO_BASE 环境变量")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  1. OSS 路径映射
 # ═══════════════════════════════════════════════════════════════════════
