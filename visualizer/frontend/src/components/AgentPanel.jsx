@@ -496,6 +496,48 @@ export default function AgentPanel() {
   }, [videoRows]);
 
   const hasResults = result && result.rows && result.rows.length > 0;
+
+  // Arrow 下载：调用 /execute-sql-arrow 获取二进制并下载
+  const handleArrowDownload = async () => {
+    const sql = sqlEditor.trim();
+    if (!sql) return;
+    try {
+      const payload = {
+        sql,
+        db_path: selectedDb || undefined,
+        batch_id: selectedBatch || undefined,
+        query_mode: queryMode || undefined,
+        db_limit: Number(dbLimit) || 30,
+        result_limit: Number(resultLimit) || 100,
+      };
+      const res = await fetch(`${API_BASE}/api/agent/execute-sql-arrow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.headers.get('content-type')?.includes('application/vnd.apache.arrow.stream')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `query_result_${Date.now()}.arrow`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // 降级为 JSON 下载
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `query_result_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      setError('Arrow 下载失败: ' + e.message);
+    }
+  };
   const columns = result?.columns || [];
 
   return (
@@ -706,6 +748,13 @@ export default function AgentPanel() {
                     扫描 {result.scanned_dbs} 个 DB，命中 {result.matched_dbs} 个
                   </span>
                 )}
+                <button
+                  onClick={handleArrowDownload}
+                  style={{ marginLeft: 12, padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #52c41a', background: 'transparent', color: '#52c41a', cursor: 'pointer' }}
+                  title="下载 Arrow IPC 二进制文件（高效传输，pyarrow 不可用时自动降级为 JSON）"
+                >
+                  ⬇ Arrow 下载
+                </button>
               </div>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

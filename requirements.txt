@@ -45,6 +45,7 @@ opencv-python==4.13.0.92
 orjson==3.11.9
 packaging==26.2
 pandas==2.3.3
+pyarrow==18.1.0
 pillow==12.2.0
 propcache==0.5.2
 protobuf==3.19.6

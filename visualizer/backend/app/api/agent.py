@@ -2,10 +2,11 @@ import os
 import logging
 import json
 import re
+import io
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse, Response
 from app.models.schemas import AgentQueryRequest, AgentQueryResponse, ExecuteSQLRequest
 from app.core.config import settings
 
@@ -493,3 +494,98 @@ async def generate_sql_only(req: AgentQueryRequest):
         }
     except Exception as e:
         return {"sql": "", "error": str(e)}
+
+
+@router.post("/execute-sql-arrow")
+async def execute_sql_arrow(req: ExecuteSQLRequest):
+    """执行 SQL 并以 Apache Arrow IPC 格式返回结果（二进制直传，大数据集更高效）。
+    
+    前端通过 fetch + ArrayBuffer 接收，使用 Apache Arrow JS 解析。
+    如果 pyarrow 不可用则自动降级为 JSON。
+    """
+    try:
+        import pyarrow as pa
+    except ImportError:
+        # 降级：走 JSON
+        resp = await execute_sql(req)
+        return resp
+
+    db_path, query_mode, resolved_batch_id = _resolve_db_path(AgentQueryRequest(
+        question="",
+        db_path=req.db_path,
+        batch_id=req.batch_id,
+        query_mode=req.query_mode,
+        db_limit=req.db_limit,
+        result_limit=req.result_limit,
+    ))
+
+    validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
+    if validation_err:
+        # 返回 JSON 错误
+        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=validation_err)
+
+    if db_path.startswith("oss://"):
+        from tools.rosbag_path_resolver import resolve_db_path
+        try:
+            db_path = resolve_db_path(db_path)
+        except ValueError as e:
+            return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
+
+    engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
+
+    validation_error = engine._validate_sql(req.sql)
+    if validation_error:
+        return AgentQueryResponse(sql=req.sql, explanation="SQL 校验失败", columns=[], rows=[], error=validation_error)
+
+    try:
+        if query_mode == "parquet":
+            result = await engine._query_parquet(req.sql, result_limit=req.result_limit)
+        elif engine.is_dir:
+            result = await engine._query_batch(req.sql, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
+        else:
+            result = await engine._query_single(req.sql, result_limit=req.result_limit)
+    except Exception as e:
+        return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
+
+    # 将 rows (List[Dict]) 转为 Arrow Table
+    if not result.rows:
+        # 空结果：返回空 Arrow 表
+        table = pa.table({})
+    else:
+        # 按列组织数据
+        columns_data = {col: [] for col in result.columns}
+        for row in result.rows:
+            for col in result.columns:
+                columns_data[col].append(row.get(col))
+        
+        arrow_arrays = []
+        arrow_fields = []
+        for col in result.columns:
+            values = columns_data[col]
+            # 推断类型
+            try:
+                arr = pa.array(values)
+            except (pa.ArrowInvalid, pa.ArrowTypeError):
+                # 降级为 string
+                arr = pa.array([str(v) if v is not None else None for v in values], type=pa.string())
+            arrow_fields.append(pa.field(col, arr.type))
+            arrow_arrays.append(arr)
+        
+        schema = pa.schema(arrow_fields)
+        table = pa.table({field.name: arr for field, arr in zip(arrow_fields, arrow_arrays)}, schema=schema)
+
+    # 序列化为 Arrow IPC (stream format)
+    sink = pa.BufferOutputStream()
+    writer = pa.ipc.new_stream(sink, table.schema)
+    writer.write_table(table)
+    writer.close()
+
+    return Response(
+        content=sink.getvalue().to_pybytes(),
+        media_type="application/vnd.apache.arrow.stream",
+        headers={
+            "X-Arrow-Schema": json.dumps({"fields": [{"name": f.name, "type": str(f.type)} for f in table.schema]}),
+            "X-Total-Rows": str(len(result.rows)),
+            "X-SQL": result.sql[:500],
+        },
+    )
