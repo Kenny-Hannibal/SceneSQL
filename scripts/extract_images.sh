@@ -45,6 +45,13 @@ if [ -d "$UV_PYTHON_LIB" ] && ls "$UV_PYTHON_LIB"/libpython*.so >/dev/null 2>&1;
     echo "[INFO] uv Python lib: ${UV_PYTHON_LIB}"
 fi
 
+# gsbag pip 安装时将 .so 放在 .venv/lib/ (libgacbag_storage.so.4 等)
+VENV_LIB="${PROJECT_ROOT}/.venv/lib"
+if [ -d "$VENV_LIB" ]; then
+    export LD_LIBRARY_PATH="${VENV_LIB}:${LD_LIBRARY_PATH}"
+    echo "[INFO] venv lib: ${VENV_LIB}"
+fi
+
 # ──── Proto 路径 ────
 PROTO_BASE="${PROJECT_ROOT}/../data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
 if [ -d "$PROTO_BASE" ]; then
