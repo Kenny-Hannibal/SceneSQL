@@ -3,6 +3,9 @@ import sys
 import logging
 import subprocess
 from typing import List, Optional, Dict
+from pathlib import Path
+
+import yaml
 
 from app.core.config import settings
 from app.core.exceptions import ExtractionFailedException
@@ -27,6 +30,61 @@ _tasks: Dict[str, Dict] = {}
 
 VIDEO_OUTPUT_DIR = settings.VIDEO_OUTPUT_DIR
 os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
+
+# ── Video configuration loader ──
+_DEFAULT_VIDEO_CONFIG = {
+    "input_fps": 10,
+    "output_fps": 10,
+    "crf": 23,
+    "preset": "fast",
+    "topic_fps_overrides": {},
+}
+
+_video_config_cache: Optional[Dict] = None
+_video_config_mtime: float = 0.0
+
+
+def _load_video_config() -> Dict:
+    """从 video_config.yaml 读取配置，支持热更新（文件修改后自动重载）。"""
+    global _video_config_cache, _video_config_mtime
+    config_path = Path(__file__).resolve().parent.parent.parent / "video_config.yaml"
+    try:
+        mtime = config_path.stat().st_mtime
+    except OSError:
+        return dict(_DEFAULT_VIDEO_CONFIG)
+
+    if _video_config_cache is not None and mtime == _video_config_mtime:
+        return _video_config_cache
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            user_cfg = yaml.safe_load(f) or {}
+        merged = dict(_DEFAULT_VIDEO_CONFIG)
+        for k, v in user_cfg.items():
+            if k in merged:
+                merged[k] = type(merged[k])(v)
+            elif k == "topic_fps_overrides":
+                merged[k] = v if isinstance(v, dict) else {}
+        _video_config_cache = merged
+        _video_config_mtime = mtime
+        logger.info("Loaded video config from %s: %s", config_path, merged)
+    except Exception as exc:
+        logger.warning("Failed to load video_config.yaml, using defaults: %s", exc)
+        merged = dict(_DEFAULT_VIDEO_CONFIG)
+        _video_config_cache = merged
+    return _video_config_cache
+
+
+def _get_fps_for_topic(topic: str, config: Dict) -> int:
+    """根据 topic 名称返回帧率，优先使用 topic_fps_overrides。"""
+    overrides = config.get("topic_fps_overrides", {})
+    if topic in overrides:
+        return int(overrides[topic])
+    # 前缀匹配（如 /camera/front_center 匹配 /camera/front_center/compressed）
+    for prefix, fps in overrides.items():
+        if topic.startswith(prefix):
+            return int(fps)
+    return int(config.get("input_fps", 10))
 
 
 def get_task(task_id: str) -> Optional[Dict]:
@@ -167,6 +225,14 @@ def extract_topic_to_mp4(
     )
     _update_task(task_id, status="processing", progress=0.0, message="Opening bag...")
 
+    # 加载视频配置，动态调整帧率和质量
+    config = _load_video_config()
+    input_fps = _get_fps_for_topic(topic, config)
+    output_fps = int(config.get("output_fps", input_fps))
+    crf = int(config.get("crf", 23))
+    preset = str(config.get("preset", "fast"))
+    logger.info("[%s] Video config: input_fps=%d output_fps=%d crf=%d preset=%s", task_id, input_fps, output_fps, crf, preset)
+
     try:
         reader = gsbag_reader.GsBagReader(bag_path)
         reader.set_topic_filter([topic])
@@ -216,14 +282,14 @@ def extract_topic_to_mp4(
         "-y",
         "-hide_banner",
         "-loglevel", "error",
-        "-r", "10",               # input framerate (raw HEVC has no container timestamps)
+        "-r", str(input_fps),   # input framerate (from config)
         "-f", "hevc",
         "-i", "-",                # read from stdin pipe
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-preset", preset,
+        "-crf", str(crf),
         "-pix_fmt", "yuv420p",
-        "-r", "10",               # output framerate
+        "-r", str(output_fps),    # output framerate (from config)
         mp4_path,
     ]
 
