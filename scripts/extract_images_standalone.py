@@ -30,7 +30,10 @@ logger = logging.getLogger(__name__)
 # ╚══════════════════════════════════════════════════════════════════════╝
 
 GSBAG_SDK = "/root/data/text2sql/three_party/gsbag_x86_Release_4.2.18_20260227_Linux"
-PROTO_BASE = "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
+# proto 目录：脚本所在目录下的 proto/ 文件夹（含 j6/image_encode/boleidl_pb2.py 和 j6/Comm/boleidl_pb2.py）
+# 如果同事拿到整个 scripts/ 文件夹，此处留空即可自动使用脚本旁边的 proto/ 目录
+# 也可以手动指定绝对路径，如 "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
+PROTO_BASE = ""
 OSS_MOUNT_MAP = "gacrnd-oss/gac_liulian:/mnt/gacrnd-oss/gac_liulian,gacrnd-ali-collect-t68-thor:/mnt/gacrnd-ali-collect-t68-thor"
 DM_ACCESS_TOKEN = os.getenv("DM_ACCESS_TOKEN", "")  # 优先读环境变量，否则在此填入
 
@@ -59,16 +62,28 @@ DEFAULT_TOPICS = ["/gac/cam/fw120_encoded"]
 #  环境自举 — LD_LIBRARY_PATH 必须在进程启动前设好，否则 os.execv 重启
 # ═══════════════════════════════════════════════════════════════════════
 
+def _resolve_proto_base():
+    """如果 PROTO_BASE 为空，自动查找脚本所在目录下的 proto/ 文件夹"""
+    if PROTO_BASE:
+        return PROTO_BASE
+    # 脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate = os.path.join(script_dir, "proto")
+    if os.path.isdir(os.path.join(candidate, "j6", "image_encode")):
+        return candidate
+    return ""
+
 def _bootstrap():
     global DM_ACCESS_TOKEN
+    proto_base = _resolve_proto_base()
     if os.getenv("__EXTRACT_ENV_READY") == "1":
         # exec 后从 os.environ 恢复
         DM_ACCESS_TOKEN = os.getenv("DM_ACCESS_TOKEN", DM_ACCESS_TOKEN)
         # proto sys.path
-        if PROTO_BASE and os.path.isdir(PROTO_BASE):
-            if PROTO_BASE not in sys.path:
-                sys.path.append(PROTO_BASE)
-            j6 = os.path.join(PROTO_BASE, "j6")
+        if proto_base and os.path.isdir(proto_base):
+            if proto_base not in sys.path:
+                sys.path.append(proto_base)
+            j6 = os.path.join(proto_base, "j6")
             if os.path.isdir(j6) and j6 not in sys.path:
                 sys.path.append(j6)
         return
@@ -107,9 +122,9 @@ def _bootstrap():
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     # proto
-    if PROTO_BASE and os.path.isdir(PROTO_BASE):
-        sys.path.append(PROTO_BASE)
-        j6 = os.path.join(PROTO_BASE, "j6")
+    if proto_base and os.path.isdir(proto_base):
+        sys.path.append(proto_base)
+        j6 = os.path.join(proto_base, "j6")
         if os.path.isdir(j6):
             sys.path.append(j6)
 
