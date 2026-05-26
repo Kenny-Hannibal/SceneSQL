@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""LLM Client — 封装 OpenAI API 调用（兼容 VLLM）。"""
+"""LLM Client — 封装 OpenAI API 调用（兼容 VLLM），支持流式输出。"""
 
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, AsyncIterator
 
 
 class LLMClient:
@@ -36,3 +36,25 @@ class LLMClient:
             max_tokens=max_tokens,
         )
         return resp.choices[0].message.content or ""
+
+    async def chat_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        """流式调用 LLM，逐 token 返回。"""
+        stream = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content

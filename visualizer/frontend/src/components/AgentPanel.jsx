@@ -20,6 +20,7 @@ export default function AgentPanel() {
   // SQL 编辑器
   const [sqlEditor, setSqlEditor] = useState('');
   const [sqlEditMode, setSqlEditMode] = useState('auto'); // 'auto' | 'preview'
+  const [streamingSql, setStreamingSql] = useState(''); // 实时显示流式生成的 SQL
 
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
@@ -264,6 +265,7 @@ export default function AgentPanel() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let sqlBuffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -278,6 +280,12 @@ export default function AgentPanel() {
               const data = JSON.parse(jsonStr);
               if (data.stage === 'error') {
                 setError(data.message);
+              } else if (data.stage === 'generating_token') {
+                // 逐 token 实时显示 SQL 生成过程
+                sqlBuffer += data.token;
+                setStreamingSql(sqlBuffer);
+              } else if (data.stage === 'sql_generated') {
+                setStreamingSql(''); // 清除流式显示，最终 SQL 由编辑器接管
               } else if (data.stage === 'completed') {
                 setResult({
                   sql: data.sql,
@@ -652,6 +660,14 @@ export default function AgentPanel() {
           {progress.map((p, i) => (
             <div key={i} style={{ marginBottom: 4 }}>{p}</div>
           ))}
+        </div>
+      )}
+
+      {/* 流式 SQL 生成实时显示 */}
+      {streamingSql && (
+        <div style={{ marginTop: 12, padding: 10, background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 4 }}>
+          <div style={{ fontSize: 12, color: '#52c41a', fontWeight: 600, marginBottom: 6 }}>✨ SQL 生成中...</div>
+          <pre style={{ margin: 0, fontSize: 13, fontFamily: 'Consolas, Monaco, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#333' }}>{streamingSql}</pre>
         </div>
       )}
 

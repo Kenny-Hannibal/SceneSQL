@@ -339,21 +339,34 @@ async def agent_query_stream(req: AgentQueryRequest):
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
 
-        prompt = f"""
-{engine.schema_text}
+        # 使用路由 + 分层注入构建 prompt
+        route = engine.router.route(req.question)
+        from agent.backend.app.core.schema_reader import format_schema_for_prompt
+        from agent.backend.app.core.tag_router import build_prompt
 
-用户问题：{req.question}
+        schema_text = format_schema_for_prompt(
+            engine.schema,
+            only_tables=route.involved_tables if route.involved_tables else None,
+        )
+        system_prompt, user_prompt = build_prompt(
+            question=req.question,
+            schema_text=schema_text,
+            route=route,
+        )
 
-请生成 SQLite SQL（只输出纯 SQL，不要解释，不要带 LIMIT）：
-"""
-        yield f"data: {json.dumps({'stage': 'generating', 'message': '正在生成 SQL...'})}\n\n"
+        yield f"data: {json.dumps({'stage': 'generating', 'message': '正在生成 SQL...', 'route_method': route.method, 'matched_tags': [t.tag_name for t in route.matched_tags], 'involved_tables': sorted(route.involved_tables)})}\n\n"
 
+        # ── 流式逐 token 输出 SQL 生成过程 ──
+        raw_sql_parts = []
         try:
-            raw_sql = await engine.llm.chat(SYSTEM_PROMPT, prompt, temperature=0.1)
+            async for token in engine.llm.chat_stream(system_prompt, user_prompt, temperature=0.1):
+                raw_sql_parts.append(token)
+                yield f"data: {json.dumps({'stage': 'generating_token', 'token': token})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'stage': 'error', 'message': f'LLM 调用失败: {e}'})}\n\n"
             return
 
+        raw_sql = "".join(raw_sql_parts)
         sql = engine._clean_sql(raw_sql)
         yield f"data: {json.dumps({'stage': 'sql_generated', 'sql': sql})}\n\n"
 
