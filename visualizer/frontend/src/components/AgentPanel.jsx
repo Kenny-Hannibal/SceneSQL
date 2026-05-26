@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SqlEditor from './SqlEditor';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -679,29 +680,12 @@ export default function AgentPanel() {
 
       {/* SQL 编辑器 */}
       <div style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <div style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>SQL 编辑器</div>
-          <button
-            onClick={handleExecuteSql}
-            disabled={loading || !sqlEditor.trim()}
-            style={{
-              padding: '6px 16px', fontSize: 13, borderRadius: 4, border: 'none',
-              background: (loading || !sqlEditor.trim()) ? '#ccc' : '#1890ff',
-              color: '#fff', cursor: (loading || !sqlEditor.trim()) ? 'not-allowed' : 'pointer',
-            }}
-          >
-            ▶ 执行 SQL
-          </button>
-        </div>
-        <textarea
+        <SqlEditor
           value={sqlEditor}
-          onChange={(e) => setSqlEditor(e.target.value)}
+          onChange={setSqlEditor}
+          onExecute={handleExecuteSql}
+          disabled={loading}
           placeholder="在此输入或编辑 SQL，也可以由 LLM 生成后填入...&#10;&#10;例如：SELECT bag_id, tag_name, start_ts, end_ts FROM range_tag WHERE tag_name = 'intersection_left_turn' LIMIT 100;"
-          spellCheck={false}
-          style={{
-            width: '100%', minHeight: 120, padding: 12, fontSize: 13, fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-            borderRadius: 4, border: '1px solid #d9d9d9', background: '#fafafa', resize: 'vertical', lineHeight: 1.6,
-          }}
         />
       </div>
 
