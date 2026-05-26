@@ -145,10 +145,9 @@ def _bootstrap_env(gsbag_sdk: str, proto_base: str):
     if sysconfig_lib and os.path.isdir(sysconfig_lib):
         lib_dirs.append(sysconfig_lib)
 
-    # 5. .venv/lib (pip 安装的 gsbag 放 .so 在这里)
-    #    从 sys.executable 推断: .venv/bin/python → .venv/lib
-    venv_dir = os.path.dirname(os.path.dirname(exe_real))
-    venv_lib = os.path.join(venv_dir, "lib")
+    # 5. venv/lib — pip 安装的 gsbag .so 在这里 (libgacbag_storage.so.4 等)
+    #    sys.prefix 在 venv 下指向 .venv/ 根目录
+    venv_lib = os.path.join(sys.prefix, "lib")
     if os.path.isdir(venv_lib) and any(
         f.startswith("libgacbag") or f.startswith("libpython")
         for f in os.listdir(venv_lib)
