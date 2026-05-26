@@ -96,6 +96,17 @@ database_schema:
     - CRUISE_STRAIGHT
     - INTERSECTION_RIGHTTURN
     - INTERSECTION_STRAIGHT
+    - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+    - CongestedFollow
+    - CRUISE_CREEP
+    - CRUISE_RAMP
+    - CRUISE_SLOWFOLLOW
+    - CRUISE_SLOWMOVE
+    - INTERSECTION_LEFTTURN
+    - LANECHANGE_ABANDON
+    - over_rain_level
+    - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+    - STOPANDGO_FIRSTCARSTOPATREDLIGHT
     notes:
     - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*, AVOIDANCE_*, INTERSECTION_*
     - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
@@ -231,6 +242,21 @@ database_schema:
       nullable: false
     - name: utm_yaw
       type: FLOAT
+      nullable: false
+    - name: gl_dis_to_left
+      type: FLOAT
+      nullable: false
+    - name: gl_dis_to_right
+      type: FLOAT
+      nullable: false
+    - name: gl_lane_cnt
+      type: INTEGER
+      nullable: false
+    - name: gl_left_cnt
+      type: INTEGER
+      nullable: false
+    - name: gl_right_cnt
+      type: INTEGER
       nullable: false
   - name: dynamic_obj
     type: vertical_timeseries
@@ -479,5 +505,5 @@ database_schema:
 git_version:
   data_mining_repo: 6db12fafcba9330fb4bb1ba615d9a8ae7cde9341
   branch: origin/data_mining/master
-  synced_at: '2026-05-21T20:50:16.831474+08:00'
+  synced_at: '2026-05-26T16:19:45+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

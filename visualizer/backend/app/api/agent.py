@@ -264,6 +264,14 @@ async def resolve_bag_path(bag_id: str):
         return {"bag_id": bag_id, "bag_path": "", "error": str(e)}
 
 
+def _paginate_rows(rows, page: int, page_size: int):
+    """对结果行进行分页切片，返回 (page_rows, total_rows)。"""
+    total = len(rows)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return rows[start:end], total
+
+
 @router.post("/query", response_model=AgentQueryResponse)
 async def agent_query(req: AgentQueryRequest):
     db_path, query_mode, resolved_batch_id = _resolve_db_path(req)
@@ -280,19 +288,27 @@ async def agent_query(req: AgentQueryRequest):
         except ValueError as e:
             return AgentQueryResponse(sql="", explanation="", columns=[], rows=[], error=str(e))
 
-    logger.info("Agent query: %s | mode: %s | db: %s | batch_id: %s | limit: %s",
-                req.question, query_mode, db_path, resolved_batch_id, req.result_limit)
+    logger.info("Agent query: %s | mode: %s | db: %s | batch_id: %s | limit: %s | page: %s",
+                req.question, query_mode, db_path, resolved_batch_id, req.result_limit, req.page)
     engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
     result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit)
+
+    # 分页
+    page = max(req.page, 1)
+    page_size = max(req.page_size, 1)
+    page_rows, total_rows = _paginate_rows(result.rows, page, page_size)
 
     return AgentQueryResponse(
         sql=result.sql,
         explanation=result.explanation,
         columns=result.columns,
-        rows=result.rows,
+        rows=page_rows,
         error=result.error,
         scanned_dbs=result.scanned_dbs,
         matched_dbs=result.matched_dbs,
+        total_rows=total_rows,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -317,6 +333,8 @@ async def agent_query_stream(req: AgentQueryRequest):
             return StreamingResponse(oss_err(), media_type="text/event-stream")
 
     engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
+    page = max(req.page, 1)
+    page_size = max(req.page_size, 1)
 
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
@@ -357,7 +375,8 @@ async def agent_query_stream(req: AgentQueryRequest):
             yield f"data: {json.dumps({'stage': 'error', 'message': f'执行失败: {e}'})}\n\n"
             return
 
-        yield f"data: {json.dumps({'stage': 'completed', 'sql': result.sql, 'explanation': result.explanation, 'columns': result.columns, 'rows': result.rows, 'error': result.error, 'scanned_dbs': result.scanned_dbs, 'matched_dbs': result.matched_dbs})}\n\n"
+        page_rows, total_rows = _paginate_rows(result.rows, page, page_size)
+        yield f"data: {json.dumps({'stage': 'completed', 'sql': result.sql, 'explanation': result.explanation, 'columns': result.columns, 'rows': page_rows, 'error': result.error, 'scanned_dbs': result.scanned_dbs, 'matched_dbs': result.matched_dbs, 'total_rows': total_rows, 'page': page, 'page_size': page_size})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -372,6 +391,8 @@ async def execute_sql(req: ExecuteSQLRequest):
         query_mode=req.query_mode,
         db_limit=req.db_limit,
         result_limit=req.result_limit,
+        page=req.page,
+        page_size=req.page_size,
     ))
 
     validation_err = _validate_db_path(db_path, query_mode, resolved_batch_id)
@@ -402,14 +423,21 @@ async def execute_sql(req: ExecuteSQLRequest):
     except Exception as e:
         return AgentQueryResponse(sql=req.sql, explanation="", columns=[], rows=[], error=str(e))
 
+    page = max(req.page, 1)
+    page_size = max(req.page_size, 1)
+    page_rows, total_rows = _paginate_rows(result.rows, page, page_size)
+
     return AgentQueryResponse(
         sql=result.sql,
         explanation=result.explanation,
         columns=result.columns,
-        rows=result.rows,
+        rows=page_rows,
         error=result.error,
         scanned_dbs=result.scanned_dbs,
         matched_dbs=result.matched_dbs,
+        total_rows=total_rows,
+        page=page,
+        page_size=page_size,
     )
 
 

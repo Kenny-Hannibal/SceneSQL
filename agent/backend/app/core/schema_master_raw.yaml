@@ -10,7 +10,7 @@ source_files:
   user_workspace: /root/data/data_mining/UBM_mining/ubm_data_mining/user_workspace/
 sqlite_database:
   engine: SQLite
-  sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260515_T68_1131_5bb5ec_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
+  sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260522_T68_1131_97ba3f_sdpro_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
   note: ONLY to_sqlite_db.py writes to SQLite. Downstream processors NEVER write back.
   tables:
   - name: dynamic_lane
@@ -369,6 +369,26 @@ sqlite_database:
       type: FLOAT
       notnull: false
       pk: false
+    - name: gl_dis_to_left
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: gl_dis_to_right
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: gl_lane_cnt
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: gl_left_cnt
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: gl_right_cnt
+      type: INTEGER
+      notnull: false
+      pk: false
   - name: intersection_info
     columns:
     - name: intersection_id
@@ -535,8 +555,8 @@ range_tag:
       file: op_lane_keep.py
       note: add_event 被注释掉，改用 add_table 直接写入 horizontal table
   actual_tags_from_sample_db:
-    description: 从样本 DB 中 DISTINCT 查询得到的实际存在的标签（30个）
-    sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260515_T68_1131_5bb5ec_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
+    description: 从样本 DB 中 DISTINCT 查询得到的实际存在的标签
+    sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260522_T68_1131_97ba3f_sdpro_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
     tags:
     - name: ActiveWiperState
       source: cloud_operator
@@ -647,6 +667,49 @@ range_tag:
       source: car_end_behavior_tag
       parser: em_behavior_tag_parser
       category: INTERSECTION
+    - name: AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: AVOIDANCE
+    - name: CongestedFollow
+      source: cloud_operator
+      operator: CongestedFollow
+    - name: CRUISE_CREEP
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: CRUISE_RAMP
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: CRUISE_SLOWFOLLOW
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: CRUISE_SLOWMOVE
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: CRUISE
+    - name: INTERSECTION_LEFTTURN
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: INTERSECTION
+    - name: LANECHANGE_ABANDON
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: LANECHANGE
+    - name: over_rain_level
+      source: cloud_operator
+      operator: RainLevelOperator
+      note: 动态 label_id（同 RainLevel 算子，tag_name 为 over_rain_level）
+    - name: STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: STOPANDGO
+    - name: STOPANDGO_FIRSTCARSTOPATREDLIGHT
+      source: car_end_behavior_tag
+      parser: em_behavior_tag_parser
+      category: STOPANDGO
   potential_tags_not_in_sample:
     description: '以下标签理论上会通过上述注入源进入 SQLite，但在样本 DB 中未出现。 未出现原因：样本 bag 的场景未触发对应算子，或车端未产生对应行为标签。
 
@@ -934,5 +997,5 @@ not_in_sqlite:
 git_version:
   data_mining_repo: 6db12fafcba9330fb4bb1ba615d9a8ae7cde9341
   branch: origin/data_mining/master
-  synced_at: '2026-05-21T20:50:16.831474+08:00'
+  synced_at: '2026-05-26T16:19:45+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

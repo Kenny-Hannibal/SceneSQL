@@ -42,6 +42,8 @@ class AgentQueryRequest(BaseModel):
     query_mode: Optional[str] = None  # "sqlite" | "parquet"（db_path 为空时使用）
     db_limit: int = 30  # 批量查询时最多扫描的 DB 数量
     result_limit: int = 100  # 单条 SQL 返回的最大行数
+    page: int = 1  # 分页页码（从 1 开始）
+    page_size: int = 50  # 每页行数
 
 
 class AgentQueryResponse(BaseModel):
@@ -52,6 +54,9 @@ class AgentQueryResponse(BaseModel):
     error: Optional[str] = None
     scanned_dbs: int = 0
     matched_dbs: int = 0
+    total_rows: int = 0  # 总行数（用于分页）
+    page: int = 1
+    page_size: int = 50
 
 
 class ExecuteSQLRequest(BaseModel):
@@ -61,3 +66,5 @@ class ExecuteSQLRequest(BaseModel):
     query_mode: Optional[str] = None
     db_limit: int = 30
     result_limit: int = 100
+    page: int = 1
+    page_size: int = 50

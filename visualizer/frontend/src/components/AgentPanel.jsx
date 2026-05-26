@@ -25,6 +25,11 @@ export default function AgentPanel() {
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
 
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalRows, setTotalRows] = useState(0);
+
   // Visualization modals
   const [topicModalOpen, setTopicModalOpen] = useState(false);
   const [topicModalData, setTopicModalData] = useState(null);
@@ -89,6 +94,8 @@ export default function AgentPanel() {
       question: question.trim(),
       db_limit: Number(dbLimit) || 30,
       result_limit: Number(resultLimit) || 100,
+      page: page,
+      page_size: pageSize,
     };
 
     if (dbPath.trim()) {
@@ -115,6 +122,8 @@ export default function AgentPanel() {
         sql,
         db_limit: Number(dbLimit) || 30,
         result_limit: Number(resultLimit) || 100,
+        page: page,
+        page_size: pageSize,
       };
       if (dbPath.trim()) {
         payload.db_path = dbPath.trim();
@@ -196,6 +205,8 @@ export default function AgentPanel() {
       const data = await res.json();
       setResult(data);
       setSqlEditor(data.sql || '');
+      if (data.total_rows !== undefined) setTotalRows(data.total_rows);
+      if (data.page !== undefined) setPage(data.page);
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -278,6 +289,8 @@ export default function AgentPanel() {
                   matched_dbs: data.matched_dbs,
                 });
                 setSqlEditor(data.sql || '');
+                if (data.total_rows !== undefined) setTotalRows(data.total_rows);
+                if (data.page !== undefined) setPage(data.page);
               } else {
                 addProgress(data.message || data.stage);
               }
@@ -646,7 +659,7 @@ export default function AgentPanel() {
           {hasResults && (
             <div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                Results ({result.rows.length} rows)
+                Results ({totalRows || result.rows.length} rows total, showing page {page})
                 {result.scanned_dbs > 0 && (
                   <span style={{ marginLeft: 12, color: '#999' }}>
                     扫描 {result.scanned_dbs} 个 DB，命中 {result.matched_dbs} 个
@@ -689,6 +702,29 @@ export default function AgentPanel() {
                   </tbody>
                 </table>
               </div>
+              {/* Pagination controls */}
+              {totalRows > pageSize && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 12, fontSize: 13 }}>
+                  <button
+                    disabled={page <= 1}
+                    onClick={() => { setPage(page - 1); handleSubmit(); }}
+                    style={{ padding: '4px 12px', borderRadius: 4, border: '1px solid #d9d9d9', background: page <= 1 ? '#f5f5f5' : '#fff', cursor: page <= 1 ? 'not-allowed' : 'pointer' }}
+                  >上一页</button>
+                  <span style={{ color: '#666' }}>第 {page} / {Math.ceil(totalRows / pageSize)} 页</span>
+                  <button
+                    disabled={page >= Math.ceil(totalRows / pageSize)}
+                    onClick={() => { setPage(page + 1); handleSubmit(); }}
+                    style={{ padding: '4px 12px', borderRadius: 4, border: '1px solid #d9d9d9', background: page >= Math.ceil(totalRows / pageSize) ? '#f5f5f5' : '#fff', cursor: page >= Math.ceil(totalRows / pageSize) ? 'not-allowed' : 'pointer' }}
+                  >下一页</button>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                    style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 12 }}
+                  >
+                    {[20, 50, 100, 200].map((s) => <option key={s} value={s}>{s}/页</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           )}
 

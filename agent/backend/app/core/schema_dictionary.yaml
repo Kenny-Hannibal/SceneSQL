@@ -473,6 +473,110 @@ tags:
     - 与 cloud 端的 Intersection + sub_tag=IsIntersection 不同源
     related_tables:
     - range_tag
+  AVOIDANCE_MULTIOBSTACLEAROUNDEGO:
+    description: 多障碍物绕行避让
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: AVOIDANCE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CongestedFollow:
+    description: 拥堵跟车
+    sub_tags: []
+    source: cloud_operator
+    operator: CongestedFollow
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CREEP:
+    description: 蠕行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_RAMP:
+    description: 匝道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_SLOWFOLLOW:
+    description: 慢行跟车巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_SLOWMOVE:
+    description: 慢行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  INTERSECTION_LEFTTURN:
+    description: 路口左转
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=LeftIntersection 不同源
+    related_tables:
+    - range_tag
+  LANECHANGE_ABANDON:
+    description: 放弃变道
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: LANECHANGE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  over_rain_level:
+    description: 降雨状态（与 RainLevel 相同算子，但使用 over_rain_level 作为 tag_name）
+    sub_tags:
+    - heavy_rain
+    - light_rain
+    - moderate_rain
+    source: cloud_operator
+    operator: RainLevelOperator
+    dynamic_label_id: true
+    limitations:
+    - 与 RainLevel 使用同一算子 RainLevelOperator，但 tag_name 存储为 over_rain_level
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  STOPANDGO_FIRSTCARSTARTATGREENLIGHT:
+    description: 红绿灯路口首车绿灯起步
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: STOPANDGO
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  STOPANDGO_FIRSTCARSTOPATREDLIGHT:
+    description: 红绿灯路口首车红灯停车
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: STOPANDGO
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
   car_end_behavior_tags:
     description: 车端行为标签完整列表
     source: car_end_behavior_tag
@@ -1031,6 +1135,33 @@ fields:
     - ego
     notes:
     - 0 通常指向正北，顺时针增大
+  ego.gl_dis_to_left:
+    description: 自车到左侧guide line距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.gl_dis_to_right:
+    description: 自车到右侧guide line距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.gl_lane_cnt:
+    description: guide line车道数
+    type: INTEGER
+    related_tables:
+    - ego
+  ego.gl_left_cnt:
+    description: guide line左侧车道数
+    type: INTEGER
+    related_tables:
+    - ego
+  ego.gl_right_cnt:
+    description: guide line右侧车道数
+    type: INTEGER
+    related_tables:
+    - ego
   ego.ego_lane_id:
     description: 自车当前车道 ID
     type: INTEGER
@@ -1238,5 +1369,5 @@ fields:
 git_version:
   data_mining_repo: 6db12fafcba9330fb4bb1ba615d9a8ae7cde9341
   branch: origin/data_mining/master
-  synced_at: '2026-05-21T20:50:16.831474+08:00'
+  synced_at: '2026-05-26T16:19:45+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
