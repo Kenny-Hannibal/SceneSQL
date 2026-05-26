@@ -333,21 +333,63 @@ export default function AgentPanel() {
       }
     }
 
-    // 获取 bag 实际时间范围 + camera topics
+    // 打开 modal 并显示加载进度
+    setTopicModalData({ bagPath, row, cameraTopics: [], startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
+    setSelectedTopic('');
+    setTopicModalOpen(true);
+
+    // 使用 SSE 流式获取 bag info（带进度反馈）
     let bagStartNs = null;
     let bagEndNs = null;
     let clampedMsg = '';
     let cameraTopics = [];
+
     try {
-      const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
-      if (bagInfoRes.ok) {
-        const bagInfo = await bagInfoRes.json();
-        bagStartNs = bagInfo.start_time_ns;
-        bagEndNs = bagInfo.end_time_ns;
-        cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
+      const response = await fetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.stage === 'loading' || data.stage === 'parsing_topics') {
+                setTopicModalData(prev => prev ? { ...prev, loading: true, loadingMsg: data.message } : prev);
+              } else if (data.stage === 'completed' && data.bag_info) {
+                const info = data.bag_info;
+                bagStartNs = info.start_time_ns;
+                bagEndNs = info.end_time_ns;
+                cameraTopics = (info.topics || []).map((t) => t.name).filter(Boolean);
+              } else if (data.stage === 'error') {
+                // 降级：使用非流式 API
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              // ignore parse errors
+            }
+          }
+        }
       }
     } catch (e) {
-      // bag info 不可用，跳过
+      // 降级到非流式 API
+      try {
+        const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
+        if (bagInfoRes.ok) {
+          const bagInfo = await bagInfoRes.json();
+          bagStartNs = bagInfo.start_time_ns;
+          bagEndNs = bagInfo.end_time_ns;
+          cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
+        }
+      } catch (e2) {
+        // bag info 不可用，跳过
+      }
     }
 
     let startTs = row.start_ts ? Math.round(row.start_ts * 1e9) : null;
@@ -362,9 +404,8 @@ export default function AgentPanel() {
       endTs = bagEndNs;
     }
 
-    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg });
+    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
     setSelectedTopic(cameraTopics.length > 0 ? cameraTopics[0] : '');
-    setTopicModalOpen(true);
   };
 
   const handleExtractVideo = async () => {
@@ -775,6 +816,15 @@ export default function AgentPanel() {
               <b>Bag:</b> {topicModalData.bagPath}<br/>
               <b>时间范围:</b> {topicModalData.row.start_ts} ~ {topicModalData.row.end_ts} (秒)
             </div>
+            {topicModalData.loading ? (
+              <div style={{ padding: '20px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: '#1890ff', marginBottom: 12 }}>{topicModalData.loadingMsg || '加载中...'}</div>
+                <div style={{ width: '100%', height: 6, background: '#f0f0f0', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: '100%', height: '100%', background: '#1890ff', borderRadius: 3, animation: 'progress-pulse 1.5s ease-in-out infinite' }} />
+                </div>
+                <style>{`@keyframes progress-pulse { 0%, 100% { opacity: 0.4; width: 30%; } 50% { opacity: 1; width: 70%; } }`}</style>
+              </div>
+            ) : (
             {topicModalData.cameraTopics.length > 0 ? (
               <div style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>选择 Camera Topic:</label>
@@ -800,6 +850,7 @@ export default function AgentPanel() {
                 />
               </div>
             )}
+            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
                 onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
@@ -809,10 +860,10 @@ export default function AgentPanel() {
               </button>
               <button
                 onClick={handleExtractVideo}
-                disabled={!selectedTopic}
+                disabled={!selectedTopic || topicModalData.loading}
                 style={{
                   padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
-                  background: !selectedTopic ? '#ccc' : '#1890ff', color: '#fff', cursor: !selectedTopic ? 'not-allowed' : 'pointer',
+                  background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
                 }}
               >
                 确认提取
