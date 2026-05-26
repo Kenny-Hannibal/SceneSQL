@@ -1,42 +1,14 @@
 #!/usr/bin/env python3
 """
-extract_images.py — 从 SQL 查询结果提取 Rosbag 图片帧（独立版本）
-
-自包含脚本，不依赖 SceneSQL 项目结构。可直接分享给同事使用。
-
-流程：
-  bag_id → dm_sdk 倒查原始 bag 路径 → gsbag 提取 HEVC 帧 → 解码保存为 JPEG/PNG
+extract_images.py — 从 SQL 查询结果提取 Rosbag 图片帧
 
 用法:
-  # 单条提取 (通过 bag_id，需 dm_sdk)
-  python extract_images.py --bag_id 13qCIWDNxsqGSksD56q2si202605 --start_ts 1773270382 --end_ts 1773270389
-
-  # 单条提取 (直接指定 bag 路径，无需 dm_sdk)
-  python extract_images.py --bag_path /mnt/gacrnd-ali-collect-t68-thor/.../bag_dir --start_ts 1773270382 --end_ts 1773270389
-
-  # 批量 CSV 提取
+  python extract_images.py --bag_id xxx --start_ts 1773270382 --end_ts 1773270389
+  python extract_images.py --bag_path /mnt/.../bag_dir --start_ts 1773270382 --end_ts 1773270389
   python extract_images.py --csv tasks.csv --output_dir /data/output
+  python extract_images.py --csv tasks.csv --cam_names fw120
 
-  # 只提取指定摄像头
-  python extract_images.py --bag_id xxx --start_ts 1 --end_ts 2 --cam_names fw120
-
-CSV 格式 (逗号分隔，首行表头自动跳过):
-  bag_id,start_ts,end_ts
-  13qCIWDNxsqGSksD56q2si202605,1773270382,1773270389
-  another_id,1773270400,1773270410
-
-  也可直接给 bag_path（第1列非 bag_id 时需用 --csv_mode path）:
-  /mnt/.../bag_dir,1773270382,1773270389
-
-环境要求:
-  - Python 3.10+ (uv 管理的 venv 或系统 Python 均可)
-  - gsbag 包 (pip install)
-  - dm_sdk 包 (可选，仅 --bag_id 模式需要)
-  - PyAV + Pillow (用于 HEVC 解码)
-  - 关键: gsbag 是 C 扩展，需要 LD_LIBRARY_PATH 包含:
-    · libpython3.x.so 所在目录
-    · libgacbag_*.so 所在目录 (通常在 .venv/lib/ 或 gsbag SDK lib/)
-  本脚本会自动检测并设置 LD_LIBRARY_PATH，必要时重启动自身。
+CSV 格式: bag_id,start_ts,end_ts (首行表头自动跳过)
 """
 
 import os
@@ -50,241 +22,175 @@ import subprocess
 from io import BytesIO
 from typing import List, Optional, Dict
 
-# ═══════════════════════════════════════════════════════════════════════
-#  配置区 — 按你的 DSW 环境修改这些默认值
-# ═══════════════════════════════════════════════════════════════════════
-
-# gsbag SDK 路径 (包含 lib/ 和 external/)
-DEFAULT_GSBAG_SDK = "/root/data/text2sql/three_party/gsbag_x86_Release_4.2.18_20260227_Linux"
-
-# boleidl_pb2 proto 路径 (包含 j6/image_encode/boleidl_pb2.py)
-DEFAULT_PROTO_BASE = "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
-
-# OSS 挂载映射 (格式: oss前缀:本地路径,oss前缀:本地路径)
-DEFAULT_OSS_MOUNT_MAP = (
-    "gacrnd-oss/gac_liulian:/mnt/gacrnd-oss/gac_liulian,"
-    "gacrnd-ali-collect-t68-thor:/mnt/gacrnd-ali-collect-t68-thor"
-)
-
-# dm_sdk access token (用于 bag_id → bag 路径倒查)
-DEFAULT_DM_ACCESS_TOKEN = ""
-
-# ═══════════════════════════════════════════════════════════════════════
-#  摄像头 topic 映射
-# ═══════════════════════════════════════════════════════════════════════
-
-CAMERA_TOPIC_MAP = {
-    "fw120": "/gac/cam/fw120_encoded",
-    "fw60":  "/gac/cam/fw60_encoded",
-    "ft30":  "/gac/cam/ft30_encoded",
-    "ft20":  "/gac/cam/ft20_encoded",
-    "r50":   "/gac/cam/r50_encoded",
-    "fl99":  "/gac/cam/fl99_encoded",
-    "fr99":  "/gac/cam/fr99_encoded",
-    "rl99":  "/gac/cam/rl99_encoded",
-    "rr99":  "/gac/cam/rr99_encoded",
-}
-
-DEFAULT_TOPICS = ["/gac/cam/fw120_encoded"]
-
-# ═══════════════════════════════════════════════════════════════════════
-#  日志
-# ═══════════════════════════════════════════════════════════════════════
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  配置区 — 同事拿到文件后，只需修改这里 ↓                            ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+GSBAG_SDK = "/root/data/text2sql/three_party/gsbag_x86_Release_4.2.18_20260227_Linux"
+PROTO_BASE = "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
+OSS_MOUNT_MAP = "gacrnd-oss/gac_liulian:/mnt/gacrnd-oss/gac_liulian,gacrnd-ali-collect-t68-thor:/mnt/gacrnd-ali-collect-t68-thor"
+DM_ACCESS_TOKEN = ""  # bag_id 模式必填，bag_path 模式留空即可
+
+# LD_LIBRARY_PATH 需要的额外目录（按实际环境增减）
+# 常见需要加入的: libpython3.x.so 所在目录, libgacbag_*.so 所在目录
+EXTRA_LD_PATHS = [
+    "/root/data/text2sql/.venv/lib",                                         # libgacbag_*.so
+    "/root/.local/share/uv/python/cpython-3.10.19-linux-x86_64-gnu/lib",    # libpython3.10.so
+]
+
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  以下无需修改                                                      ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+CAMERA_TOPIC_MAP = {
+    "fw120": "/gac/cam/fw120_encoded", "fw60": "/gac/cam/fw60_encoded",
+    "ft30": "/gac/cam/ft30_encoded",   "ft20": "/gac/cam/ft20_encoded",
+    "r50": "/gac/cam/r50_encoded",     "fl99": "/gac/cam/fl99_encoded",
+    "fr99": "/gac/cam/fr99_encoded",   "rl99": "/gac/cam/rl99_encoded",
+    "rr99": "/gac/cam/rr99_encoded",
+}
+DEFAULT_TOPICS = ["/gac/cam/fw120_encoded"]
+
 
 # ═══════════════════════════════════════════════════════════════════════
-#  0. 环境自举 — LD_LIBRARY_PATH 必须在进程启动前设好
+#  环境自举 — LD_LIBRARY_PATH 必须在进程启动前设好，否则 os.execv 重启
 # ═══════════════════════════════════════════════════════════════════════
 
-def _bootstrap_env(gsbag_sdk: str, proto_base: str):
-    """
-    检测并设置 LD_LIBRARY_PATH 等环境变量。
-
-    如果当前进程缺少必要的 LD_LIBRARY_PATH，设置后 os.execv 重启自身。
-    这是处理 gsbag C 扩展依赖 .so 的唯一可靠方式。
-    """
-    # 如果环境标记已存在，说明已经完成自举，跳过
-    if os.getenv("__EXTRACT_IMAGES_ENV_READY") == "1":
-        # 只需补 proto sys.path
-        _inject_proto_path(proto_base)
+def _bootstrap():
+    if os.getenv("__EXTRACT_ENV_READY") == "1":
+        # proto sys.path
+        if PROTO_BASE and os.path.isdir(PROTO_BASE):
+            if PROTO_BASE not in sys.path:
+                sys.path.append(PROTO_BASE)
+            j6 = os.path.join(PROTO_BASE, "j6")
+            if os.path.isdir(j6) and j6 not in sys.path:
+                sys.path.append(j6)
         return
 
-    need_reexec = False
-    ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    ld = os.environ.get("LD_LIBRARY_PATH", "")
+    changed = False
 
-    # 收集需要加入 LD_LIBRARY_PATH 的目录
-    lib_dirs = []
+    # gsbag SDK
+    for d in [
+        os.path.join(GSBAG_SDK, "lib"),
+        os.path.join(GSBAG_SDK, "external", "platform_sdk", "lib", "gacrnd"),
+        os.path.join(GSBAG_SDK, "external", "platform_sdk", "lib", "third_party"),
+    ]:
+        if os.path.isdir(d) and d not in ld:
+            ld = f"{d}:{ld}"
+            changed = True
 
-    # 1. gsbag SDK lib
-    sdk_lib = os.path.join(gsbag_sdk, "lib")
-    if os.path.isdir(sdk_lib):
-        lib_dirs.append(sdk_lib)
+    # 额外 lib 目录
+    for d in EXTRA_LD_PATHS:
+        if os.path.isdir(d) and d not in ld:
+            ld = f"{d}:{ld}"
+            changed = True
 
-    # 2. gsbag SDK platform_sdk
-    for sub in ["gacrnd", "third_party"]:
-        d = os.path.join(gsbag_sdk, "external", "platform_sdk", "lib", sub)
-        if os.path.isdir(d):
-            lib_dirs.append(d)
+    # HOBOT_COM_SDK
+    hobot = os.path.join(GSBAG_SDK, "external", "platform_sdk")
+    if os.path.isdir(hobot):
+        os.environ["HOBOT_COM_SDK"] = hobot
 
-    # 3. uv Python 的 libpython3.x.so
-    exe_real = os.path.realpath(sys.executable)
-    exe_dir = os.path.dirname(exe_real)
-    uv_lib = os.path.join(os.path.dirname(exe_dir), "lib")
-    if os.path.isdir(uv_lib) and any(
-        f.startswith("libpython") and f.endswith(".so")
-        for f in os.listdir(uv_lib)
-    ):
-        lib_dirs.append(uv_lib)
+    os.environ["LD_LIBRARY_PATH"] = ld
+    os.environ["GSBAG_SDK"] = GSBAG_SDK
+    os.environ["__EXTRACT_ENV_READY"] = "1"
 
-    # 4. sysconfig.LIBDIR
-    import sysconfig
-    sysconfig_lib = sysconfig.get_config_var("LIBDIR")
-    if sysconfig_lib and os.path.isdir(sysconfig_lib):
-        lib_dirs.append(sysconfig_lib)
-
-    # 5. venv/lib — pip 安装的 gsbag .so 在这里 (libgacbag_storage.so.4 等)
-    #    sys.prefix 在 venv 下指向 .venv/ 根目录
-    venv_lib = os.path.join(sys.prefix, "lib")
-    if os.path.isdir(venv_lib) and any(
-        f.startswith("libgacbag") or f.startswith("libpython")
-        for f in os.listdir(venv_lib)
-    ):
-        lib_dirs.append(venv_lib)
-
-    # 6. HOBOT_COM_SDK
-    hobot_sdk = os.path.join(gsbag_sdk, "external", "platform_sdk")
-    if os.path.isdir(hobot_sdk):
-        os.environ["HOBOT_COM_SDK"] = hobot_sdk
-
-    # 合并到 LD_LIBRARY_PATH
-    for d in lib_dirs:
-        if d not in ld_path:
-            ld_path = f"{d}:{ld_path}"
-            need_reexec = True
-
-    os.environ["LD_LIBRARY_PATH"] = ld_path
-    os.environ["GSBAG_SDK"] = gsbag_sdk
-    os.environ["__EXTRACT_IMAGES_ENV_READY"] = "1"
-
-    if need_reexec:
-        logger.info("环境变量已设置，重启动以加载动态库...")
+    if changed:
+        logger.info("LD_LIBRARY_PATH 已设置，重启动...")
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    _inject_proto_path(proto_base)
-
-
-def _inject_proto_path(proto_base: str):
-    """将 proto 路径加入 sys.path (用于 j6.image_encode.boleidl_pb2)。"""
-    if proto_base and os.path.isdir(proto_base):
-        if proto_base not in sys.path:
-            sys.path.append(proto_base)
-        j6 = os.path.join(proto_base, "j6")
-        if os.path.isdir(j6) and j6 not in sys.path:
+    # proto
+    if PROTO_BASE and os.path.isdir(PROTO_BASE):
+        sys.path.append(PROTO_BASE)
+        j6 = os.path.join(PROTO_BASE, "j6")
+        if os.path.isdir(j6):
             sys.path.append(j6)
-        logger.info("Proto: %s", proto_base)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  1. OSS 路径映射
+#  OSS
 # ═══════════════════════════════════════════════════════════════════════
 
-def parse_oss_mount_map(s: Optional[str]) -> Dict[str, str]:
-    result = {}
+def _parse_mount_map(s):
+    m = {}
     if not s:
-        return result
-    for pair in s.split(","):
-        pair = pair.strip()
-        if ":" not in pair:
+        return m
+    for p in s.split(","):
+        p = p.strip()
+        if ":" not in p:
             continue
-        k, v = pair.split(":", 1)
-        result[k.strip()] = v.strip()
-    return result
+        k, v = p.split(":", 1)
+        m[k.strip()] = v.strip()
+    return m
 
 
-def oss_to_local(oss_path: str, mount_map: Dict[str, str]) -> Optional[str]:
-    if not oss_path:
+def _oss2local(path, mmap):
+    if not path:
         return None
-    oss_path = oss_path.rstrip("/")
-    if oss_path.startswith("oss://"):
-        oss_path = oss_path[6:]
-    for k, v in sorted(mount_map.items(), key=lambda x: -len(x[0])):
-        if oss_path.startswith(k):
-            rel = oss_path[len(k):]
-            if rel.startswith("/"):
-                rel = rel[1:]
-            return os.path.normpath(os.path.join(v, rel))
-    return os.path.normpath(oss_path)
+    path = path.rstrip("/")
+    if path.startswith("oss://"):
+        path = path[6:]
+    for k, v in sorted(mmap.items(), key=lambda x: -len(x[0])):
+        if path.startswith(k):
+            r = path[len(k):]
+            if r.startswith("/"):
+                r = r[1:]
+            return os.path.normpath(os.path.join(v, r))
+    return os.path.normpath(path)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  2. dm_sdk 路径解析 (可选)
+#  dm_sdk 路径解析
 # ═══════════════════════════════════════════════════════════════════════
 
-def resolve_bag_path_via_dmsdk(bag_id: str, access_token: str, oss_mount_map_str: str) -> tuple:
-    """
-    通过 dm_sdk 从 bag_id 倒查本地 rosbag 路径。
-    返回 (local_path, info_dict)
-    """
-    try:
-        from dm_sdk import ProdDataClient, RawDataClient
-    except ImportError:
-        raise ImportError("dm_sdk 未安装。使用 --bag_path 直接指定 bag 目录可绕过此依赖。")
+def _resolve_bag_path(bag_id, token, oss_map_str):
+    from dm_sdk import ProdDataClient, RawDataClient
+    mmap = _parse_mount_map(oss_map_str)
 
-    mount_map = parse_oss_mount_map(oss_mount_map_str)
-
-    # Step 1: 产线表查 origins
-    prod = ProdDataClient(access_token=access_token, table="ubm_vehicle_module_bin")
+    prod = ProdDataClient(access_token=token, table="ubm_vehicle_module_bin")
     resp = prod.get_bag_metadata(data_id=bag_id)
     if resp.resp_code() != 200:
-        raise RuntimeError(f"ProdData query failed: {resp.msg}")
-    prod_data = resp.resp_data()
-    if not prod_data:
-        raise ValueError(f"Bag {bag_id} not found in ubm_vehicle_module_bin")
-    origins = prod_data.get("origins", [])
+        raise RuntimeError(f"ProdData failed: {resp.msg}")
+    pd = resp.resp_data()
+    if not pd:
+        raise ValueError(f"Bag {bag_id} not found")
+    origins = pd.get("origins", [])
     if not origins:
-        raise ValueError(f"Bag {bag_id} has no origins info")
-    origin = origins[0]
-    origin_table = origin.get("table")
-    origin_bag_id = origin.get("bag_id")
-    if not origin_table or not origin_bag_id:
-        raise ValueError(f"Origins info incomplete for {bag_id}")
+        raise ValueError(f"Bag {bag_id} no origins")
+    o = origins[0]
+    otable, obag = o.get("table"), o.get("bag_id")
+    if not otable or not obag:
+        raise ValueError(f"Origins incomplete for {bag_id}")
 
-    # Step 2: 原始表查 storage_prefix
-    raw = RawDataClient(access_token=access_token, table=origin_table)
-    raw_resp = raw.get_bag_metadata(bag_id=origin_bag_id)
-    if raw_resp.resp_code() != 200:
-        raise RuntimeError(f"RawData query failed: {raw_resp.msg}")
-    raw_data = raw_resp.resp_data() or {}
-    oss_path = raw_data.get("storage_prefix") or raw_data.get("raw_storage_prefix")
+    raw = RawDataClient(access_token=token, table=otable)
+    rr = raw.get_bag_metadata(bag_id=obag)
+    if rr.resp_code() != 200:
+        raise RuntimeError(f"RawData failed: {rr.msg}")
+    rd = rr.resp_data() or {}
+    oss = rd.get("storage_prefix") or rd.get("raw_storage_prefix")
+    local = _oss2local(oss, mmap) if oss else None
+    info = {"data_id": bag_id, "origin_bag_id": obag, "oss_path": oss,
+            "local_path": local, "vin": rd.get("vin"), "vehicle_model": rd.get("vehicle_model")}
 
-    # Step 3: OSS → 本地
-    local_path = oss_to_local(oss_path, mount_map) if oss_path else None
-    info = {
-        "data_id": bag_id, "origin_bag_id": origin_bag_id,
-        "oss_path": oss_path, "local_path": local_path,
-        "vin": raw_data.get("vin"), "vehicle_model": raw_data.get("vehicle_model"),
-    }
-
-    if not local_path:
-        raise ValueError(f"无法解析 bag_id={bag_id} 的本地路径 (OSS={oss_path})")
-    if not os.path.exists(local_path):
-        local_path = _download_from_oss(oss_path, bag_id)
-
-    return local_path, info
+    if not local:
+        raise ValueError(f"无法解析本地路径 (OSS={oss})")
+    if not os.path.exists(local):
+        local = _download_oss(oss, bag_id)
+    return local, info
 
 
-def _download_from_oss(oss_path: str, bag_id: str) -> str:
+def _download_oss(oss, bag_id):
     tmp = f"/tmp/bag_staging/{bag_id}"
     os.makedirs(tmp, exist_ok=True)
-    url = oss_path if oss_path.startswith("oss://") else f"oss://{oss_path}"
-    logger.info("从 OSS 下载: %s → %s", url, tmp)
+    url = oss if oss.startswith("oss://") else f"oss://{oss}"
+    logger.info("OSS 下载: %s → %s", url, tmp)
     r = subprocess.run(["ossutil64", "cp", "-r", url, tmp], capture_output=True, text=True, timeout=600)
     if r.returncode != 0:
         raise RuntimeError(f"ossutil 失败: {r.stderr}")
-    name = os.path.basename(oss_path)
+    name = os.path.basename(oss)
     for c in [os.path.join(tmp, name), os.path.join(tmp, name, name)]:
         if os.path.exists(c):
             return c
@@ -292,10 +198,10 @@ def _download_from_oss(oss_path: str, bag_id: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  3. metadata.yaml
+#  metadata.yaml
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_bag_time_range(bag_path: str):
+def _bag_time_range(bag_path):
     import yaml
     mp = os.path.join(bag_path, "metadata.yaml")
     if not os.path.exists(mp):
@@ -318,32 +224,27 @@ def get_bag_time_range(bag_path: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  4. 图片帧提取核心
+#  图片帧提取
 # ═══════════════════════════════════════════════════════════════════════
 
-def extract_images_from_bag(
-    bag_path: str, topics: List[str],
-    start_ts: Optional[int], end_ts: Optional[int],
-    output_dir: str, image_format: str = "jpeg",
-) -> Dict[str, int]:
+def _extract(bag_path, topics, start_ts, end_ts, output_dir, fmt="jpeg"):
     from gsbag import gsbag_reader
-    from j6.image_encode import boleidl_pb2 as image_encode_boleidl_pb2
+    from j6.image_encode import boleidl_pb2
 
-    # Clamp
-    bag_start, bag_end = get_bag_time_range(bag_path)
-    if start_ts is not None and bag_start is not None and start_ts < bag_start:
-        logger.info("start_ts %d < bag_start %d, 钳位", start_ts, bag_start)
-        start_ts = bag_start
-    if end_ts is not None and bag_end is not None and end_ts > bag_end:
-        logger.info("end_ts %d > bag_end %d, 钳位", end_ts, bag_end)
-        end_ts = bag_end
+    bs, be = _bag_time_range(bag_path)
+    if start_ts is not None and bs is not None and start_ts < bs:
+        logger.info("start_ts %d < bag_start %d, 钳位", start_ts, bs)
+        start_ts = bs
+    if end_ts is not None and be is not None and end_ts > be:
+        logger.info("end_ts %d > bag_end %d, 钳位", end_ts, be)
+        end_ts = be
 
     counts = {}
     for topic in topics:
         tdir = topic.strip("/").replace("/", "_")
         out = os.path.join(output_dir, tdir)
         os.makedirs(out, exist_ok=True)
-        logger.info("提取 topic=%s [%s, %s]", topic, start_ts, end_ts)
+        logger.info("提取 %s [%s, %s]", topic, start_ts, end_ts)
 
         try:
             reader = gsbag_reader.GsBagReader(bag_path)
@@ -353,7 +254,7 @@ def extract_images_from_bag(
             counts[topic] = 0
             continue
 
-        frames = []  # [(ts, hevc_bytes)]
+        frames = []
         errs = 0
         for m in reader.read_messages():
             ts = m.timestamp
@@ -362,7 +263,7 @@ def extract_images_from_bag(
             if end_ts is not None and ts > end_ts:
                 continue
             try:
-                msg = image_encode_boleidl_pb2.Image()
+                msg = boleidl_pb2.Image()
                 data = []
                 gsbag_reader.HobotMessageSerializer.deserialize_image(m, msg, data)
                 if data:
@@ -370,12 +271,12 @@ def extract_images_from_bag(
             except Exception as e:
                 errs += 1
                 if errs <= 5:
-                    logger.warning("帧解码错误: %s", e)
+                    logger.warning("解码错误: %s", e)
         if errs > 5:
             logger.info("跳过 %d 个解码错误帧", errs)
 
         total = len(frames)
-        logger.info("topic=%s: %d 帧", topic, total)
+        logger.info("%s: %d 帧", topic, total)
         if total == 0:
             counts[topic] = 0
             continue
@@ -383,25 +284,23 @@ def extract_images_from_bag(
         saved = 0
         for idx, (ts, payload) in enumerate(frames):
             try:
-                img = _decode_hevc(payload)
+                img = _decode(payload)
                 if img is None:
                     continue
-                ext = "jpg" if image_format == "jpeg" else "png"
-                fp = os.path.join(out, f"{ts}.{ext}")
-                img.save(fp, image_format.upper())
+                ext = "jpg" if fmt == "jpeg" else "png"
+                img.save(os.path.join(out, f"{ts}.{ext}"), fmt.upper())
                 saved += 1
                 if (idx + 1) % 50 == 0:
                     logger.info("  [%s] %d/%d", tdir, saved, total)
             except Exception as e:
                 if saved == 0:
-                    logger.warning("帧保存失败: %s", e)
-
+                    logger.warning("保存失败: %s", e)
         counts[topic] = saved
-        logger.info("topic=%s: 保存 %d 帧 → %s", topic, saved, out)
+        logger.info("%s: %d 帧 → %s", topic, saved, out)
     return counts
 
 
-def _decode_hevc(raw: bytes):
+def _decode(raw):
     try:
         import av
         c = av.open(BytesIO(raw), mode="r", format="hevc")
@@ -410,16 +309,13 @@ def _decode_hevc(raw: bytes):
                 return f.to_image()
         c.close()
     except ImportError:
-        return _decode_hevc_ffmpeg(raw)
+        return _decode_ffmpeg(raw)
     except Exception:
         try:
             import av
             buf = BytesIO(raw)
             c = av.open(buf, mode="r", format="hevc")
-            imgs = []
-            for pkt in c.demux(video=0):
-                for f in pkt.decode():
-                    imgs.append(f.to_image())
+            imgs = [f.to_image() for pkt in c.demux(video=0) for f in pkt.decode()]
             c.close()
             return imgs[0] if imgs else None
         except Exception:
@@ -427,7 +323,7 @@ def _decode_hevc(raw: bytes):
     return None
 
 
-def _decode_hevc_ffmpeg(raw: bytes):
+def _decode_ffmpeg(raw):
     try:
         from PIL import Image
         r = subprocess.run(
@@ -443,39 +339,31 @@ def _decode_hevc_ffmpeg(raw: bytes):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  5. 任务执行
+#  任务执行
 # ═══════════════════════════════════════════════════════════════════════
 
-def parse_time(val: str) -> int:
-    """自动识别秒/纳秒：< 10^10 视为秒，否则纳秒。"""
+def _parse_time(val):
     n = int(val)
     if n < 10_000_000_000:
-        logger.info("时间戳 %d → 秒，转纳秒: %d", n, n * 1_000_000_000)
+        logger.info("时间戳 %d → 秒，转纳秒", n)
         return n * 1_000_000_000
     return n
 
 
-def run_one(
-    bag_id: Optional[str], bag_path: Optional[str],
-    start_ts: str, end_ts: str,
-    topics: List[str], output_dir: Optional[str],
-    image_format: str, access_token: str, oss_mount_map: str,
-) -> bool:
-    start_ns = parse_time(start_ts)
-    end_ns = parse_time(end_ts)
-
+def _run_one(bag_id, bag_path, start_ts, end_ts, topics, output_dir, fmt, token, oss_map):
+    start_ns = _parse_time(start_ts)
+    end_ns = _parse_time(end_ts)
     if not topics:
         topics = DEFAULT_TOPICS
 
-    # bag 路径
     info = {}
     if bag_path:
         _bag = bag_path
         info = {"data_id": os.path.basename(bag_path), "local_path": bag_path}
     elif bag_id:
         try:
-            _bag, info = resolve_bag_path_via_dmsdk(bag_id, access_token, oss_mount_map)
-            logger.info("路径解析: %s (vin=%s)", _bag, info.get("vin"))
+            _bag, info = _resolve_bag_path(bag_id, token, oss_map)
+            logger.info("路径: %s (vin=%s)", _bag, info.get("vin"))
         except Exception as e:
             logger.error("路径解析失败: %s", e)
             return False
@@ -487,17 +375,15 @@ def run_one(
         logger.error("bag 目录不存在: %s", _bag)
         return False
 
-    # 输出目录
     if output_dir:
         _out = output_dir
     else:
-        ts_tag = time.strftime("%Y%m%d_%H%M%S")
-        _out = os.path.join(".", "extracted_images", f"{info.get('data_id', 'unknown')}_{ts_tag}")
+        _out = os.path.join(".", "extracted_images", f"{info.get('data_id', 'unknown')}_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(_out, exist_ok=True)
 
-    logger.info("提取: bag=%s topics=%s [%d, %d]ns → %s", _bag, topics, start_ns, end_ns, _out)
+    logger.info("提取: %s topics=%s [%d,%d] → %s", _bag, topics, start_ns, end_ns, _out)
     try:
-        result = extract_images_from_bag(_bag, topics, start_ns, end_ns, _out, image_format)
+        result = _extract(_bag, topics, start_ns, end_ns, _out, fmt)
     except Exception as e:
         logger.error("提取失败: %s", e)
         return False
@@ -510,19 +396,13 @@ def run_one(
     logger.info("=" * 60)
 
     with open(os.path.join(_out, "_extraction_meta.json"), "w", encoding="utf-8") as f:
-        json.dump({
-            "bag_path": _bag, "bag_info": info, "topics": topics,
-            "start_ts_ns": start_ns, "end_ts_ns": end_ns,
-            "result_counts": result, "total_frames": total,
-        }, f, ensure_ascii=False, indent=2)
+        json.dump({"bag_path": _bag, "bag_info": info, "topics": topics,
+                   "start_ts_ns": start_ns, "end_ts_ns": end_ns,
+                   "result_counts": result, "total_frames": total}, f, ensure_ascii=False, indent=2)
     return True
 
 
-def run_csv(
-    csv_path: str, csv_mode: str,
-    topics: List[str], output_base: Optional[str],
-    image_format: str, access_token: str, oss_mount_map: str,
-):
+def _run_csv(csv_path, csv_mode, topics, output_base, fmt, token, oss_map):
     if not os.path.exists(csv_path):
         logger.error("CSV 不存在: %s", csv_path)
         sys.exit(1)
@@ -533,100 +413,58 @@ def run_csv(
             if not row or not row[0].strip():
                 continue
             if i == 0:
-                # 跳过表头
                 try:
                     int(row[1].strip())
                 except (ValueError, IndexError):
                     continue
             if len(row) < 3:
-                logger.warning("第 %d 行不足3列，跳过", i + 1)
+                logger.warning("第 %d 行不足3列", i + 1)
                 continue
-            tasks.append({
-                "col1": row[0].strip(),
-                "start_ts": row[1].strip(),
-                "end_ts": row[2].strip(),
-            })
+            tasks.append({"col1": row[0].strip(), "start_ts": row[1].strip(), "end_ts": row[2].strip()})
 
     if not tasks:
         logger.error("CSV 无有效任务")
         sys.exit(1)
 
     logger.info("CSV: %d 条任务", len(tasks))
-    ok, fail = 0, 0
-
+    ok = fail = 0
     for i, t in enumerate(tasks, 1):
         logger.info("\n" + "=" * 60)
-        logger.info("[%d/%d] %s  [%s, %s]", i, len(tasks), t["col1"], t["start_ts"], t["end_ts"])
-
-        # csv_mode=id → col1 是 bag_id; csv_mode=path → col1 是 bag_path
-        bag_id = t["col1"] if csv_mode == "id" else None
-        bag_path = t["col1"] if csv_mode == "path" else None
-
-        # 输出: output_base/bag_id/
-        task_out = os.path.join(output_base, t["col1"]) if output_base else None
-
-        if run_one(bag_id, bag_path, t["start_ts"], t["end_ts"],
-                    topics, task_out, image_format, access_token, oss_mount_map):
+        logger.info("[%d/%d] %s [%s,%s]", i, len(tasks), t["col1"], t["start_ts"], t["end_ts"])
+        bid = t["col1"] if csv_mode == "id" else None
+        bpath = t["col1"] if csv_mode == "path" else None
+        tout = os.path.join(output_base, t["col1"]) if output_base else None
+        if _run_one(bid, bpath, t["start_ts"], t["end_ts"], topics, tout, fmt, token, oss_map):
             ok += 1
         else:
             fail += 1
 
     logger.info("\n" + "#" * 60)
-    logger.info("全部完成: 成功 %d / 失败 %d / 共 %d", ok, fail, len(tasks))
+    logger.info("完成: 成功 %d / 失败 %d / 共 %d", ok, fail, len(tasks))
     logger.info("#" * 60)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  6. CLI
+#  CLI
 # ═══════════════════════════════════════════════════════════════════════
 
 def main():
-    p = argparse.ArgumentParser(
-        description="从 SQL 查询结果提取 Rosbag 图片帧（独立版）",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  python extract_images.py --bag_id 13qCIWDN --start_ts 1773270382 --end_ts 1773270389
-  python extract_images.py --bag_path /mnt/.../bag --start_ts 1773270382 --end_ts 1773270389
-  python extract_images.py --csv tasks.csv --output_dir /data/output
-  python extract_images.py --csv tasks.csv --cam_names fw120 --output_dir /data/output
-        """,
-    )
-
-    # 输入
+    p = argparse.ArgumentParser(description="从 SQL 查询结果提取 Rosbag 图片帧", formatter_class=argparse.RawDescriptionHelpFormatter)
     inp = p.add_mutually_exclusive_group()
-    inp.add_argument("--csv", help="CSV 文件 (批量模式)")
+    inp.add_argument("--csv", help="CSV 文件 (批量)")
     inp.add_argument("--bag_id", help="bag_id (需 dm_sdk)")
     inp.add_argument("--bag_path", help="bag 本地路径 (无需 dm_sdk)")
-
-    p.add_argument("--csv_mode", choices=["id", "path"], default="id",
-                   help="CSV 第1列含义: id=bag_id (默认), path=bag_path")
-    p.add_argument("--start_ts", help="起始时间戳 (秒或纳秒)")
-    p.add_argument("--end_ts", help="结束时间戳 (秒或纳秒)")
-
-    # topic
-    p.add_argument("--topics", nargs="+", default=None,
-                   help="摄像头 topic，如 /gac/cam/fw120_encoded")
-    p.add_argument("--cam_names", nargs="+", default=None,
-                   help="摄像头短名: fw120 fw60 r50 fl99 等")
-
-    # 输出
-    p.add_argument("--output_dir", default=None,
-                   help="单条: 输出目录; CSV: 输出根目录 (每个bag一个子目录)")
+    p.add_argument("--csv_mode", choices=["id", "path"], default="id", help="CSV第1列: id或path")
+    p.add_argument("--start_ts", help="起始时间戳 (秒/纳秒自动识别)")
+    p.add_argument("--end_ts", help="结束时间戳 (秒/纳秒自动识别)")
+    p.add_argument("--topics", nargs="+", help="摄像头 topic")
+    p.add_argument("--cam_names", nargs="+", help="摄像头短名: fw120 fw60 r50 等")
+    p.add_argument("--output_dir", help="单条:输出目录 / CSV:输出根目录(每个bag子目录)")
     p.add_argument("--format", choices=["jpeg", "png"], default="jpeg")
-
-    # 环境配置
-    p.add_argument("--gsbag_sdk", default=DEFAULT_GSBAG_SDK, help="gsbag SDK 路径")
-    p.add_argument("--proto_base", default=DEFAULT_PROTO_BASE, help="proto 路径")
-    p.add_argument("--access_token", default=DEFAULT_DM_ACCESS_TOKEN, help="dm_sdk token")
-    p.add_argument("--oss_mount_map", default=DEFAULT_OSS_MOUNT_MAP, help="OSS 挂载映射")
-
     args = p.parse_args()
 
-    # ─── 环境自举 ───
-    _bootstrap_env(args.gsbag_sdk, args.proto_base)
+    _bootstrap()
 
-    # ─── 解析 topics ───
     topics = args.topics
     if not topics and args.cam_names:
         topics = [CAMERA_TOPIC_MAP[n] for n in args.cam_names if n in CAMERA_TOPIC_MAP]
@@ -636,23 +474,18 @@ def main():
     if not topics:
         topics = DEFAULT_TOPICS
 
-    # ─── 执行 ───
+    token = DM_ACCESS_TOKEN
+    oss_map = OSS_MOUNT_MAP
+
     if args.csv:
-        run_csv(
-            args.csv, args.csv_mode, topics, args.output_dir,
-            args.format, args.access_token, args.oss_mount_map,
-        )
+        _run_csv(args.csv, args.csv_mode, topics, args.output_dir, args.format, token, oss_map)
     else:
         if not args.bag_id and not args.bag_path:
             p.error("需要 --csv, --bag_id 或 --bag_path")
         if not args.start_ts or not args.end_ts:
             p.error("单条模式需要 --start_ts 和 --end_ts")
-        ok = run_one(
-            args.bag_id, args.bag_path,
-            args.start_ts, args.end_ts,
-            topics, args.output_dir,
-            args.format, args.access_token, args.oss_mount_map,
-        )
+        ok = _run_one(args.bag_id, args.bag_path, args.start_ts, args.end_ts,
+                       topics, args.output_dir, args.format, token, oss_map)
         sys.exit(0 if ok else 1)
 
 
