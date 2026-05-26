@@ -291,7 +291,7 @@ async def agent_query(req: AgentQueryRequest):
     logger.info("Agent query: %s | mode: %s | db: %s | batch_id: %s | limit: %s | page: %s",
                 req.question, query_mode, db_path, resolved_batch_id, req.result_limit, req.page)
     engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
-    result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit)
+    result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
 
     # 分页
     page = max(req.page, 1)
@@ -368,7 +368,7 @@ async def agent_query_stream(req: AgentQueryRequest):
             if engine.query_mode == "parquet":
                 result = await engine._query_parquet(sql, result_limit=req.result_limit)
             elif engine.is_dir:
-                result = await engine._query_batch(sql, result_limit=req.result_limit, db_limit=req.db_limit)
+                result = await engine._query_batch(sql, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
             else:
                 result = await engine._query_single(sql, result_limit=req.result_limit)
         except Exception as e:
@@ -417,7 +417,7 @@ async def execute_sql(req: ExecuteSQLRequest):
         if query_mode == "parquet":
             result = await engine._query_parquet(req.sql, result_limit=req.result_limit)
         elif engine.is_dir:
-            result = await engine._query_batch(req.sql, result_limit=req.result_limit, db_limit=req.db_limit)
+            result = await engine._query_batch(req.sql, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
         else:
             result = await engine._query_single(req.sql, result_limit=req.result_limit)
     except Exception as e:

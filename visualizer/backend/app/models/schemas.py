@@ -44,6 +44,7 @@ class AgentQueryRequest(BaseModel):
     result_limit: int = 100  # 单条 SQL 返回的最大行数
     page: int = 1  # 分页页码（从 1 开始）
     page_size: int = 50  # 每页行数
+    max_workers: int = 32  # 批量查询并发数
 
 
 class AgentQueryResponse(BaseModel):
@@ -68,3 +69,4 @@ class ExecuteSQLRequest(BaseModel):
     result_limit: int = 100
     page: int = 1
     page_size: int = 50
+    max_workers: int = 32

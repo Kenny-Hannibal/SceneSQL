@@ -226,13 +226,55 @@ class AgentEngine:
         columns: List[str] = []
         matched = 0
 
+        # 优化：SQLite 只读连接 + WAL 模式 + mmap
         def process_one(db_file: str):
             db_path = os.path.join(self.db_path, db_file)
-            return self._execute_single(sql, db_path, db_file, resolver)
+            conn = None
+            try:
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                conn.row_factory = sqlite3.Row
+                # 优化：禁用 journal + 加大 cache 加速只读查询
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+                conn.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+                cursor = conn.execute(sql)
+                rows = cursor.fetchall()
+                if not rows:
+                    conn.close()
+                    return []
+
+                data_id = db_file.replace(".db", "")
+                bag_id = data_id
+                bag_path = ""
+                try:
+                    info = resolver.resolve(data_id)
+                    bag_id = info.origin_bag_id or data_id
+                    bag_path = info.local_path or info.oss_path or ""
+                except Exception as exc:
+                    logger.debug("Resolver failed for %s: %s", data_id, exc)
+
+                result = []
+                for row in rows:
+                    d = dict(row)
+                    d["bag_id"] = bag_id
+                    d["db_file"] = db_file
+                    d["bag_path"] = bag_path
+                    result.append(d)
+                conn.close()
+                return result
+            except Exception as exc:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                logger.warning("SQL execution failed on %s: %s", db_file, exc)
+                return [{"_error": str(exc), "db_file": db_file}]
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [loop.run_in_executor(executor, process_one, f) for f in db_files]
-            for rows in await asyncio.gather(*futures):
+            for coro in asyncio.as_completed(futures):
+                rows = await coro
                 for row in rows:
                     if "_error" in row:
                         errors.append(f"{row['db_file']}: {row['_error']}")
@@ -344,7 +386,7 @@ class AgentEngine:
             matched_dbs=1 if good_rows else 0,
         )
 
-    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30) -> AgentResult:
+    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
         # ── P0: 路由 + 分层注入 ──
         route = self.router.route(question)
 
@@ -382,7 +424,7 @@ class AgentEngine:
         if self.query_mode == "parquet":
             return await self._query_parquet(sql, result_limit=result_limit)
         elif self.is_dir:
-            return await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit)
+            return await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit, max_workers=max_workers)
         else:
             return await self._query_single(sql, result_limit=result_limit)
 
