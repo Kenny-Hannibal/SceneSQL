@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 GSBAG_SDK = "/root/data/text2sql/three_party/gsbag_x86_Release_4.2.18_20260227_Linux"
 PROTO_BASE = "/root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
 OSS_MOUNT_MAP = "gacrnd-oss/gac_liulian:/mnt/gacrnd-oss/gac_liulian,gacrnd-ali-collect-t68-thor:/mnt/gacrnd-ali-collect-t68-thor"
-DM_ACCESS_TOKEN = ""  # bag_id 模式必填，bag_path 模式留空即可
+DM_ACCESS_TOKEN = os.getenv("DM_ACCESS_TOKEN", "")  # 优先读环境变量，否则在此填入
 
 # LD_LIBRARY_PATH 需要的额外目录（按实际环境增减）
 # 常见需要加入的: libpython3.x.so 所在目录, libgacbag_*.so 所在目录
@@ -60,7 +60,10 @@ DEFAULT_TOPICS = ["/gac/cam/fw120_encoded"]
 # ═══════════════════════════════════════════════════════════════════════
 
 def _bootstrap():
+    global DM_ACCESS_TOKEN
     if os.getenv("__EXTRACT_ENV_READY") == "1":
+        # exec 后从 os.environ 恢复
+        DM_ACCESS_TOKEN = os.getenv("DM_ACCESS_TOKEN", DM_ACCESS_TOKEN)
         # proto sys.path
         if PROTO_BASE and os.path.isdir(PROTO_BASE):
             if PROTO_BASE not in sys.path:
@@ -96,6 +99,7 @@ def _bootstrap():
 
     os.environ["LD_LIBRARY_PATH"] = ld
     os.environ["GSBAG_SDK"] = GSBAG_SDK
+    os.environ["DM_ACCESS_TOKEN"] = DM_ACCESS_TOKEN
     os.environ["__EXTRACT_ENV_READY"] = "1"
 
     if changed:
