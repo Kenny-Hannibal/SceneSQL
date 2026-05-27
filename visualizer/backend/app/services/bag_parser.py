@@ -7,12 +7,13 @@ from typing import List, Dict, Optional
 from app.core.config import settings
 from app.core.exceptions import BagNotFoundException
 
-# Ensure proto paths are available (absolute path from project root parent)
-_PROTO_BASE = settings.PROJECT_ROOT.parent / "data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
-sys.path.append(str(_PROTO_BASE))
-sys.path.append(str(_PROTO_BASE / "j6"))
-
-from gsbag import gsbag_reader
+# gsbag SDK — 可选依赖（本机无 gsbag 时优雅降级）
+try:
+    from gsbag import gsbag_reader
+    _HAS_GSBAG = True
+except ImportError:
+    gsbag_reader = None
+    _HAS_GSBAG = False
 
 logger = logging.getLogger(__name__)
 

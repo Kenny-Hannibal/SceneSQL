@@ -15,13 +15,20 @@ PROJECT_ROOT = str(settings.PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# Ensure proto paths are available (absolute path from project root parent)
-_PROTO_BASE = settings.PROJECT_ROOT.parent / "data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.3"
-sys.path.append(str(_PROTO_BASE))
-sys.path.append(str(_PROTO_BASE / "j6"))
+# gsbag SDK — 可选依赖（本机无 gsbag 时优雅降级）
+try:
+    from gsbag import gsbag_reader
+    _HAS_GSBAG = True
+except ImportError:
+    gsbag_reader = None
+    _HAS_GSBAG = False
 
-from gsbag import gsbag_reader
-from j6.image_encode import boleidl_pb2 as image_encode_boleidl_pb2
+try:
+    from j6.image_encode import boleidl_pb2 as image_encode_boleidl_pb2
+    _HAS_PROTO = True
+except ImportError:
+    image_encode_boleidl_pb2 = None
+    _HAS_PROTO = False
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +241,8 @@ def extract_topic_to_mp4(
     logger.info("[%s] Video config: input_fps=%d output_fps=%d crf=%d preset=%s", task_id, input_fps, output_fps, crf, preset)
 
     try:
+        if not _HAS_GSBAG:
+            raise RuntimeError("gsbag SDK not available (not installed on this machine)")
         reader = gsbag_reader.GsBagReader(bag_path)
         reader.set_topic_filter([topic])
     except Exception as exc:
