@@ -504,8 +504,8 @@ export default function AgentPanel() {
     try {
       const payload = {
         sql,
-        db_path: selectedDb || undefined,
-        batch_id: selectedBatch || undefined,
+        db_path: dbPath || undefined,
+        batch_id: batchId || undefined,
         query_mode: queryMode || undefined,
         db_limit: Number(dbLimit) || 30,
         result_limit: Number(resultLimit) || 100,
