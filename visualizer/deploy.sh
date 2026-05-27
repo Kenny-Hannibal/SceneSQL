@@ -1,8 +1,17 @@
 #!/bin/bash
 # One-click deployment script for Rosbag Visualizer
 # Builds frontend and starts backend (with embedded static serving)
+#
+# Usage:
+#   ./deploy.sh          # 正常部署（如果服务已运行则跳过）
+#   ./deploy.sh --force  # 强制重启（先 kill 再部署）
 
 set -e
+
+FORCE_RESTART=false
+if [ "$1" = "--force" ] || [ "$1" = "-f" ]; then
+    FORCE_RESTART=true
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -60,13 +69,57 @@ npm run build
 cd "$SCRIPT_DIR"
 
 # ============================================
-# 4. Stop existing backend if any
+# 4. Check existing backend — don't restart if already running
 # ============================================
-EXISTING_PID=$(pgrep -f "uvicorn backend.app.main:app" || true)
+EXISTING_PID=$(pgrep -f "uvicorn backend.app.main:app" 2>/dev/null || true)
 if [ -n "$EXISTING_PID" ]; then
-    echo "[INFO] Stopping existing backend (PID: $EXISTING_PID)..."
-    kill "$EXISTING_PID" 2>/dev/null || true
-    sleep 2
+    # 验证进程是否真的存活
+    if kill -0 "$EXISTING_PID" 2>/dev/null; then
+        if [ "$FORCE_RESTART" = true ]; then
+            # --force 模式：直接 kill 现有进程，继续部署
+            echo "[INFO] --force flag set. Stopping existing backend (PID $EXISTING_PID)..."
+            kill "$EXISTING_PID" 2>/dev/null || true
+            sleep 2
+            if kill -0 "$EXISTING_PID" 2>/dev/null; then
+                echo "[WARNING] Process $EXISTING_PID still alive after SIGTERM, sending SIGKILL..."
+                kill -9 "$EXISTING_PID" 2>/dev/null || true
+                sleep 1
+            fi
+            echo "[INFO] Existing backend stopped. Proceeding with redeployment..."
+        else
+            # 正常模式：检查健康状态，健康则跳过
+            if curl -s --max-time 3 http://localhost:30001/health 2>/dev/null | grep -q '"status":"ok"'; then
+                echo ""
+                echo "=========================================="
+                echo "  ⚠️  Backend Already Running"
+                echo "=========================================="
+                echo ""
+                echo "  Backend PID:      $EXISTING_PID"
+                echo "  Visualizer UI:    http://localhost:30001"
+                echo "  Health Check:     http://localhost:30001/health"
+                echo "  Log file:         /tmp/rosbag_visualizer.log"
+                echo ""
+                echo "  To stop:          kill $EXISTING_PID"
+                echo "  To force restart: $0 --force"
+                echo ""
+                echo "  Skipping deployment — service is already healthy."
+                echo "=========================================="
+                exit 0
+            else
+                echo "[WARNING] Process $EXISTING_PID exists but health check failed. Killing and restarting..."
+                kill "$EXISTING_PID" 2>/dev/null || true
+                sleep 2
+                # 确保进程已退出
+                if kill -0 "$EXISTING_PID" 2>/dev/null; then
+                    echo "[WARNING] Process $EXISTING_PID still alive, sending SIGKILL..."
+                    kill -9 "$EXISTING_PID" 2>/dev/null || true
+                    sleep 1
+                fi
+            fi
+        fi
+    else
+        echo "[INFO] Stale PID $EXISTING_PID found (process dead). Cleaning up..."
+    fi
 fi
 
 # ============================================
