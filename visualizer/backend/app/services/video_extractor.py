@@ -14,6 +14,10 @@ from app.core.exceptions import ExtractionFailedException
 PROJECT_ROOT = str(settings.PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+# j6 protobuf modules need both scripts/proto (for j6.image_encode) and scripts/proto/j6 (for Comm submodule)
+for proto_path in [os.path.join(PROJECT_ROOT, "scripts/proto"), os.path.join(PROJECT_ROOT, "scripts/proto/j6")]:
+    if proto_path not in sys.path:
+        sys.path.insert(0, proto_path)
 
 # gsbag SDK — 可选依赖（本机无 gsbag 时优雅降级）
 try:
@@ -41,7 +45,7 @@ os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
 # ── Video configuration loader ──
 _DEFAULT_VIDEO_CONFIG = {
     "input_fps": 10,
-    "output_fps": 10,
+    "output_fps": None,  # None = 自动跟随 input_fps
     "crf": 23,
     "preset": "fast",
     "topic_fps_overrides": {},
@@ -131,6 +135,25 @@ def _get_bag_time_range(bag_path: str):
         return None, None
 
 
+def _get_topic_fps(bag_path: str, topic: str) -> Optional[float]:
+    """从 metadata.yaml 读取指定 topic 的帧率（message_freq）。"""
+    import yaml
+    metadata_path = os.path.join(bag_path, "metadata.yaml")
+    if not os.path.exists(metadata_path):
+        return None
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            meta = yaml.safe_load(f)
+        info = meta.get("gacbag_bagfile_information", {})
+        for t in info.get("topics_with_message_count", []):
+            tm = t.get("topic_metadata", {})
+            if tm.get("name") == topic:
+                return float(t.get("message_freq", 0))
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_bag_path(bag_path: str, task_id: str) -> str:
     """确保 bag_path 是本地可访问路径。如果是 OSS 路径，尝试下载到临时目录。"""
     # 已经是本地绝对路径
@@ -195,6 +218,7 @@ def extract_topic_to_mp4(
     task_id: str,
     start_ts: Optional[int] = None,
     end_ts: Optional[int] = None,
+    fps: Optional[float] = None,
 ) -> str:
     """Extract HEVC frames from a bag topic and transcode to H.264 MP4.
 
@@ -203,7 +227,7 @@ def extract_topic_to_mp4(
       - start_ts/end_ts allow extracting a time slice (nanoseconds).
       - Single-pass bag read: frames are buffered in memory (HEVC payloads only).
       - Frames are piped directly into ffmpeg to skip temp-file I/O.
-      - Input framerate -r 10 is set so ffmpeg treats raw HEVC correctly.
+      - Input framerate from bag metadata (message_freq), fallback to config.
 
     Time range clamping:
       - If start_ts < bag start → clamp to bag start
@@ -232,13 +256,24 @@ def extract_topic_to_mp4(
     )
     _update_task(task_id, status="processing", progress=0.0, message="Opening bag...")
 
-    # 加载视频配置，动态调整帧率和质量
+    # 帧率优先级：外部传入 > bag metadata > video_config.yaml > 默认 10
     config = _load_video_config()
-    input_fps = _get_fps_for_topic(topic, config)
-    output_fps = int(config.get("output_fps", input_fps))
+    meta_fps = _get_topic_fps(bag_path, topic)
+    if fps is not None and fps > 0:
+        input_fps = fps
+        fps_source = "request"
+    elif meta_fps is not None and meta_fps > 0:
+        input_fps = meta_fps
+        fps_source = "metadata"
+    else:
+        input_fps = _get_fps_for_topic(topic, config)
+        fps_source = "config_fallback"
+    # 输出帧率：配置显式指定 > 跟随 input_fps
+    output_fps_cfg = config.get("output_fps")
+    output_fps = int(output_fps_cfg if output_fps_cfg is not None else input_fps)
     crf = int(config.get("crf", 23))
     preset = str(config.get("preset", "fast"))
-    logger.info("[%s] Video config: input_fps=%d output_fps=%d crf=%d preset=%s", task_id, input_fps, output_fps, crf, preset)
+    logger.info("[%s] FPS source=%s input_fps=%.2f output_fps=%d crf=%d preset=%s", task_id, fps_source, input_fps, output_fps, crf, preset)
 
     try:
         if not _HAS_GSBAG:

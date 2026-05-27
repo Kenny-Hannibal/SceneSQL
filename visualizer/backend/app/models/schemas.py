@@ -17,6 +17,7 @@ class ExtractRequest(BaseModel):
     output_filename: Optional[str] = None
     start_ts: Optional[int] = None   # nanoseconds
     end_ts: Optional[int] = None     # nanoseconds
+    fps: Optional[float] = None      # topic 帧率（从 metadata 读取，不传则自动检测）
 
 
 class ExtractResponse(BaseModel):

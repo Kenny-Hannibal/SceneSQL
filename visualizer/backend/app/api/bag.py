@@ -29,7 +29,7 @@ async def bag_info_stream(bag_path: str):
         try:
             yield f"data: {json.dumps({'stage': 'parsing_topics', 'message': '正在解析 bag topics...'})}\n\n"
             info = await asyncio.get_event_loop().run_in_executor(None, get_bag_info, bag_path)
-            yield f"data: {json.dumps({'stage': 'completed', 'bag_info': info.dict()})}\n\n"
+            yield f"data: {json.dumps({'stage': 'completed', 'bag_info': info})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
 

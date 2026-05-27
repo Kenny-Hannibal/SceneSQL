@@ -126,10 +126,12 @@ class AgentEngine:
 
     def _validate_sql(self, sql: str) -> Optional[str]:
         upper = sql.upper().strip()
-        if not upper.startswith("SELECT"):
-            return "只允许 SELECT 查询"
-        if " FROM " not in upper and "\nFROM " not in upper:
-            return "SQL 不完整，缺少 FROM 子句"
+        if not upper.startswith("SELECT") and not upper.startswith("WITH"):
+            return "只允许 SELECT / WITH (CTE) 查询"
+        has_select = "SELECT" in upper
+        has_from = " FROM " in upper or "\nFROM " in upper
+        if not (has_select and has_from):
+            return "SQL 不完整，缺少 SELECT 或 FROM 子句"
         forbidden = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE"]
         for kw in forbidden:
             if kw in upper:
@@ -155,7 +157,7 @@ class AgentEngine:
         return re.sub(r';\s*$', f' LIMIT {limit};', cleaned)
 
     def _execute_single(self, sql: str, db_path: str, db_file: str, resolver) -> List[Dict[str, Any]]:
-        """Execute SQL on a single DB and return rows with bag_id & bag_path appended."""
+        """Execute SQL on a single DB and return rows with bag_id appended."""
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
@@ -165,14 +167,12 @@ class AgentEngine:
                 conn.close()
                 return []
 
-            # Resolve bag_id & local path
+            # Resolve bag_id
             data_id = db_file.replace(".db", "")
             bag_id = data_id
-            bag_path = ""
             try:
                 info = resolver.resolve(data_id)
                 bag_id = info.origin_bag_id or data_id
-                bag_path = info.local_path or info.oss_path or ""
             except Exception as exc:
                 logger.debug("Resolver failed for %s: %s", data_id, exc)
 
@@ -180,8 +180,6 @@ class AgentEngine:
             for row in rows:
                 d = dict(row)
                 d["bag_id"] = bag_id
-                d["db_file"] = db_file
-                d["bag_path"] = bag_path
                 result.append(d)
             conn.close()
             return result
@@ -245,11 +243,9 @@ class AgentEngine:
 
                 data_id = db_file.replace(".db", "")
                 bag_id = data_id
-                bag_path = ""
                 try:
                     info = resolver.resolve(data_id)
                     bag_id = info.origin_bag_id or data_id
-                    bag_path = info.local_path or info.oss_path or ""
                 except Exception as exc:
                     logger.debug("Resolver failed for %s: %s", data_id, exc)
 
@@ -257,8 +253,6 @@ class AgentEngine:
                 for row in rows:
                     d = dict(row)
                     d["bag_id"] = bag_id
-                    d["db_file"] = db_file
-                    d["bag_path"] = bag_path
                     result.append(d)
                 conn.close()
                 return result
@@ -302,16 +296,31 @@ class AgentEngine:
 
     @staticmethod
     def _ensure_bag_id_in_select(sql: str) -> str:
-        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * 和纯聚合查询）。"""
+        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * / GROUP BY / 聚合查询）。"""
         upper = sql.upper()
         if "BAG_ID" in upper or "SELECT *" in upper:
             return sql
-        # 纯聚合查询（无 GROUP BY 但有聚合函数）不添加 bag_id，避免语法错误
-        has_aggregate = any(agg in upper for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN("])
-        has_group_by = "GROUP BY" in upper
-        if has_aggregate and not has_group_by:
+        # GROUP BY 查询不能安全注入 bag_id（非聚合列会报错）
+        if "GROUP BY" in upper:
             return sql
-        return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\1bag_id, ", sql)
+        # 纯聚合查询也不注入
+        has_aggregate = any(agg in upper for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN("])
+        if has_aggregate:
+            return sql
+        # SELECT 开头：直接注入
+        if upper.startswith("SELECT"):
+            return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\g<1>bag_id, ", sql)
+        # WITH (CTE) 开头：找到最外层 SELECT 注入
+        if upper.startswith("WITH"):
+            matches = list(re.finditer(r"(?i)(?<!\w)SELECT(?=\s)", sql))
+            if matches:
+                last = matches[-1]
+                pos = last.start()
+                after = sql[pos + 6:].lstrip()
+                if after.upper().startswith("DISTINCT"):
+                    return sql[:pos] + "SELECT DISTINCT bag_id, " + after[8:].lstrip()
+                return sql[:pos] + "SELECT bag_id, " + after
+        return sql
 
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
         """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
@@ -343,12 +352,11 @@ class AgentEngine:
             except Exception as exc:
                 logger.warning("Resolver init failed, bag_path will be empty: %s", exc)
 
-        # 注入 bag_id / bag_path / db_file 到每行
+        # 保留 bag_id（如果 SQL 已返回），不再主动注入 bag_path / db_file
         for r in good_rows:
-            bid = r.get("bag_id", "")
-            r["bag_id"] = bid
-            r["bag_path"] = bag_path_map.get(bid, "")
-            r["db_file"] = f"{bid}.db" if bid else ""
+            if "bag_id" in r:
+                bid = r.get("bag_id", "")
+                r["bag_id"] = bid
 
         columns = list(good_rows[0].keys()) if good_rows else []
 

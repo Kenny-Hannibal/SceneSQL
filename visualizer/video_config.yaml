@@ -4,10 +4,13 @@
 
 # Default input frame rate (frames per second from bag)
 # Lower values = faster extraction, smaller file; higher = smoother but slower
+# 实际优先使用 bag metadata 中每个 topic 的 message_freq，此值仅作为 fallback
 input_fps: 10
 
 # Default output frame rate
-output_fps: 10
+# 留空或删除表示自动跟随 input_fps（推荐，保持与 bag 原始帧率一致）
+# 若显式设置，则所有 topic 统一输出为此帧率
+# output_fps: 10
 
 # H.264 encoding quality (lower = better quality, larger file)
 # Range: 0 (lossless) to 51 (worst). Recommended: 18-28

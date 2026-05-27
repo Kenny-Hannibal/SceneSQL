@@ -44,6 +44,8 @@ fi
 export GSBAG_SDK="${PROJECT_ROOT}/three_party/gsbag_x86_Release_4.2.18_20260227_Linux"
 export PYTHON_LIBDIR=$($PYTHON -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
 export LD_LIBRARY_PATH=${GSBAG_SDK}/lib:${PYTHON_LIBDIR}:${LD_LIBRARY_PATH}
+# .venv/lib contains libgacbag_storage.so.4 etc (gsbag pip package libs)
+export LD_LIBRARY_PATH=${PROJECT_ROOT}/.venv/lib:${LD_LIBRARY_PATH}
 export HOBOT_COM_SDK=${GSBAG_SDK}/external/platform_sdk
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${HOBOT_COM_SDK}/lib/gacrnd:${HOBOT_COM_SDK}/lib/third_party
 

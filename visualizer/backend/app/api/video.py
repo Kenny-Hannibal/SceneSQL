@@ -25,6 +25,7 @@ def extract_video(req: ExtractRequest, background_tasks: BackgroundTasks):
         task_id,
         start_ts=req.start_ts,
         end_ts=req.end_ts,
+        fps=req.fps,
     )
     return ExtractResponse(
         task_id=task_id,

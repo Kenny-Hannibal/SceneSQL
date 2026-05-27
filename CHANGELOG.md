@@ -4,6 +4,53 @@
 
 ---
 
+## [2026-05-27] 帧率动态化 + 视频提取修复 + SQL 校验增强
+
+### 变更内容
+
+#### 1. 帧率动态化（核心功能）
+- 后端新增 `_get_topic_fps()` 从 `metadata.yaml` 读取每个 topic 的 `message_freq`
+- `extract_topic_to_mp4` 帧率优先级：前端传入 > bag metadata > `video_config.yaml` > 默认 10
+- `output_fps` 默认自动跟随 `input_fps`（`video_config.yaml` 中 `output_fps` 已注释掉）
+- 前端下拉框显示 topic 名 + 帧率，选择后标签旁实时显示 fps
+- 前端 `handleExtractVideo` 把 `fps` 传给 `/api/video/extract`
+
+#### 2. gsbag SDK / 视频提取修复
+- `deploy.sh` 重新添加 `.venv/lib` 到 `LD_LIBRARY_PATH`（修复 `libgacbag_storage.so.4` 找不到）
+- `video_extractor.py` 添加 `scripts/proto` 和 `scripts/proto/j6` 到 `sys.path`，修复 protobuf 导入失败导致的 "No frames found"
+- `bag.py` 修复 `info.dict()` → `info`（SSE 流返回 dict 而非 Pydantic 模型）
+
+#### 3. SQL 校验与查询增强
+- `_validate_sql` 支持 `WITH` 开头的 CTE 查询
+- `_clean_sql` 修复多行 CTE 截断 bug（保留从 `SELECT`/`WITH` 到末尾的完整 SQL）
+- `_ensure_bag_id_in_select` 支持 `WITH` 开头 SQL，自动找到最外层 SELECT 注入 `bag_id`
+- 后端不再主动注入 `bag_path` 和 `db_file` 到结果中
+
+#### 4. 前端交互优化
+- **播包可视化按钮左移**：表格 Action 列移到最左侧
+- **表格双滚动条**：上方和下方都有水平滚动条，scrollLeft 双向同步
+- **视频提取进度条**：点击"确认提取"后弹窗保持打开，显示实时进度百分比和阶段
+- **bag 读取错误提前报**：`get_bag_info` 失败时弹窗直接显示红色错误框，不再让用户先填 topic 再报错
+
+### 涉及文件
+- `agent/backend/app/services/agent_engine.py`
+- `visualizer/backend/app/api/bag.py`
+- `visualizer/backend/app/api/video.py`
+- `visualizer/backend/app/models/schemas.py`
+- `visualizer/backend/app/services/video_extractor.py`
+- `visualizer/deploy.sh`
+- `visualizer/frontend/src/components/AgentPanel.jsx`
+- `visualizer/video_config.yaml`
+
+### 测试验证
+- ✅ gsbag SDK 正常加载，`get_bag_info` 返回 camera topics
+- ✅ protobuf 导入成功，帧数据反序列化正常（`data_len=~230KB`）
+- ✅ 低帧率 topic（9.86fps）和高帧率 topic（27.63fps）均正确提取
+- ✅ 后端 build/部署通过
+- ✅ 前端 build 编译通过
+
+---
+
 ## [2026-05-27] 客户端分页重构
 
 **Commit**: `3380ddf` — feat: 截断提示；`ca88f13` — refactor: 分页改为客户端缓存模式
