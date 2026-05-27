@@ -899,7 +899,7 @@ export default function AgentPanel() {
                   />
                 </div>
               )
-            )
+            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
                 onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
