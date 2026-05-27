@@ -927,7 +927,7 @@ export default function AgentPanel() {
           {hasResults && (
             <div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                Results ({totalRows} rows total, showing page {page})
+                Results ({totalRows} rows{totalRows >= resultLimit ? ' — may be truncated, increase result_limit' : ''}, showing page {page})
                 {result?.scanned_dbs > 0 && (
                   <span style={{ marginLeft: 12, color: '#999' }}>
                     扫描 {result.scanned_dbs} 个 DB，命中 {result.matched_dbs} 个
