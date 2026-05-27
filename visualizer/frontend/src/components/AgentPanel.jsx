@@ -271,22 +271,19 @@ export default function AgentPanel() {
     return payload;
   };
 
-  // 执行 SQL 编辑器中的 SQL
-  const handleExecuteSql = async () => {
+  // 执行 SQL 编辑器中的 SQL（支持传入指定页码，用于翻页）
+  const handleExecuteSql = async (targetPage) => {
     const sql = sqlEditor.trim();
     if (!sql) return;
     setLoading(true);
     setError('');
-    setResult(null);
-    clearProgress();
-    setVideoRows([]);
 
     try {
       const payload = {
         sql,
         db_limit: Number(dbLimit) || 30,
         result_limit: Number(resultLimit) || 100,
-        page: page,
+        page: targetPage || page,
         page_size: pageSize,
       };
       if (dbPath.trim()) {
@@ -307,6 +304,8 @@ export default function AgentPanel() {
       }
       const data = await res.json();
       setResult(data);
+      if (data.total_rows !== undefined) setTotalRows(data.total_rows);
+      if (data.page !== undefined) setPage(data.page);
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -325,6 +324,7 @@ export default function AgentPanel() {
     setResult(null);
     clearProgress();
     setVideoRows([]);
+    setPage(1);  // 新查询重置到第 1 页
 
     if (sqlEditMode === 'preview') {
       // 仅生成 SQL，填入编辑器
@@ -388,6 +388,7 @@ export default function AgentPanel() {
     setResult(null);
     clearProgress();
     setVideoRows([]);
+    setPage(1);  // 新查询重置到第 1 页
 
     if (sqlEditMode === 'preview') {
       // Stream 模式下 preview 也走 generate-sql
@@ -975,7 +976,7 @@ export default function AgentPanel() {
                   page={page}
                   pageSize={pageSize}
                   totalRows={totalRows}
-                  onPageChange={(p) => { setPage(p); handleSubmit(); }}
+                  onPageChange={(p) => handleExecuteSql(p)}
                 />
               )}
             </div>
