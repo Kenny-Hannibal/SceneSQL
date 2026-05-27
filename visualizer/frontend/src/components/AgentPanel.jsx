@@ -3,6 +3,168 @@ import SqlEditor from './SqlEditor';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+// ============================================
+// 分页控件组件
+// ============================================
+function PaginationControls({ page, pageSize, totalRows, onPageChange }) {
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const [jumpInput, setJumpInput] = useState('');
+  const [showJump, setShowJump] = useState(false);
+  const jumpRef = useRef(null);
+
+  // 生成页码列表：首页 ... 当前页附近 ... 尾页
+  function getPageNumbers() {
+    const pages = [];
+    const delta = 2; // 当前页前后各显示几页
+
+    // 始终显示第一页
+    pages.push(1);
+
+    const rangeStart = Math.max(2, page - delta);
+    const rangeEnd = Math.min(totalPages - 1, page + delta);
+
+    // 左侧省略号
+    if (rangeStart > 2) {
+      pages.push('left-ellipsis');
+    }
+
+    // 中间页码
+    for (let i = rangeStart; i <= rangeEnd; i++) {
+      pages.push(i);
+    }
+
+    // 右侧省略号
+    if (rangeEnd < totalPages - 1) {
+      pages.push('right-ellipsis');
+    }
+
+    // 始终显示最后一页（如果总页数 > 1）
+    if (totalPages > 1) {
+      pages.push(totalPages);
+    }
+
+    return pages;
+  }
+
+  // 点击省略号跳转
+  const handleJumpSubmit = () => {
+    const num = parseInt(jumpInput, 10);
+    if (isNaN(num) || num < 1) {
+      onPageChange(1);
+    } else if (num > totalPages) {
+      onPageChange(totalPages);
+    } else {
+      onPageChange(num);
+    }
+    setJumpInput('');
+    setShowJump(false);
+  };
+
+  // 仅允许输入数字
+  const handleJumpInput = (e) => {
+    const val = e.target.value;
+    if (/^\d*$/.test(val)) {
+      setJumpInput(val);
+    }
+  };
+
+  // 省略号点击时显示输入框
+  const handleEllipsisClick = (side) => {
+    setShowJump(true);
+    // 预填：左侧省略号跳到当前页-5，右侧跳到当前页+5
+    if (side === 'left') {
+      setJumpInput(String(Math.max(1, page - 5)));
+    } else {
+      setJumpInput(String(Math.min(totalPages, page + 5)));
+    }
+    setTimeout(() => {
+      if (jumpRef.current) jumpRef.current.focus();
+    }, 50);
+  };
+
+  const pageNumbers = getPageNumbers();
+
+  const btnStyle = (active, disabled) => ({
+    minWidth: 32,
+    height: 32,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    border: active ? '1px solid #1890ff' : '1px solid #d9d9d9',
+    background: active ? '#1890ff' : (disabled ? '#f5f5f5' : '#fff'),
+    color: active ? '#fff' : (disabled ? '#bbb' : '#333'),
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13,
+    padding: '0 6px',
+    fontWeight: active ? 600 : 400,
+  });
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 13, flexWrap: 'wrap' }}>
+      {/* 上一页 */}
+      <button
+        disabled={page <= 1}
+        onClick={() => onPageChange(page - 1)}
+        style={btnStyle(false, page <= 1)}
+      >‹</button>
+
+      {/* 页码 */}
+      {pageNumbers.map((p, idx) => {
+        if (p === 'left-ellipsis' || p === 'right-ellipsis') {
+          return (
+            <span key={p} style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <button
+                onClick={() => handleEllipsisClick(p === 'left-ellipsis' ? 'left' : 'right')}
+                style={{
+                  minWidth: 32, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff',
+                  color: '#1890ff', cursor: 'pointer', fontSize: 13, padding: '0 6px',
+                }}
+                title="点击跳转到指定页"
+              >···</button>
+              {showJump && (
+                <input
+                  ref={jumpRef}
+                  type="text"
+                  value={jumpInput}
+                  onChange={handleJumpInput}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleJumpSubmit(); if (e.key === 'Escape') { setShowJump(false); setJumpInput(''); } }}
+                  onBlur={() => { if (jumpInput) handleJumpSubmit(); else setShowJump(false); }}
+                  placeholder="页码"
+                  style={{
+                    width: 50, height: 28, fontSize: 12, textAlign: 'center',
+                    borderRadius: 4, border: '1px solid #1890ff', marginLeft: 4, padding: '0 4px',
+                  }}
+                />
+              )}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            style={btnStyle(p === page, false)}
+          >{p}</button>
+        );
+      })}
+
+      {/* 下一页 */}
+      <button
+        disabled={page >= totalPages}
+        onClick={() => onPageChange(page + 1)}
+        style={btnStyle(false, page >= totalPages)}
+      >›</button>
+
+      {/* 总页数提示 */}
+      <span style={{ color: '#999', fontSize: 12, marginLeft: 8 }}>
+        共 {totalRows} 行 · 第 {page}/{totalPages} 页
+      </span>
+    </div>
+  );
+}
+
 export default function AgentPanel() {
   const [question, setQuestion] = useState('');
   const [dbPath, setDbPath] = useState('');
@@ -29,7 +191,7 @@ export default function AgentPanel() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(20);
   const [totalRows, setTotalRows] = useState(0);
 
   // Visualization modals
@@ -640,7 +802,7 @@ export default function AgentPanel() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <input
             type="number"
             value={dbLimit}
@@ -661,6 +823,21 @@ export default function AgentPanel() {
             title="单条 SQL 返回的最大行数"
             style={{ width: 100, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
           />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 13, color: '#666', whiteSpace: 'nowrap' }}>每页显示:</label>
+            <input
+              type="number"
+              value={pageSize}
+              min={5}
+              max={500}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (v >= 5 && v <= 500) { setPageSize(v); setPage(1); }
+              }}
+              title="每页显示行数 (5-500)"
+              style={{ width: 70, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
+            />
+          </div>
         </div>
 
         {/* 自然语言输入 + 提交按钮 */}
@@ -793,27 +970,13 @@ export default function AgentPanel() {
                 </table>
               </div>
               {/* Pagination controls */}
-              {totalRows > pageSize && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 12, fontSize: 13 }}>
-                  <button
-                    disabled={page <= 1}
-                    onClick={() => { setPage(page - 1); handleSubmit(); }}
-                    style={{ padding: '4px 12px', borderRadius: 4, border: '1px solid #d9d9d9', background: page <= 1 ? '#f5f5f5' : '#fff', cursor: page <= 1 ? 'not-allowed' : 'pointer' }}
-                  >上一页</button>
-                  <span style={{ color: '#666' }}>第 {page} / {Math.ceil(totalRows / pageSize)} 页</span>
-                  <button
-                    disabled={page >= Math.ceil(totalRows / pageSize)}
-                    onClick={() => { setPage(page + 1); handleSubmit(); }}
-                    style={{ padding: '4px 12px', borderRadius: 4, border: '1px solid #d9d9d9', background: page >= Math.ceil(totalRows / pageSize) ? '#f5f5f5' : '#fff', cursor: page >= Math.ceil(totalRows / pageSize) ? 'not-allowed' : 'pointer' }}
-                  >下一页</button>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                    style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 12 }}
-                  >
-                    {[20, 50, 100, 200].map((s) => <option key={s} value={s}>{s}/页</option>)}
-                  </select>
-                </div>
+              {totalRows > 0 && (
+                <PaginationControls
+                  page={page}
+                  pageSize={pageSize}
+                  totalRows={totalRows}
+                  onPageChange={(p) => { setPage(p); handleSubmit(); }}
+                />
               )}
             </div>
           )}

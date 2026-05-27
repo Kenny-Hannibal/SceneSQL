@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 
 /**
- * SqlEditor — 专业化 SQL 编辑器组件
+ * SqlEditor — 专业化 SQL 编辑器组件 (Light Theme)
  * 特性：语法高亮、行号、Tab 缩进、自动大写关键字、快捷键（Ctrl+Enter 执行）
  */
 
@@ -101,19 +101,19 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
       border: '1px solid #d9d9d9',
       borderRadius: 6,
       overflow: 'hidden',
-      background: '#1e1e1e',
+      background: '#fff',
     }}>
-      {/* CSS 样式 */}
+      {/* CSS 样式 — Light 主题 */}
       <style>{`
-        .sql-keyword { color: #569cd6; font-weight: 600; }
-        .sql-function { color: #dcdcaa; }
-        .sql-string { color: #ce9178; }
-        .sql-number { color: #b5cea8; }
-        .sql-comment { color: #6a9955; font-style: italic; }
-        .sql-operator { color: #d4d4d4; }
-        .sql-line-num { color: #858585; text-align: right; user-select: none; padding-right: 12px; }
+        .sql-keyword { color: #0033b3; font-weight: 600; }
+        .sql-function { color: #00627a; }
+        .sql-string { color: #067d17; }
+        .sql-number { color: #1750db; }
+        .sql-comment { color: #8c8c8c; font-style: italic; }
+        .sql-operator { color: #333; }
+        .sql-line-num { color: #999; text-align: right; user-select: none; padding-right: 12px; }
         .sql-editor-textarea {
-          background: transparent; color: transparent; caret-color: #aeafad;
+          background: transparent; color: transparent; caret-color: #333;
           position: absolute; top: 0; left: 0; width: 100%; height: 100%;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           font-size: 13px; line-height: 1.6; padding: 12px 12px 12px 0;
@@ -125,27 +125,27 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           font-size: 13px; line-height: 1.6; padding: 12px 12px 12px 0;
           white-space: pre; overflow: hidden; z-index: 1; pointer-events: none;
-          color: #d4d4d4;
+          color: #333;
         }
       `}</style>
 
       {/* 工具栏 */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '6px 12px', background: '#252526', borderBottom: '1px solid #3c3c3c',
+        padding: '6px 12px', background: '#fafafa', borderBottom: '1px solid #e8e8e8',
       }}>
-        <span style={{ fontSize: 12, color: '#ccc', fontWeight: 600 }}>SQL 编辑器</span>
+        <span style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>SQL 编辑器</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => { if (value) { navigator.clipboard.writeText(value); } }}
-            style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #555', background: 'transparent', color: '#aaa', cursor: 'pointer' }}
+            style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #d9d9d9', background: 'transparent', color: '#666', cursor: 'pointer' }}
             title="复制 SQL"
           >
             📋 复制
           </button>
           <button
             onClick={() => onChange('')}
-            style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #555', background: 'transparent', color: '#aaa', cursor: 'pointer' }}
+            style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #d9d9d9', background: 'transparent', color: '#666', cursor: 'pointer' }}
             title="清空"
           >
             ✕ 清空
@@ -155,7 +155,7 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
             disabled={disabled || !value?.trim()}
             style={{
               padding: '3px 12px', fontSize: 12, borderRadius: 3, border: 'none',
-              background: (disabled || !value?.trim()) ? '#555' : '#1890ff',
+              background: (disabled || !value?.trim()) ? '#d9d9d9' : '#1890ff',
               color: '#fff', cursor: (disabled || !value?.trim()) ? 'not-allowed' : 'pointer',
               fontWeight: 600,
             }}
@@ -171,8 +171,8 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         <div
           ref={lineNumbersRef}
           style={{
-            padding: '12px 0', minWidth: 44, background: '#1e1e1e',
-            borderRight: '1px solid #3c3c3c', overflow: 'hidden',
+            padding: '12px 0', minWidth: 44, background: '#fafafa',
+            borderRight: '1px solid #e8e8e8', overflow: 'hidden',
           }}
         >
           {Array.from({ length: lineCount }, (_, i) => (
@@ -206,7 +206,7 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
       {/* 状态栏 */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', padding: '3px 12px',
-        background: '#252526', borderTop: '1px solid #3c3c3c', fontSize: 11, color: '#858585',
+        background: '#fafafa', borderTop: '1px solid #e8e8e8', fontSize: 11, color: '#999',
       }}>
         <span>{lineCount} 行</span>
         <span>SQLite | UTF-8</span>
