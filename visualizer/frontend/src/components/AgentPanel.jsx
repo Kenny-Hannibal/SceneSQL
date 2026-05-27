@@ -189,10 +189,11 @@ export default function AgentPanel() {
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
 
-  // Pagination
+  // Pagination (client-side)
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalRows, setTotalRows] = useState(0);
+  const [allRows, setAllRows] = useState([]);  // 缓存全量查询结果，翻页不发请求
 
   // Visualization modals
   const [topicModalOpen, setTopicModalOpen] = useState(false);
@@ -252,14 +253,14 @@ export default function AgentPanel() {
     }
   }, [queryMode, batches]);
 
-  // 构建请求 payload
+  // 构建请求 payload（请求全量数据，翻页由前端完成）
   const buildPayload = () => {
     const payload = {
       question: question.trim(),
       db_limit: Number(dbLimit) || 30,
       result_limit: Number(resultLimit) || 100,
-      page: page,
-      page_size: pageSize,
+      page: 1,
+      page_size: Number(resultLimit) || 100,  // 取回全量数据，前端分页
     };
 
     if (dbPath.trim()) {
@@ -271,8 +272,8 @@ export default function AgentPanel() {
     return payload;
   };
 
-  // 执行 SQL 编辑器中的 SQL（支持传入指定页码，用于翻页）
-  const handleExecuteSql = async (targetPage) => {
+  // 执行 SQL 编辑器中的 SQL（取回全量数据，翻页由前端完成）
+  const handleExecuteSql = async () => {
     const sql = sqlEditor.trim();
     if (!sql) return;
     setLoading(true);
@@ -283,8 +284,8 @@ export default function AgentPanel() {
         sql,
         db_limit: Number(dbLimit) || 30,
         result_limit: Number(resultLimit) || 100,
-        page: targetPage || page,
-        page_size: pageSize,
+        page: 1,
+        page_size: Number(resultLimit) || 100,  // 取回全量数据
       };
       if (dbPath.trim()) {
         payload.db_path = dbPath.trim();
@@ -304,8 +305,9 @@ export default function AgentPanel() {
       }
       const data = await res.json();
       setResult(data);
-      if (data.total_rows !== undefined) setTotalRows(data.total_rows);
-      if (data.page !== undefined) setPage(data.page);
+      setAllRows(data.rows || []);
+      setTotalRows((data.rows || []).length);
+      setPage(1);  // 新查询重置到第 1 页
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -369,8 +371,9 @@ export default function AgentPanel() {
       const data = await res.json();
       setResult(data);
       setSqlEditor(data.sql || '');
-      if (data.total_rows !== undefined) setTotalRows(data.total_rows);
-      if (data.page !== undefined) setPage(data.page);
+      setAllRows(data.rows || []);
+      setTotalRows((data.rows || []).length);
+      setPage(1);
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -461,8 +464,9 @@ export default function AgentPanel() {
                   matched_dbs: data.matched_dbs,
                 });
                 setSqlEditor(data.sql || '');
-                if (data.total_rows !== undefined) setTotalRows(data.total_rows);
-                if (data.page !== undefined) setPage(data.page);
+                setAllRows(data.rows || []);
+                setTotalRows((data.rows || []).length);
+                setPage(1);
               } else {
                 addProgress(data.message || data.stage);
               }
@@ -658,7 +662,10 @@ export default function AgentPanel() {
     };
   }, [videoRows]);
 
-  const hasResults = result && result.rows && result.rows.length > 0;
+  const hasResults = allRows.length > 0;
+
+  // 客户端分页：从全量数据中切片当前页
+  const displayRows = allRows.slice((page - 1) * pageSize, page * pageSize);
 
   // Arrow 下载：调用 /execute-sql-arrow 获取二进制并下载
   const handleArrowDownload = async () => {
@@ -920,8 +927,8 @@ export default function AgentPanel() {
           {hasResults && (
             <div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                Results ({totalRows || result.rows.length} rows total, showing page {page})
-                {result.scanned_dbs > 0 && (
+                Results ({totalRows} rows total, showing page {page})
+                {result?.scanned_dbs > 0 && (
                   <span style={{ marginLeft: 12, color: '#999' }}>
                     扫描 {result.scanned_dbs} 个 DB，命中 {result.matched_dbs} 个
                   </span>
@@ -947,7 +954,7 @@ export default function AgentPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.rows.map((row, idx) => (
+                    {displayRows.map((row, idx) => (
                       <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
                         {columns.map((col) => (
                           <td key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px' }}>
@@ -970,19 +977,19 @@ export default function AgentPanel() {
                   </tbody>
                 </table>
               </div>
-              {/* Pagination controls */}
+              {/* Pagination controls — 纯前端分页，不发请求 */}
               {totalRows > 0 && (
                 <PaginationControls
                   page={page}
                   pageSize={pageSize}
                   totalRows={totalRows}
-                  onPageChange={(p) => handleExecuteSql(p)}
+                  onPageChange={(p) => setPage(p)}
                 />
               )}
             </div>
           )}
 
-          {result.rows && result.rows.length === 0 && !error && (
+          {allRows.length === 0 && result && !error && (
             <div style={{ color: '#666', fontSize: 14 }}>No rows returned.</div>
           )}
         </div>
