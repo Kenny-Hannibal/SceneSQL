@@ -189,6 +189,9 @@ export default function AgentPanel() {
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
 
+  // Extraction progress modal (replaces the bottom panel)
+  const [extractModalOpen, setExtractModalOpen] = useState(false);
+
   // Pagination (client-side)
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -198,15 +201,9 @@ export default function AgentPanel() {
   // Visualization modals
   const [topicModalOpen, setTopicModalOpen] = useState(false);
   const [topicModalData, setTopicModalData] = useState(null);
-  const [selectedTopic, setSelectedTopic] = useState('');
+  const [selectedTopic, setSelectedTopic] = useState(() => localStorage.getItem('lastSelectedTopic') || '');
   const [playerModalOpen, setPlayerModalOpen] = useState(false);
   const [playerData, setPlayerData] = useState(null);
-
-  // 表格双滚动条 refs
-  const topScrollRef = useRef(null);
-  const topScrollContentRef = useRef(null);
-  const tableWrapRef = useRef(null);
-  const tableRef = useRef(null);
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -516,8 +513,8 @@ export default function AgentPanel() {
     }
 
     // 打开 modal 并显示加载进度
-    setTopicModalData({ bagPath, row, cameraTopics: [], cameraTopicMap: {}, startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
-    setSelectedTopic('');
+    setTopicModalData({ bagPath, row, cameraTopics: [], startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
+    setSelectedTopic(localStorage.getItem('lastSelectedTopic') || '');
     setTopicModalOpen(true);
 
     // 使用 SSE 流式获取 bag info（带进度反馈）
@@ -525,7 +522,6 @@ export default function AgentPanel() {
     let bagEndNs = null;
     let clampedMsg = '';
     let cameraTopics = [];
-    let bagError = null;
 
     try {
       const response = await fetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
@@ -549,13 +545,10 @@ export default function AgentPanel() {
                 const info = data.bag_info;
                 bagStartNs = info.start_time_ns;
                 bagEndNs = info.end_time_ns;
-                const topicList = (info.topics || []).filter((t) => t.name);
-                cameraTopics = topicList.map((t) => t.name);
-                const topicMap = {};
-                topicList.forEach((t) => { topicMap[t.name] = t.freq || 0; });
-                topicModalData.cameraTopicMap = topicMap;
+                cameraTopics = (info.topics || []).map((t) => t.name).filter(Boolean);
               } else if (data.stage === 'error') {
-                bagError = data.message;
+                // 降级：使用非流式 API
+                throw new Error(data.message);
               }
             } catch (e) {
               // ignore parse errors
@@ -564,28 +557,17 @@ export default function AgentPanel() {
         }
       }
     } catch (e) {
-      bagError = bagError || e.message;
-    }
-
-    // 如果 SSE 失败，尝试降级到非流式 API
-    if (!bagError && cameraTopics.length === 0) {
+      // 降级到非流式 API
       try {
         const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
         if (bagInfoRes.ok) {
           const bagInfo = await bagInfoRes.json();
           bagStartNs = bagInfo.start_time_ns;
           bagEndNs = bagInfo.end_time_ns;
-          const topicList = (bagInfo.topics || []).filter((t) => t.name);
-          cameraTopics = topicList.map((t) => t.name);
-          const topicMap = {};
-          topicList.forEach((t) => { topicMap[t.name] = t.freq || 0; });
-          topicModalData.cameraTopicMap = topicMap;
-        } else {
-          const err = await bagInfoRes.json().catch(() => ({}));
-          bagError = err.detail || `HTTP ${bagInfoRes.status}`;
+          cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
         }
       } catch (e2) {
-        bagError = bagError || e2.message;
+        // bag info 不可用，跳过
       }
     }
 
@@ -601,28 +583,30 @@ export default function AgentPanel() {
       endTs = bagEndNs;
     }
 
-    setTopicModalData({ bagPath, row, cameraTopics, cameraTopicMap: topicModalData.cameraTopicMap || {}, startTs, endTs, clampedMsg, loading: false, loadingMsg: '', bagError });
-    setSelectedTopic(cameraTopics.length > 0 ? cameraTopics[0] : '');
+    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
+    // 优先使用上次记忆的 topic，如果它在当前可用 topic 列表中；否则取第一个
+    const lastTopic = localStorage.getItem('lastSelectedTopic') || '';
+    const defaultTopic = (lastTopic && cameraTopics.includes(lastTopic)) ? lastTopic
+      : (cameraTopics.length > 0 ? cameraTopics[0] : '');
+    setSelectedTopic(defaultTopic);
   };
 
   const handleExtractVideo = async () => {
     if (!topicModalData || !selectedTopic) return;
-    const { bagPath, row, startTs, endTs, clampedMsg, cameraTopicMap } = topicModalData;
-    const topicFps = cameraTopicMap && cameraTopicMap[selectedTopic] ? cameraTopicMap[selectedTopic] : null;
+    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
+
+    // 记忆用户选择的 topic
+    localStorage.setItem('lastSelectedTopic', selectedTopic);
 
     if (clampedMsg) {
       alert('⏱️ 时间范围已自动调整：\n\n' + clampedMsg + '\n将按调整后的范围播放视频。');
     }
 
     try {
-      const payload = { bag_path: bagPath, topic: selectedTopic, start_ts: startTs, end_ts: endTs };
-      if (topicFps && topicFps > 0) {
-        payload.fps = topicFps;
-      }
       const res = await fetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ bag_path: bagPath, topic: selectedTopic, start_ts: startTs, end_ts: endTs }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -633,10 +617,11 @@ export default function AgentPanel() {
         ...prev.filter((v) => v.task_id !== data.task_id),
         { task_id: data.task_id, row, topic: selectedTopic, status: data.status, video_url: '', progress: 0, message: data.message },
       ]);
-      // 保持弹窗打开，进入提取进度状态
-      setTopicModalData((prev) => prev ? { ...prev, extracting: true, taskId: data.task_id, extractError: null } : prev);
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setExtractModalOpen(true);  // 显示提取进度弹窗
     } catch (e) {
-      setTopicModalData((prev) => prev ? { ...prev, extracting: false, extractError: e.message } : prev);
+      alert('启动视频提取失败: ' + e.message);
     }
   };
 
@@ -680,16 +665,41 @@ export default function AgentPanel() {
       if (newlyCompleted) {
         setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic });
         setPlayerModalOpen(true);
-        // 如果有正在显示进度的 topicModal，关闭它
-        setTopicModalOpen(false);
-        setTopicModalData(null);
+        setExtractModalOpen(false);  // 关闭进度弹窗，打开播放器
       }
     }, 1500);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [videoRows, playerModalOpen]);
+  }, [videoRows]);
+
+  // 双向滚动条同步：顶部 + 底部
+  useEffect(() => {
+    const topBar = document.getElementById('top-scrollbar');
+    const topContent = document.getElementById('top-scrollbar-content');
+    const bottomBar = document.getElementById('tbl-scroll-container');
+    if (!topBar || !topContent || !bottomBar) return;
+
+    // 让顶部滚动条内容与表格等宽
+    const syncWidth = () => {
+      topContent.style.width = bottomBar.scrollWidth + 'px';
+    };
+    syncWidth();
+
+    const onTopScroll = () => { bottomBar.scrollLeft = topBar.scrollLeft; };
+    const onBottomScroll = () => { topBar.scrollLeft = bottomBar.scrollLeft; };
+
+    topBar.addEventListener('scroll', onTopScroll);
+    bottomBar.addEventListener('scroll', onBottomScroll);
+    window.addEventListener('resize', syncWidth);
+
+    return () => {
+      topBar.removeEventListener('scroll', onTopScroll);
+      bottomBar.removeEventListener('scroll', onBottomScroll);
+      window.removeEventListener('resize', syncWidth);
+    };
+  }, [allRows, page]);  // 结果变化时重新绑定
 
   const hasResults = allRows.length > 0;
 
@@ -738,18 +748,6 @@ export default function AgentPanel() {
     }
   };
   const columns = result?.columns || [];
-
-  // 同步表格双滚动条宽度
-  useEffect(() => {
-    const syncWidth = () => {
-      if (tableRef.current && topScrollContentRef.current) {
-        topScrollContentRef.current.style.width = tableRef.current.scrollWidth + 'px';
-      }
-    };
-    syncWidth();
-    window.addEventListener('resize', syncWidth);
-    return () => window.removeEventListener('resize', syncWidth);
-  }, [displayRows, columns]);
 
   return (
     <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -982,64 +980,45 @@ export default function AgentPanel() {
                   ⬇ Arrow 下载
                 </button>
               </div>
-              <div>
-                {/* 顶部水平滚动条 */}
-                <div
-                  ref={topScrollRef}
-                  onScroll={() => {
-                    if (tableWrapRef.current) {
-                      tableWrapRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-                    }
-                  }}
-                  style={{ overflowX: 'auto', overflowY: 'hidden', height: 14, borderBottom: '1px solid #e8e8e8' }}
-                >
-                  <div ref={topScrollContentRef} style={{ height: 1 }} />
-                </div>
-                {/* 表格区域 */}
-                <div
-                  ref={tableWrapRef}
-                  onScroll={() => {
-                    if (topScrollRef.current) {
-                      topScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
-                    }
-                  }}
-                  style={{ overflowX: 'auto' }}
-                >
-                  <table ref={tableRef} style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: '100%' }}>
-                    <thead>
-                      <tr style={{ background: '#fafafa' }}>
-                        <th style={{ border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>Action</th>
-                        {columns.map((col) => (
-                          <th key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayRows.map((row, idx) => (
-                        <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
-                          <td style={{ border: '1px solid #e8e8e8', padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                            <button
-                              onClick={() => startVisualization(row)}
-                              style={{
-                                padding: '4px 10px', fontSize: 12, borderRadius: 4, border: 'none',
-                                background: '#1890ff', color: '#fff', cursor: 'pointer',
-                              }}
-                            >
-                              📹 播包可视化
-                            </button>
-                          </td>
-                          {columns.map((col) => (
-                            <td key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                              {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col] ?? '')}
-                            </td>
-                          ))}
-                        </tr>
+              {/* 顶部滚动条：与底部同步 */}
+              <div id="top-scrollbar" style={{ overflowX: 'auto', height: 17, borderBottom: '1px solid #e8e8e8' }}>
+                <div id="top-scrollbar-content" style={{ height: 1 }}></div>
+              </div>
+              <div style={{ overflowX: 'auto' }} id="tbl-scroll-container">
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#fafafa' }}>
+                      {columns.map((col) => (
+                        <th key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>
+                          {col}
+                        </th>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayRows.map((row, idx) => (
+                      <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                        {columns.map((col) => (
+                          <td key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px' }}>
+                            {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col] ?? '')}
+                          </td>
+                        ))}
+                        <td style={{ border: '1px solid #e8e8e8', padding: '8px 12px' }}>
+                          <button
+                            onClick={() => startVisualization(row)}
+                            style={{
+                              padding: '4px 10px', fontSize: 12, borderRadius: 4, border: 'none',
+                              background: '#1890ff', color: '#fff', cursor: 'pointer',
+                            }}
+                          >
+                            📹 播包可视化
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
               {/* Pagination controls — 纯前端分页，不发请求 */}
               {totalRows > 0 && (
@@ -1059,74 +1038,81 @@ export default function AgentPanel() {
         </div>
       )}
 
-      {/* Video extraction panel */}
-      {videoRows.length > 0 && (
-        <div style={{ marginTop: 20, padding: 16, background: '#f0f5ff', borderRadius: 8, border: '1px solid #d6e4ff' }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: 16 }}>📹 播包可视化</h3>
-          {videoRows.map((v) => (
-            <div key={v.task_id} style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8' }}>
-              <div style={{ fontSize: 13, color: '#555', marginBottom: 6 }}>
-                <b>Bag:</b> {v.row.bag_id || '未知'} &nbsp;|&nbsp;
-                <b>Topic:</b> {v.topic} &nbsp;|&nbsp;
-                <b>Time:</b> {v.row.start_ts} ~ {v.row.end_ts}
+      {/* 视频提取进度弹窗（替代底部堆积面板） */}
+      {extractModalOpen && videoRows.length > 0 && (() => {
+        const v = videoRows[videoRows.length - 1];  // 显示最新一条的状态
+        const isFailed = v.status === 'failed';
+        return (
+          <div
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+            }}
+          >
+            <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 360, maxWidth: 450, textAlign: 'center' }}>
+              <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>
+                {isFailed ? '❌ 视频提取失败' : '📹 视频提取中'}
+              </h3>
+              <div style={{ fontSize: 13, color: '#555', marginBottom: 8 }}>
+                <b>Bag:</b> {v.row.bag_id || v.row.db_file} &nbsp;|&nbsp;
+                <b>Topic:</b> {v.topic}
               </div>
-              <div style={{ fontSize: 13, color: '#666' }}>
-                {v.status === 'pending' && '⏳ 等待中...'}
-                {v.status === 'processing' && `⏳ 提取中... ${v.progress.toFixed(1)}%`}
-                {v.status === 'completed' && '✅ 提取完成'}
-                {v.status === 'failed' && `❌ 失败: ${v.message}`}
-              </div>
-              {v.video_url && (
-                <video
-                  src={v.video_url}
-                  controls
-                  style={{ width: '100%', maxHeight: 400, background: '#000', borderRadius: 4, marginTop: 8 }}
-                />
+              {!isFailed && (
+                <div style={{ margin: '16px 0' }}>
+                  <div style={{ fontSize: 14, color: '#1890ff', marginBottom: 8 }}>
+                    {v.status === 'pending' && '⏳ 排队中...'}
+                    {v.status === 'processing' && `⏳ 提取中... ${v.progress.toFixed(1)}%`}
+                    {v.status === 'completed' && '✅ 提取完成，即将播放...'}
+                  </div>
+                  {v.status === 'processing' && (
+                    <div style={{ width: '100%', height: 8, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ width: `${v.progress}%`, height: '100%', background: '#1890ff', borderRadius: 4, transition: 'width 0.3s' }} />
+                    </div>
+                  )}
+                </div>
               )}
+              {isFailed && (
+                <div style={{ fontSize: 13, color: '#cf1322', margin: '12px 0', padding: 10, background: '#fff2f0', borderRadius: 4 }}>
+                  {v.message}
+                </div>
+              )}
+              <button
+                onClick={() => { setExtractModalOpen(false); if (isFailed) setVideoRows([]); }}
+                style={{
+                  marginTop: 12, padding: '8px 24px', fontSize: 13, borderRadius: 4,
+                  border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer',
+                }}
+              >
+                {isFailed ? '关闭' : '取消提取'}
+              </button>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Topic 选择弹窗 */}
       {topicModalOpen && topicModalData && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-        }}>
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setTopicModalOpen(false); setTopicModalData(null); } }}
+        >
           <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 400, maxWidth: 500 }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>📹 播包可视化</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📹 播包可视化</h3>
+              <button
+                onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
+                style={{ padding: '4px 10px', fontSize: 16, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', lineHeight: 1 }}
+                title="关闭"
+              >✕</button>
+            </div>
             <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
               <b>Bag:</b> {topicModalData.bagPath}<br/>
               <b>时间范围:</b> {topicModalData.row.start_ts} ~ {topicModalData.row.end_ts} (秒)
             </div>
-            {topicModalData.extracting ? (
-              <div style={{ padding: '16px 0' }}>
-                {(() => {
-                  const task = videoRows.find((v) => v.task_id === topicModalData.taskId);
-                  const progress = task ? task.progress : 0;
-                  const msg = task ? task.message : '等待中...';
-                  const status = task ? task.status : 'pending';
-                  return (
-                    <div>
-                      <div style={{ fontSize: 14, color: '#1890ff', marginBottom: 12 }}>
-                        {status === 'pending' && '⏳ 等待开始提取...'}
-                        {status === 'processing' && `⏳ ${msg}`}
-                        {status === 'completed' && '✅ 提取完成，正在打开播放器...'}
-                        {status === 'failed' && `❌ 提取失败: ${msg}`}
-                      </div>
-                      <div style={{ width: '100%', height: 8, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${progress}%`, height: '100%', background: status === 'failed' ? '#ff4d4f' : '#1890ff',
-                          borderRadius: 4, transition: 'width 0.3s ease',
-                        }} />
-                      </div>
-                      <div style={{ fontSize: 12, color: '#999', marginTop: 6, textAlign: 'right' }}>{progress.toFixed(1)}%</div>
-                    </div>
-                  );
-                })()}
-              </div>
-            ) : topicModalData.loading ? (
+            {topicModalData.loading ? (
               <div style={{ padding: '20px 0', textAlign: 'center' }}>
                 <div style={{ fontSize: 14, color: '#1890ff', marginBottom: 12 }}>{topicModalData.loadingMsg || '加载中...'}</div>
                 <div style={{ width: '100%', height: 6, background: '#f0f0f0', borderRadius: 3, overflow: 'hidden' }}>
@@ -1134,78 +1120,50 @@ export default function AgentPanel() {
                 </div>
                 <style>{`@keyframes progress-pulse { 0%, 100% { opacity: 0.4; width: 30%; } 50% { opacity: 1; width: 70%; } }`}</style>
               </div>
-            ) : topicModalData.bagError ? (
-              <div style={{ marginBottom: 16, padding: 12, background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4 }}>
-                <div style={{ fontSize: 14, color: '#cf1322', marginBottom: 6 }}>❌ 无法读取 Bag 信息</div>
-                <div style={{ fontSize: 12, color: '#595959' }}>{topicModalData.bagError}</div>
-                {topicModalData.bagError.includes('gsbag SDK not available') && (
-                  <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 8 }}>
-                    提示：gsbag SDK 环境变量可能配置不正确，请联系管理员检查 deploy.sh 中的 LD_LIBRARY_PATH。
-                  </div>
-                )}
-              </div>
-            ) : topicModalData.cameraTopics.length > 0 ? (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>
-                  选择 Camera Topic
-                  {selectedTopic && topicModalData.cameraTopicMap && topicModalData.cameraTopicMap[selectedTopic] > 0 && (
-                    <span style={{ color: '#1890ff', marginLeft: 8, fontWeight: 400 }}>
-                      ({topicModalData.cameraTopicMap[selectedTopic].toFixed(2)} fps)
-                    </span>
-                  )}
-                </label>
-                <select
-                  value={selectedTopic}
-                  onChange={(e) => setSelectedTopic(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
-                >
-                  {topicModalData.cameraTopics.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                      {topicModalData.cameraTopicMap && topicModalData.cameraTopicMap[t] > 0
-                        ? ` (${topicModalData.cameraTopicMap[t].toFixed(2)} fps)`
-                        : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
             ) : (
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
-                <input
-                  type="text"
-                  value={selectedTopic}
-                  onChange={(e) => setSelectedTopic(e.target.value)}
-                  placeholder="/camera/front_center"
-                  style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
-                />
-              </div>
-            )}
-            {topicModalData.extractError && (
-              <div style={{ fontSize: 13, color: '#cf1322', marginBottom: 12, padding: 8, background: '#fff2f0', borderRadius: 4 }}>
-                ❌ {topicModalData.extractError}
-              </div>
+              topicModalData.cameraTopics.length > 0 ? (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>选择 Camera Topic:</label>
+                  <select
+                    value={selectedTopic}
+                    onChange={(e) => setSelectedTopic(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                  >
+                    {topicModalData.cameraTopics.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
+                  <input
+                    type="text"
+                    value={selectedTopic}
+                    onChange={(e) => setSelectedTopic(e.target.value)}
+                    placeholder="/camera/front_center"
+                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                  />
+                </div>
+              )
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
                 onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
-                disabled={topicModalData.extracting}
-                style={{ padding: '8px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: topicModalData.extracting ? 'not-allowed' : 'pointer', opacity: topicModalData.extracting ? 0.6 : 1 }}
+                style={{ padding: '8px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer' }}
               >
-                {topicModalData.extracting ? '提取中...' : '取消'}
+                取消
               </button>
-              {!topicModalData.extracting && (
-                <button
-                  onClick={handleExtractVideo}
-                  disabled={!selectedTopic || topicModalData.loading}
-                  style={{
-                    padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
-                    background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  确认提取
-                </button>
-              )}
+              <button
+                onClick={handleExtractVideo}
+                disabled={!selectedTopic || topicModalData.loading}
+                style={{
+                  padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
+                  background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                确认提取
+              </button>
             </div>
           </div>
         </div>
@@ -1223,7 +1181,7 @@ export default function AgentPanel() {
                 📹 {playerData.row.bag_id || '未知'} | {playerData.topic}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭

@@ -100,6 +100,50 @@ class AgentEngine:
                     self._resolver = RosbagPathResolver()
         return self._resolver
 
+    @staticmethod
+    def _adapt_sql_for_duckdb(sql: str) -> str:
+        """将 SQLite 风格 SQL 适配为 DuckDB 兼容语法。
+
+        已知差异点：
+        1. EXISTS 返回 boolean (true/false)，而 SQLite 返回 integer (1/0)
+           → 将 boolean 上下文中的 = 1 改为 = true, = 0 改为 = false
+        2. group_concat → string_agg
+        3. strftime('%Y-%m-%d', col) → strftime(col, '%Y-%m-%d')  (参数顺序)
+        4. json_extract → json_extract_string
+           SQLite 的 json_extract 直接返回标量值（如 锥桶），
+           DuckDB 的 json_extract 返回 JSON 原生表示（如 "锥桶" 带引号），
+           json_extract_string 才返回与 SQLite 一致的纯文本。
+        """
+        # 1. boolean 比较适配：匹配常见 boolean 列命名模式
+        #    has_xxx = 1 → has_xxx = true
+        #    is_xxx = 1 → is_xxx = true
+        #    xxx_flag = 1 → xxx_flag = true
+        bool_col_pattern = r'(\b(?:has|is|can|should|has_\w+|is_\w+|\w*_flag|\w*_bool|\w*_check))\s*=\s*1\b'
+        sql = re.sub(bool_col_pattern, r'\1 = true', sql)
+        bool_col_zero = r'(\b(?:has|is|can|should|has_\w+|is_\w+|\w*_flag|\w*_bool|\w*_check))\s*=\s*0\b'
+        sql = re.sub(bool_col_zero, r'\1 = false', sql)
+
+        # 2. group_concat → string_agg
+        sql = re.sub(r'\bgroup_concat\b', 'string_agg', sql, flags=re.IGNORECASE)
+
+        # 3. strftime 参数顺序：SQLite strftime(fmt, col) → DuckDB strftime(col, fmt)
+        #    匹配 strftime('%...', col) 并交换参数
+        def _swap_strftime(m):
+            fmt = m.group(1)
+            col = m.group(2)
+            return f"strftime({col}, {fmt})"
+        sql = re.sub(
+            r"strftime\s*\(\s*('[^']*')\s*,\s*([^)]+)\s*\)",
+            _swap_strftime, sql
+        )
+
+        # 4. json_extract → json_extract_string
+        #    DuckDB json_extract 返回 JSON 类型值，比较时会把右值也当 JSON 解析导致报错
+        #    json_extract_string 返回 VARCHAR，行为与 SQLite 的 json_extract 一致
+        sql = re.sub(r'\bjson_extract\b', 'json_extract_string', sql, flags=re.IGNORECASE)
+
+        return sql
+
     def _clean_sql(self, raw: str) -> str:
         raw = raw.strip()
         # Remove <think>...</think> blocks (reasoning content)
@@ -126,12 +170,10 @@ class AgentEngine:
 
     def _validate_sql(self, sql: str) -> Optional[str]:
         upper = sql.upper().strip()
-        if not upper.startswith("SELECT") and not upper.startswith("WITH"):
-            return "只允许 SELECT / WITH (CTE) 查询"
-        has_select = "SELECT" in upper
-        has_from = " FROM " in upper or "\nFROM " in upper
-        if not (has_select and has_from):
-            return "SQL 不完整，缺少 SELECT 或 FROM 子句"
+        if not (upper.startswith("SELECT") or upper.startswith("WITH")):
+            return "只允许 SELECT 查询（含 WITH CTE）"
+        if " FROM " not in upper and "\nFROM " not in upper:
+            return "SQL 不完整，缺少 FROM 子句"
         forbidden = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE"]
         for kw in forbidden:
             if kw in upper:
@@ -157,7 +199,7 @@ class AgentEngine:
         return re.sub(r';\s*$', f' LIMIT {limit};', cleaned)
 
     def _execute_single(self, sql: str, db_path: str, db_file: str, resolver) -> List[Dict[str, Any]]:
-        """Execute SQL on a single DB and return rows with bag_id appended."""
+        """Execute SQL on a single DB and return rows with bag_id & bag_path appended."""
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
@@ -167,12 +209,14 @@ class AgentEngine:
                 conn.close()
                 return []
 
-            # Resolve bag_id
+            # Resolve bag_id & local path
             data_id = db_file.replace(".db", "")
             bag_id = data_id
+            bag_path = ""
             try:
                 info = resolver.resolve(data_id)
                 bag_id = info.origin_bag_id or data_id
+                bag_path = info.local_path or info.oss_path or ""
             except Exception as exc:
                 logger.debug("Resolver failed for %s: %s", data_id, exc)
 
@@ -180,6 +224,8 @@ class AgentEngine:
             for row in rows:
                 d = dict(row)
                 d["bag_id"] = bag_id
+                d["db_file"] = db_file
+                d["bag_path"] = bag_path
                 result.append(d)
             conn.close()
             return result
@@ -189,6 +235,7 @@ class AgentEngine:
 
     def _execute_parquet(self, sql: str, result_limit: int) -> List[Dict[str, Any]]:
         """在 Parquet 聚合数据上执行 SQL（DuckDB），返回原始行。"""
+        sql = self._adapt_sql_for_duckdb(sql)
         try:
             if self._parquet_conn is None:
                 raise RuntimeError("Parquet 连接未初始化")
@@ -243,9 +290,11 @@ class AgentEngine:
 
                 data_id = db_file.replace(".db", "")
                 bag_id = data_id
+                bag_path = ""
                 try:
                     info = resolver.resolve(data_id)
                     bag_id = info.origin_bag_id or data_id
+                    bag_path = info.local_path or info.oss_path or ""
                 except Exception as exc:
                     logger.debug("Resolver failed for %s: %s", data_id, exc)
 
@@ -253,6 +302,8 @@ class AgentEngine:
                 for row in rows:
                     d = dict(row)
                     d["bag_id"] = bag_id
+                    d["db_file"] = db_file
+                    d["bag_path"] = bag_path
                     result.append(d)
                 conn.close()
                 return result
@@ -296,31 +347,16 @@ class AgentEngine:
 
     @staticmethod
     def _ensure_bag_id_in_select(sql: str) -> str:
-        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * / GROUP BY / 聚合查询）。"""
+        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * 和纯聚合查询）。"""
         upper = sql.upper()
         if "BAG_ID" in upper or "SELECT *" in upper:
             return sql
-        # GROUP BY 查询不能安全注入 bag_id（非聚合列会报错）
-        if "GROUP BY" in upper:
-            return sql
-        # 纯聚合查询也不注入
+        # 纯聚合查询（无 GROUP BY 但有聚合函数）不添加 bag_id，避免语法错误
         has_aggregate = any(agg in upper for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN("])
-        if has_aggregate:
+        has_group_by = "GROUP BY" in upper
+        if has_aggregate and not has_group_by:
             return sql
-        # SELECT 开头：直接注入
-        if upper.startswith("SELECT"):
-            return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\g<1>bag_id, ", sql)
-        # WITH (CTE) 开头：找到最外层 SELECT 注入
-        if upper.startswith("WITH"):
-            matches = list(re.finditer(r"(?i)(?<!\w)SELECT(?=\s)", sql))
-            if matches:
-                last = matches[-1]
-                pos = last.start()
-                after = sql[pos + 6:].lstrip()
-                if after.upper().startswith("DISTINCT"):
-                    return sql[:pos] + "SELECT DISTINCT bag_id, " + after[8:].lstrip()
-                return sql[:pos] + "SELECT bag_id, " + after
-        return sql
+        return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\1bag_id, ", sql)
 
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
         """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
@@ -352,11 +388,12 @@ class AgentEngine:
             except Exception as exc:
                 logger.warning("Resolver init failed, bag_path will be empty: %s", exc)
 
-        # 保留 bag_id（如果 SQL 已返回），不再主动注入 bag_path / db_file
+        # 注入 bag_id / bag_path / db_file 到每行
         for r in good_rows:
-            if "bag_id" in r:
-                bid = r.get("bag_id", "")
-                r["bag_id"] = bid
+            bid = r.get("bag_id", "")
+            r["bag_id"] = bid
+            r["bag_path"] = bag_path_map.get(bid, "")
+            r["db_file"] = f"{bid}.db" if bid else ""
 
         columns = list(good_rows[0].keys()) if good_rows else []
 
@@ -409,6 +446,7 @@ class AgentEngine:
             question=question,
             schema_text=schema_text,
             route=route,
+            query_mode=self.query_mode,
         )
 
         logger.info(

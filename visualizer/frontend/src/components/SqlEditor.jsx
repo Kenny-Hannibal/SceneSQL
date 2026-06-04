@@ -209,7 +209,7 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         background: '#fafafa', borderTop: '1px solid #e8e8e8', fontSize: 11, color: '#999',
       }}>
         <span>{lineCount} 行</span>
-        <span>SQLite | UTF-8</span>
+        <span>DuckDB | UTF-8</span>
       </div>
     </div>
   );

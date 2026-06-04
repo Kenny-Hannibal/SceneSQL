@@ -4,50 +4,47 @@
 
 ---
 
-## [2026-05-27] 帧率动态化 + 视频提取修复 + SQL 校验增强
+## [2026-06-04] DuckDB 方言适配 + 前端UX改进
+
+**Commit**: 待提交 — feat: DuckDB方言适配 + CTE放行 + 前端关闭按钮 + topic记忆
 
 ### 变更内容
-
-#### 1. 帧率动态化（核心功能）
-- 后端新增 `_get_topic_fps()` 从 `metadata.yaml` 读取每个 topic 的 `message_freq`
-- `extract_topic_to_mp4` 帧率优先级：前端传入 > bag metadata > `video_config.yaml` > 默认 10
-- `output_fps` 默认自动跟随 `input_fps`（`video_config.yaml` 中 `output_fps` 已注释掉）
-- 前端下拉框显示 topic 名 + 帧率，选择后标签旁实时显示 fps
-- 前端 `handleExtractVideo` 把 `fps` 传给 `/api/video/extract`
-
-#### 2. gsbag SDK / 视频提取修复
-- `deploy.sh` 重新添加 `.venv/lib` 到 `LD_LIBRARY_PATH`（修复 `libgacbag_storage.so.4` 找不到）
-- `video_extractor.py` 添加 `scripts/proto` 和 `scripts/proto/j6` 到 `sys.path`，修复 protobuf 导入失败导致的 "No frames found"
-- `bag.py` 修复 `info.dict()` → `info`（SSE 流返回 dict 而非 Pydantic 模型）
-
-#### 3. SQL 校验与查询增强
-- `_validate_sql` 支持 `WITH` 开头的 CTE 查询
-- `_clean_sql` 修复多行 CTE 截断 bug（保留从 `SELECT`/`WITH` 到末尾的完整 SQL）
-- `_ensure_bag_id_in_select` 支持 `WITH` 开头 SQL，自动找到最外层 SELECT 注入 `bag_id`
-- 后端不再主动注入 `bag_path` 和 `db_file` 到结果中
-
-#### 4. 前端交互优化
-- **播包可视化按钮左移**：表格 Action 列移到最左侧
-- **表格双滚动条**：上方和下方都有水平滚动条，scrollLeft 双向同步
-- **视频提取进度条**：点击"确认提取"后弹窗保持打开，显示实时进度百分比和阶段
-- **bag 读取错误提前报**：`get_bag_info` 失败时弹窗直接显示红色错误框，不再让用户先填 topic 再报错
+- **① agent_engine.py — `_adapt_sql_for_duckdb()` + `_execute_parquet()` 入口调用**
+  运行时自动适配，即使 LLM 或用户手写的 SQL 用了 SQLite 方言也能正确执行：
+  - `has_xxx = 1` → `has_xxx = true`（boolean 列命名模式匹配）
+  - `has_xxx = 0` → `has_xxx = false`
+  - `group_concat` → `string_agg`
+  - `strftime('%Y', col)` → `strftime(col, '%Y')`（参数顺序交换）
+  - `json_extract` → `json_extract_string`（DuckDB json_extract 返回 JSON 类型，比较时右值被当 JSON 解析报错 Malformed JSON）
+  - `speed = 1` 这类普通数值比较不受影响
+- **④ agent_engine.py — `_validate_sql()` 放行 WITH CTE**
+  原逻辑只允许 `SELECT` 开头，导致 `WITH ... SELECT` 形式的 CTE 查询被拒。现允许 `WITH` 开头。
+- **② tag_router.py — `build_prompt()` 新增 `query_mode` 参数**
+  Parquet 模式下自动在 system prompt 追加 DuckDB 方言提示，让 LLM 从源头就生成正确语法，减少适配层的触发
+- **③ agent.py — 两处 `build_prompt` 调用传入 `query_mode=engine.query_mode`**
+  流式和非流式生成 SQL 的接口都会收到正确的方言提示
+- **⑤ AgentPanel.jsx — 弹窗关闭机制**
+  Topic选择弹窗添加 ✕ 关闭按钮（加载/错误状态均可关闭）+ 点击遮罩层关闭
+- **⑥ AgentPanel.jsx — 可视化topic记忆**
+  用户选择的topic存入 `localStorage('lastSelectedTopic')`，下次打开弹窗时自动回填
+  若记忆的topic不在当前可用列表中则回退到第一个
+- **⑦ AgentPanel.jsx — 视频提取进度弹窗替代底部堆积面板**
+  删除底部播包可视化堆积面板。选择topic确认后弹出进度弹窗（显示排队/提取百分比/完成），
+  提取完成自动切换到视频播放弹窗，关闭播放弹窗自动清除记录不再堆积
+  提取失败时弹窗显示错误信息，可关闭
+- **⑧ AgentPanel.jsx — 搜索结果双向滚动条**
+  结果表格顶部和底部各有一个水平滚动条，同步滚动，解决宽表只能底部滚动的痛点
 
 ### 涉及文件
 - `agent/backend/app/services/agent_engine.py`
-- `visualizer/backend/app/api/bag.py`
-- `visualizer/backend/app/api/video.py`
-- `visualizer/backend/app/models/schemas.py`
-- `visualizer/backend/app/services/video_extractor.py`
-- `visualizer/deploy.sh`
+- `agent/backend/app/core/tag_router.py`
+- `visualizer/backend/app/api/agent.py`
 - `visualizer/frontend/src/components/AgentPanel.jsx`
-- `visualizer/video_config.yaml`
 
 ### 测试验证
-- ✅ gsbag SDK 正常加载，`get_bag_info` 返回 camera topics
-- ✅ protobuf 导入成功，帧数据反序列化正常（`data_len=~230KB`）
-- ✅ 低帧率 topic（9.86fps）和高帧率 topic（27.63fps）均正确提取
-- ✅ 后端 build/部署通过
+- ✅ `_adapt_sql_for_duckdb()` 单元测试：boolean列、group_concat、strftime参数交换、json_extract
 - ✅ 前端 build 编译通过
+- ⚠️ 端到端测试待 DSW 环境 Parquet 数据验证
 
 ---
 
