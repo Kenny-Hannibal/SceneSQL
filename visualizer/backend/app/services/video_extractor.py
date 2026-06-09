@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import subprocess
+import threading
 from typing import List, Optional, Dict
 from pathlib import Path
 
@@ -210,6 +211,120 @@ def _resolve_bag_path(bag_path: str, task_id: str) -> str:
 
     logger.info("[%s] Bag downloaded to: %s", task_id, local_bag)
     return local_bag
+
+
+def extract_topic_hevc_stream(
+    bag_path: str,
+    topic: str,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+    fps: Optional[float] = None,
+):
+    """Extract HEVC frames from a bag topic and remux to fMP4 stream (no disk write, no decode).
+
+    Yields fMP4 chunks suitable for Media Source Extensions (MSE) playback.
+    """
+    bag_path = _resolve_bag_path(bag_path, "stream")
+    if not bag_path:
+        raise RuntimeError("Failed to resolve bag path")
+
+    bag_start, bag_end = _get_bag_time_range(bag_path)
+    if start_ts is not None and bag_start is not None and start_ts < bag_start:
+        start_ts = bag_start
+    if end_ts is not None and bag_end is not None and end_ts > bag_end:
+        end_ts = bag_end
+
+    config = _load_video_config()
+    meta_fps = _get_topic_fps(bag_path, topic)
+    if fps is not None and fps > 0:
+        input_fps = fps
+    elif meta_fps is not None and meta_fps > 0:
+        input_fps = meta_fps
+    else:
+        input_fps = _get_fps_for_topic(topic, config)
+
+    if not _HAS_GSBAG:
+        raise RuntimeError("gsbag SDK not available (not installed on this machine)")
+    reader = gsbag_reader.GsBagReader(bag_path)
+    reader.set_topic_filter([topic])
+
+    hevc_frames: List[bytes] = []
+    skipped_decode_errors = 0
+    for m in reader.read_messages():
+        ts = m.timestamp
+        if start_ts is not None and ts < start_ts:
+            continue
+        if end_ts is not None and ts > end_ts:
+            continue
+        try:
+            msg = image_encode_boleidl_pb2.Image()
+            image_data = []
+            gsbag_reader.HobotMessageSerializer.deserialize_image(m, msg, image_data)
+            if image_data:
+                hevc_frames.append(image_data[0])
+        except Exception as exc:
+            skipped_decode_errors += 1
+
+    total = len(hevc_frames)
+    if total == 0:
+        raise RuntimeError(f"No frames found for topic {topic} in the specified range")
+
+    if skipped_decode_errors > 0:
+        logger.info("[stream] Skipped %d decode-error frames", skipped_decode_errors)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-r", str(input_fps),
+        "-f", "hevc",
+        "-i", "-",
+        "-c:v", "copy",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4",
+        "pipe:1",
+    ]
+
+    process = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    def feed_input():
+        try:
+            for frame in hevc_frames:
+                process.stdin.write(frame)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except Exception:
+                pass
+
+    feeder = threading.Thread(target=feed_input)
+    feeder.start()
+
+    try:
+        while True:
+            chunk = process.stdout.read(262144)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        feeder.join()
+        returncode = process.wait()
+        try:
+            stderr_data = process.stderr.read().decode("utf-8", errors="ignore")
+            if stderr_data:
+                logger.warning("[stream] ffmpeg stderr: %s", stderr_data)
+            if returncode != 0:
+                logger.error("[stream] ffmpeg exited with code %d", returncode)
+        except Exception:
+            pass
 
 
 def extract_topic_to_mp4(

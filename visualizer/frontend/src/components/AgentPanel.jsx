@@ -188,6 +188,7 @@ export default function AgentPanel() {
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
+  const videoRef = useRef(null);
 
   // Extraction progress modal (replaces the bottom panel)
   const [extractModalOpen, setExtractModalOpen] = useState(false);
@@ -204,6 +205,9 @@ export default function AgentPanel() {
   const [selectedTopic, setSelectedTopic] = useState(() => localStorage.getItem('lastSelectedTopic') || '');
   const [playerModalOpen, setPlayerModalOpen] = useState(false);
   const [playerData, setPlayerData] = useState(null);
+  const [playerMode, setPlayerMode] = useState(null); // 'hevc-stream' | 'h264-file'
+  const [playerError, setPlayerError] = useState(null);
+  const [forceH264, setForceH264] = useState(false);
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -591,17 +595,7 @@ export default function AgentPanel() {
     setSelectedTopic(defaultTopic);
   };
 
-  const handleExtractVideo = async () => {
-    if (!topicModalData || !selectedTopic) return;
-    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
-
-    // 记忆用户选择的 topic
-    localStorage.setItem('lastSelectedTopic', selectedTopic);
-
-    if (clampedMsg) {
-      alert('⏱️ 时间范围已自动调整：\n\n' + clampedMsg + '\n将按调整后的范围播放视频。');
-    }
-
+  const startH264Extraction = async (bagPath, row, startTs, endTs) => {
     try {
       const res = await fetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
@@ -619,10 +613,71 @@ export default function AgentPanel() {
       ]);
       setTopicModalOpen(false);
       setTopicModalData(null);
-      setExtractModalOpen(true);  // 显示提取进度弹窗
+      setExtractModalOpen(true);
     } catch (e) {
       alert('启动视频提取失败: ' + e.message);
     }
+  };
+
+  const handleExtractVideo = async () => {
+    if (!topicModalData || !selectedTopic) return;
+    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
+
+    // 记忆用户选择的 topic
+    localStorage.setItem('lastSelectedTopic', selectedTopic);
+
+    if (clampedMsg) {
+      alert('⏱️ 时间范围已自动调整：\n\n' + clampedMsg + '\n将按调整后的范围播放视频。');
+    }
+
+    setPlayerError(null);
+    setPlayerMode(null);
+
+    // 强制 H.264 模式
+    if (forceH264) {
+      console.log('[HEVC诊断] 用户强制使用 H.264 转码');
+      setPlayerMode('h264-file');
+      startH264Extraction(bagPath, row, startTs, endTs);
+      return;
+    }
+
+    // 检测浏览器是否支持 HEVC in MP4（MSE）
+    const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    const canPlayHevc = document.createElement('video').canPlayType(hevcMime);
+    const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
+
+    console.log('[HEVC诊断] canPlayType:', canPlayHevc, '| MSE支持:', supportsHevcMSE, '| Mime:', hevcMime);
+
+    if (supportsHevcMSE) {
+      console.log('[HEVC诊断] 浏览器支持HEVC MSE，尝试流式播放');
+      setPlayerMode('hevc-stream');
+      const params = new URLSearchParams({
+        bag_path: bagPath,
+        topic: selectedTopic,
+      });
+      if (startTs !== null) params.append('start_ts', String(startTs));
+      if (endTs !== null) params.append('end_ts', String(endTs));
+
+      const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
+
+      setPlayerData({
+        stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
+        row,
+        topic: selectedTopic,
+        use_mse: true,
+        durationSec,
+      });
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setPlayerModalOpen(true);
+      return;
+    }
+
+    // 浏览器不支持 HEVC，明确提示后降级
+    console.log('[HEVC诊断] 浏览器不支持HEVC MSE，降级到H.264转码');
+    alert('当前浏览器不支持 HEVC 解码（canPlayType=' + canPlayHevc + '），将自动使用 H.264 转码方式播放。');
+    setPlayerMode('h264-file');
+    startH264Extraction(bagPath, row, startTs, endTs);
   };
 
   // Poll video extraction status
@@ -663,6 +718,7 @@ export default function AgentPanel() {
       }
       setVideoRows(currentRows);
       if (newlyCompleted) {
+        setPlayerMode('h264-file');
         setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic });
         setPlayerModalOpen(true);
         setExtractModalOpen(false);  // 关闭进度弹窗，打开播放器
@@ -673,6 +729,143 @@ export default function AgentPanel() {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [videoRows]);
+
+  // MSE 流式 HEVC 播放逻辑
+  useEffect(() => {
+    if (!playerModalOpen || !playerData?.use_mse || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const mediaSource = new MediaSource();
+    const objectUrl = URL.createObjectURL(mediaSource);
+    video.src = objectUrl;
+
+    let sourceBuffer = null;
+    let reader = null;
+    let aborted = false;
+
+    const mimeCodec = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+
+    const cleanup = () => {
+      if (aborted) return;
+      aborted = true;
+      URL.revokeObjectURL(objectUrl);
+      if (mediaSource.readyState === 'open') {
+        try { mediaSource.endOfStream(); } catch (e) {}
+      }
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
+    };
+
+    const onMseError = (source, detail) => {
+      const videoErr = video.error;
+      const msState = mediaSource.readyState;
+      const sbState = sourceBuffer ? {
+        updating: sourceBuffer.updating,
+        buffered: sourceBuffer.buffered?.length,
+      } : null;
+      const diagnostics = {
+        source,
+        detail: detail || '未知错误',
+        videoErrorCode: videoErr?.code,
+        videoErrorMessage: videoErr?.message,
+        mediaSourceState: msState,
+        sourceBufferState: sbState,
+      };
+      console.error('[HEVC诊断] MSE错误:', diagnostics);
+      const msg = `[${source}] ${detail || '未知错误'} | video.error=${videoErr?.code || 'none'} | msState=${msState}`;
+      setPlayerError('HEVC流式播放失败: ' + msg);
+      cleanup();
+    };
+
+    mediaSource.addEventListener('sourceopen', async () => {
+      if (aborted) return;
+      try {
+        // 预先设置预期总时长，避免进度条在加载过程中跳动
+        if (playerData.durationSec && playerData.durationSec > 0) {
+          try {
+            mediaSource.duration = playerData.durationSec;
+            console.log('[HEVC诊断] 预设视频时长:', playerData.durationSec, '秒');
+          } catch (e) {
+            console.warn('[HEVC诊断] 设置 duration 失败:', e);
+          }
+        }
+
+        sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+        // 使用默认 'segments' 模式，尊重 fMP4 内嵌时间戳；
+        // 'sequence' 模式可能导致 fMP4 fragment 时间戳冲突
+        // sourceBuffer.mode = 'sequence';
+
+        const response = await fetch(playerData.stream_url);
+        if (!response.ok) {
+          throw new Error(`Stream HTTP ${response.status}`);
+        }
+        reader = response.body.getReader();
+
+        const queue = [];
+        let isUpdating = false;
+
+        const processQueue = () => {
+          if (aborted || isUpdating || queue.length === 0) return;
+          const chunk = queue.shift();
+          try {
+            sourceBuffer.appendBuffer(chunk);
+            isUpdating = true;
+          } catch (e) {
+            console.error('appendBuffer failed:', e);
+            cleanup();
+          }
+        };
+
+        sourceBuffer.addEventListener('updateend', () => {
+          isUpdating = false;
+          if (queue.length === 0 && reader === null) {
+            try { mediaSource.endOfStream(); } catch (e) {}
+            return;
+          }
+          processQueue();
+        });
+
+        sourceBuffer.addEventListener('error', (e) => {
+          onMseError('SourceBuffer', e.message || 'SourceBuffer error');
+        });
+
+        while (!aborted) {
+          const { done, value } = await reader.read();
+          if (done) {
+            reader = null;
+            if (!isUpdating && queue.length === 0) {
+              try { mediaSource.endOfStream(); } catch (e) {}
+            }
+            break;
+          }
+          queue.push(value);
+          processQueue();
+        }
+      } catch (e) {
+        onMseError('Fetch/Setup', e.message || String(e));
+      }
+    });
+
+    // 监听 video 标签原生解码错误（有时比 MSE 事件更具体）
+    const onVideoError = () => {
+      const ve = video.error;
+      if (ve) {
+        const codes = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
+        onMseError('VideoElement', `${codes[ve.code] || 'UNKNOWN'}: ${ve.message || ''}`);
+      }
+    };
+    video.addEventListener('error', onVideoError);
+
+    mediaSource.addEventListener('error', (e) => {
+      onMseError('MediaSource', e.message || 'MediaSource error');
+    });
+
+    return () => {
+      video.removeEventListener('error', onVideoError);
+      cleanup();
+    };
+  }, [playerModalOpen, playerData]);
 
   // 双向滚动条同步：顶部 + 底部
   useEffect(() => {
@@ -1148,22 +1341,36 @@ export default function AgentPanel() {
               )
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
-                style={{ padding: '8px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer' }}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleExtractVideo}
-                disabled={!selectedTopic || topicModalData.loading}
-                style={{
-                  padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
-                  background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
-                }}
-              >
-                确认提取
-              </button>
+              <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  id="forceH264"
+                  checked={forceH264}
+                  onChange={(e) => setForceH264(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <label htmlFor="forceH264" style={{ fontSize: 13, color: '#555', cursor: 'pointer' }}>
+                  ⚙️ 强制使用 H.264 转码（兼容性更好，用于调试）
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
+                  style={{ padding: '8px 16px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer' }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleExtractVideo}
+                  disabled={!selectedTopic || topicModalData.loading}
+                  style={{
+                    padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
+                    background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  确认提取
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1179,20 +1386,77 @@ export default function AgentPanel() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ color: '#fff', fontSize: 14 }}>
                 📹 {playerData.row.bag_id || '未知'} | {playerData.topic}
+                {playerMode && (
+                  <span style={{
+                    marginLeft: 12,
+                    padding: '2px 10px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    background: playerMode === 'hevc-stream' ? '#52c41a' : '#fa8c16',
+                    color: '#fff',
+                  }}>
+                    {playerMode === 'hevc-stream' ? 'HEVC 直传' : 'H.264 转码'}
+                  </span>
+                )}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭
               </button>
             </div>
-            <video
-              src={playerData.video_url}
-              controls
-              autoPlay
-              style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
-            />
+
+            {playerError && (
+              <div style={{
+                background: '#fff2f0',
+                border: '1px solid #ffccc7',
+                color: '#cf1322',
+                padding: 12,
+                borderRadius: 4,
+                marginBottom: 10,
+                fontSize: 13,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠️ 播放失败</div>
+                <div>{playerError}</div>
+                <button
+                  onClick={() => {
+                    setPlayerModalOpen(false);
+                    setPlayerError(null);
+                    setForceH264(true);
+                    setTimeout(() => handleExtractVideo(), 100);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    padding: '5px 14px',
+                    fontSize: 12,
+                    borderRadius: 4,
+                    border: '1px solid #cf1322',
+                    background: '#fff',
+                    color: '#cf1322',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🔄 改用 H.264 转码重试
+                </button>
+              </div>
+            )}
+
+            {playerData.video_url ? (
+              <video
+                src={playerData.video_url}
+                controls
+                autoPlay
+                style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                controls
+                autoPlay
+                style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
+              />
+            )}
           </div>
         </div>
       )}

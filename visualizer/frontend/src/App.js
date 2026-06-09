@@ -14,7 +14,12 @@ function App() {
   const [taskStatus, setTaskStatus] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [durationSec, setDurationSec] = useState(0);
+  const [videoMode, setVideoMode] = useState(null);
+  const [videoError, setVideoError] = useState(null);
+  const [forceH264, setForceH264] = useState(false);
+  const [streamPlayerData, setStreamPlayerData] = useState(null);
   const intervalRef = useRef(null);
+  const videoRef = useRef(null);
 
   // Agent states
   const [agentQuestion, setAgentQuestion] = useState('');
@@ -51,9 +56,7 @@ function App() {
     }
   };
 
-  const extractVideo = async () => {
-    if (!selectedTopic) return;
-    setError('');
+  const startH264Extraction = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
@@ -71,6 +74,50 @@ function App() {
     } catch (e) {
       setError(e.message);
     }
+  };
+
+  const extractVideo = async () => {
+    if (!selectedTopic) return;
+    setError('');
+    setVideoError(null);
+    setVideoMode(null);
+    setVideoUrl('');
+    setStreamPlayerData(null);
+
+    const topic = topics.find((t) => t.name === selectedTopic);
+    const topicDuration = topic && topic.freq > 0 ? topic.message_count / topic.freq : (durationSec || 0);
+
+    if (forceH264) {
+      console.log('[HEVC诊断] 用户强制使用 H.264 转码');
+      setVideoMode('h264-file');
+      startH264Extraction();
+      return;
+    }
+
+    const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    const canPlayHevc = document.createElement('video').canPlayType(hevcMime);
+    const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
+
+    console.log('[HEVC诊断] canPlayType:', canPlayHevc, '| MSE支持:', supportsHevcMSE);
+
+    if (supportsHevcMSE) {
+      console.log('[HEVC诊断] 浏览器支持HEVC MSE，尝试流式播放');
+      setVideoMode('hevc-stream');
+      const params = new URLSearchParams({
+        bag_path: bagPath,
+        topic: selectedTopic,
+      });
+      setStreamPlayerData({
+        stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
+        durationSec: topicDuration,
+      });
+      return;
+    }
+
+    console.log('[HEVC诊断] 浏览器不支持HEVC MSE，降级到H.264转码');
+    alert('当前浏览器不支持 HEVC 解码（canPlayType=' + canPlayHevc + '），将自动使用 H.264 转码方式播放。');
+    setVideoMode('h264-file');
+    startH264Extraction();
   };
 
   useEffect(() => {
@@ -98,6 +145,138 @@ function App() {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [taskId]);
+
+  // MSE 流式 HEVC 播放逻辑（Bag Loader）
+  useEffect(() => {
+    if (!streamPlayerData || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const mediaSource = new MediaSource();
+    const objectUrl = URL.createObjectURL(mediaSource);
+    video.src = objectUrl;
+
+    let sourceBuffer = null;
+    let reader = null;
+    let aborted = false;
+
+    const mimeCodec = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+
+    const cleanup = () => {
+      if (aborted) return;
+      aborted = true;
+      URL.revokeObjectURL(objectUrl);
+      if (mediaSource.readyState === 'open') {
+        try { mediaSource.endOfStream(); } catch (e) {}
+      }
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
+    };
+
+    const onMseError = (source, detail) => {
+      const videoErr = video.error;
+      const msState = mediaSource.readyState;
+      const sbState = sourceBuffer ? {
+        updating: sourceBuffer.updating,
+        buffered: sourceBuffer.buffered?.length,
+      } : null;
+      const diagnostics = {
+        source,
+        detail: detail || '未知错误',
+        videoErrorCode: videoErr?.code,
+        videoErrorMessage: videoErr?.message,
+        mediaSourceState: msState,
+        sourceBufferState: sbState,
+      };
+      console.error('[HEVC诊断] MSE错误:', diagnostics);
+      const msg = `[${source}] ${detail || '未知错误'} | video.error=${videoErr?.code || 'none'} | msState=${msState}`;
+      setVideoError('HEVC流式播放失败: ' + msg);
+      cleanup();
+    };
+
+    mediaSource.addEventListener('sourceopen', async () => {
+      if (aborted) return;
+      try {
+        if (streamPlayerData.durationSec && streamPlayerData.durationSec > 0) {
+          try {
+            mediaSource.duration = streamPlayerData.durationSec;
+            console.log('[HEVC诊断] 预设视频时长:', streamPlayerData.durationSec, '秒');
+          } catch (e) {
+            console.warn('[HEVC诊断] 设置 duration 失败:', e);
+          }
+        }
+
+        sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+
+        const response = await fetch(streamPlayerData.stream_url);
+        if (!response.ok) {
+          throw new Error(`Stream HTTP ${response.status}`);
+        }
+        reader = response.body.getReader();
+
+        const queue = [];
+        let isUpdating = false;
+
+        const processQueue = () => {
+          if (aborted || isUpdating || queue.length === 0) return;
+          const chunk = queue.shift();
+          try {
+            sourceBuffer.appendBuffer(chunk);
+            isUpdating = true;
+          } catch (e) {
+            console.error('appendBuffer failed:', e);
+            cleanup();
+          }
+        };
+
+        sourceBuffer.addEventListener('updateend', () => {
+          isUpdating = false;
+          if (queue.length === 0 && reader === null) {
+            try { mediaSource.endOfStream(); } catch (e) {}
+            return;
+          }
+          processQueue();
+        });
+
+        sourceBuffer.addEventListener('error', (e) => {
+          onMseError('SourceBuffer', e.message || 'SourceBuffer error');
+        });
+
+        while (!aborted) {
+          const { done, value } = await reader.read();
+          if (done) {
+            reader = null;
+            if (!isUpdating && queue.length === 0) {
+              try { mediaSource.endOfStream(); } catch (e) {}
+            }
+            break;
+          }
+          queue.push(value);
+          processQueue();
+        }
+      } catch (e) {
+        onMseError('Fetch/Setup', e.message || String(e));
+      }
+    });
+
+    const onVideoError = () => {
+      const ve = video.error;
+      if (ve) {
+        const codes = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
+        onMseError('VideoElement', `${codes[ve.code] || 'UNKNOWN'}: ${ve.message || ''}`);
+      }
+    };
+    video.addEventListener('error', onVideoError);
+
+    mediaSource.addEventListener('error', (e) => {
+      onMseError('MediaSource', e.message || 'MediaSource error');
+    });
+
+    return () => {
+      video.removeEventListener('error', onVideoError);
+      cleanup();
+    };
+  }, [streamPlayerData]);
 
   return (
     <div className="App" style={{ maxWidth: 1200, margin: '0 auto', padding: 20, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
@@ -148,7 +327,7 @@ function App() {
             ))}
           </div>
 
-          <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={extractVideo}
               disabled={!selectedTopic || (taskStatus && taskStatus.status === 'pending')}
@@ -156,6 +335,15 @@ function App() {
             >
               🎬 Extract Video
             </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={forceH264}
+                onChange={(e) => setForceH264(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              ⚙️ 强制 H.264 转码
+            </label>
             {taskStatus && (
               <span style={{ fontSize: 14, color: '#555' }}>
                 {taskStatus.status === 'processing' && `⏳ ${taskStatus.message} (${taskStatus.progress.toFixed(1)}%)`}
@@ -170,10 +358,49 @@ function App() {
 
       {videoUrl && (
         <div style={{ padding: 20, background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h2>🎬 Video Player</h2>
+          <h2>
+            🎬 Video Player
+            <span style={{ fontSize: 12, marginLeft: 8, padding: '2px 8px', borderRadius: 4, background: '#fa8c16', color: '#fff' }}>
+              H.264 转码
+            </span>
+          </h2>
           <video
             src={videoUrl}
             controls
+            style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 4, marginTop: 12 }}
+          />
+        </div>
+      )}
+
+      {streamPlayerData && (
+        <div style={{ padding: 20, background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <h2>
+            🎬 Video Player
+            <span style={{ fontSize: 12, marginLeft: 8, padding: '2px 8px', borderRadius: 4, background: '#52c41a', color: '#fff' }}>
+              HEVC 直传
+            </span>
+          </h2>
+          {videoError && (
+            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', color: '#cf1322', padding: 12, borderRadius: 4, marginTop: 10, fontSize: 13 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠️ 播放失败</div>
+              <div>{videoError}</div>
+              <button
+                onClick={() => {
+                  setVideoError(null);
+                  setForceH264(true);
+                  setStreamPlayerData(null);
+                  setTimeout(() => extractVideo(), 100);
+                }}
+                style={{ marginTop: 8, padding: '5px 14px', fontSize: 12, borderRadius: 4, border: '1px solid #cf1322', background: '#fff', color: '#cf1322', cursor: 'pointer' }}
+              >
+                🔄 改用 H.264 转码重试
+              </button>
+            </div>
+          )}
+          <video
+            ref={videoRef}
+            controls
+            autoPlay
             style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 4, marginTop: 12 }}
           />
         </div>

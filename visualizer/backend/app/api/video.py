@@ -1,10 +1,11 @@
 import os
 import uuid
 import logging
-from fastapi import APIRouter, BackgroundTasks
-from fastapi.responses import FileResponse
+from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from app.models.schemas import ExtractRequest, ExtractResponse, VideoStatus
-from app.services.video_extractor import extract_topic_to_mp4, get_task
+from app.services.video_extractor import extract_topic_to_mp4, extract_topic_hevc_stream, get_task
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
@@ -59,3 +60,30 @@ def video_file(task_id: str):
         from app.core.exceptions import AppException
         raise AppException("Video file not found", 404)
     return FileResponse(video_path, media_type="video/mp4", filename=f"{task_id}.mp4")
+
+
+@router.get("/stream-hevc")
+def stream_hevc(
+    bag_path: str = Query(..., description="Bag path"),
+    topic: str = Query(..., description="Camera topic"),
+    start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
+    end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
+    fps: Optional[float] = Query(None, description="Override FPS"),
+):
+    """Stream HEVC remuxed to fMP4 for MSE playback. No local file is created."""
+    logger.info(
+        "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
+        bag_path, topic, start_ts, end_ts,
+    )
+    try:
+        return StreamingResponse(
+            extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps),
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": 'inline; filename="stream.mp4"',
+            },
+        )
+    except Exception as exc:
+        logger.exception("HEVC stream failed")
+        from app.core.exceptions import AppException
+        raise AppException(str(exc), 500)
