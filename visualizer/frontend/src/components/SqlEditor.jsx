@@ -1,11 +1,11 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
+import Editor from 'react-simple-code-editor';
 
 /**
- * SqlEditor — 专业化 SQL 编辑器组件 (Light Theme)
- * 特性：语法高亮、行号、Tab 缩进、自动大写关键字、快捷键（Ctrl+Enter 执行）
+ * SqlEditor — 基于 react-simple-code-editor + 外部行号
+ * 特性：语法高亮、行号、Tab 缩进、快捷键（Ctrl+Enter 执行）
  */
 
-// SQL 关键字列表（用于高亮）
 const SQL_KEYWORDS = new Set([
   'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
   'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'JOIN', 'LEFT',
@@ -25,11 +25,9 @@ const SQL_FUNCTIONS = new Set([
   'abs', 'total', 'group_concat', 'strftime', 'date', 'time',
 ]);
 
-// 简单 SQL 语法高亮：将 SQL 文本转为 span 数组
 function highlightSql(text) {
   if (!text) return [];
   const parts = [];
-  // 按单词和空白分割
   const regex = /(--[^\n]*|'[^']*'|"[^"]*"|\b\d+(?:\.\d+)?\b|\w+|[^\w\s]|\s+)/g;
   let match;
   let key = 0;
@@ -56,24 +54,29 @@ function highlightSql(text) {
 }
 
 export default function SqlEditor({ value, onChange, onExecute, placeholder, disabled }) {
-  const textareaRef = useRef(null);
   const lineNumbersRef = useRef(null);
+  const editorWrapRef = useRef(null);
   const [lineCount, setLineCount] = useState(1);
 
-  // 计算行数
   useEffect(() => {
-    const lines = (value || '').split('\n').length;
-    setLineCount(Math.max(lines, 1));
+    setLineCount(Math.max((value || '').split('\n').length, 1));
   }, [value]);
 
-  // 同步行号滚动
-  const handleScroll = useCallback(() => {
-    if (textareaRef.current && lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
-    }
+  // 监听 react-simple-code-editor 内部 textarea 的滚动，同步行号
+  useEffect(() => {
+    const wrap = editorWrapRef.current;
+    if (!wrap) return;
+    const ta = wrap.querySelector('textarea');
+    if (!ta) return;
+    const handleScroll = () => {
+      if (lineNumbersRef.current) {
+        lineNumbersRef.current.scrollTop = ta.scrollTop;
+      }
+    };
+    ta.addEventListener('scroll', handleScroll);
+    return () => ta.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Tab 键缩进
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -81,20 +84,15 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
       const end = e.target.selectionEnd;
       const newValue = value.substring(0, start) + '  ' + value.substring(end);
       onChange(newValue);
-      // 恢复光标位置
       requestAnimationFrame(() => {
         e.target.selectionStart = e.target.selectionEnd = start + 2;
       });
     }
-    // Ctrl+Enter / Cmd+Enter 执行 SQL
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       if (onExecute) onExecute();
     }
   }, [value, onChange, onExecute]);
-
-  // 高亮预览（叠加在 textarea 上方）
-  const highlightedPreview = highlightSql(value);
 
   return (
     <div style={{
@@ -103,7 +101,6 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
       overflow: 'hidden',
       background: '#fff',
     }}>
-      {/* CSS 样式 — Light 主题 */}
       <style>{`
         .sql-keyword { color: #0033b3; font-weight: 600; }
         .sql-function { color: #00627a; }
@@ -112,20 +109,16 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         .sql-comment { color: #8c8c8c; font-style: italic; }
         .sql-operator { color: #333; }
         .sql-line-num { color: #999; text-align: right; user-select: none; padding-right: 12px; }
-        .sql-editor-textarea {
-          background: transparent; color: transparent; caret-color: #333;
-          position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-          font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-          font-size: 13px; line-height: 1.6; padding: 12px 12px 12px 0;
-          border: none; outline: none; resize: none; z-index: 2;
-          white-space: pre; overflow: auto; tab-size: 2;
+        /* react-simple-code-editor 内部对齐 */
+        .sql-editor-wrap textarea,
+        .sql-editor-wrap pre {
+          font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
+          font-size: 13px !important;
+          line-height: 1.6 !important;
         }
-        .sql-editor-highlight {
-          position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        .sql-editor-wrap textarea::placeholder {
+          color: #bfbfbf;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-          font-size: 13px; line-height: 1.6; padding: 12px 12px 12px 0;
-          white-space: pre; overflow: hidden; z-index: 1; pointer-events: none;
-          color: #333;
         }
       `}</style>
 
@@ -137,7 +130,7 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         <span style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>SQL 编辑器</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={() => { if (value) { navigator.clipboard.writeText(value); } }}
+            onClick={() => { if (value) navigator.clipboard.writeText(value); }}
             style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #d9d9d9', background: 'transparent', color: '#666', cursor: 'pointer' }}
             title="复制 SQL"
           >
@@ -165,8 +158,8 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         </div>
       </div>
 
-      {/* 编辑器主体：行号 + 代码区域 */}
-      <div style={{ display: 'flex', position: 'relative', minHeight: 140, maxHeight: 400 }}>
+      {/* 编辑器主体：行号 + Editor */}
+      <div style={{ display: 'flex', minHeight: 140, maxHeight: 400 }}>
         {/* 行号 */}
         <div
           ref={lineNumbersRef}
@@ -182,23 +175,26 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
           ))}
         </div>
 
-        {/* 代码区 */}
-        <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-          {/* 高亮层 */}
-          <div className="sql-editor-highlight">
-            {highlightedPreview}
-          </div>
-          {/* 输入层 */}
-          <textarea
-            ref={textareaRef}
+        {/* react-simple-code-editor */}
+        <div ref={editorWrapRef} className="sql-editor-wrap" style={{ flex: 1, minWidth: 0, background: '#fff' }}>
+          <Editor
             value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onScroll={handleScroll}
-            placeholder={placeholder}
-            spellCheck={false}
-            className="sql-editor-textarea"
+            onValueChange={onChange}
+            highlight={highlightSql}
+            padding={12}
             disabled={disabled}
+            placeholder={placeholder}
+            onKeyDown={handleKeyDown}
+            tabSize={2}
+            insertSpaces
+            ignoreTabKey={false}
+            style={{
+              fontFamily: '"Consolas", "Monaco", "Courier New", monospace',
+              fontSize: 13,
+              backgroundColor: '#fff',
+              color: '#333',
+              minHeight: 120,
+            }}
           />
         </div>
       </div>
