@@ -360,7 +360,7 @@ class AgentEngine:
         此时自动给 bag_id 加上第一个表的别名/名称前缀，如 ``e.bag_id``。
         """
         upper = sql.upper()
-        if "BAG_ID" in upper or "SELECT *" in upper:
+        if "SELECT *" in upper:
             return sql
         # 纯聚合查询（无 GROUP BY 但有聚合函数）不添加 bag_id，避免语法错误
         has_aggregate = any(agg in upper for agg in ["COUNT(", "SUM(", "AVG(", "MAX(", "MIN("])
