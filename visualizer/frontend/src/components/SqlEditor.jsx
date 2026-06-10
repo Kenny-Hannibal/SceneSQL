@@ -31,7 +31,13 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
       overflow: 'hidden',
       background: '#fff',
       position: 'relative',
+      textAlign: 'left',
     }}>
+      <style>{`
+        /* 覆盖全局 text-align: center 对 CodeMirror 的影响 */
+        .cm-editor { text-align: left !important; }
+        .cm-content { text-align: left !important; }
+      `}</style>
       {/* 工具栏 — sticky 定位，滚动时冻结在最上方 */}
       <div style={{
         position: 'sticky',

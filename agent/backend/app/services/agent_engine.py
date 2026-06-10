@@ -169,7 +169,11 @@ class AgentEngine:
         return raw
 
     def _validate_sql(self, sql: str) -> Optional[str]:
-        upper = sql.upper().strip()
+        import re
+        # 去掉行注释和块注释后再判断语句类型
+        cleaned = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+        cleaned = re.sub(r"--.*?\n", "\n", cleaned)
+        upper = cleaned.upper().strip()
         if not (upper.startswith("SELECT") or upper.startswith("WITH")):
             return "只允许 SELECT 查询（含 WITH CTE）"
         if " FROM " not in upper and "\nFROM " not in upper:

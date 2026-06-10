@@ -56,6 +56,11 @@
 - ✅ 进度条从打开起稳定，不跳动
 - ✅ 后端 ffmpeg stderr 日志输出正常
 - ✅ 前端 build 编译通过
+- **② AgentPanel.jsx — CodeMirror 6 文本居中修复**
+  - 覆盖 `.App { text-align: center }` 全局样式，确保 SQL 代码左对齐
+- **③ agent_engine.py — `_validate_sql()` 去掉注释后再判断语句类型**
+  - 原逻辑直接对原始 SQL 做 `strip().startswith("WITH")`，导致以 `-- 注释` 开头的 CTE 查询被误判为非 SELECT
+  - 现先通过正则去掉 `--` 行注释和 `/* */` 块注释，再判断首词是否为 SELECT/WITH
 - ⚠️ Windows Chrome 的 HEVC 硬件解码支持因系统而异
 
 ---
