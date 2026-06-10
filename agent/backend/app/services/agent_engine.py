@@ -355,6 +355,9 @@ class AgentEngine:
 
         对 CTE 中的每个 SELECT 以及最外层 SELECT 都注入 bag_id，
         同时把 bag_id 追加到 GROUP BY 列表，避免语法错误。
+
+        当 SELECT 的 FROM 子句包含多个表（JOIN）时，bag_id 会出现歧义引用。
+        此时自动给 bag_id 加上第一个表的别名/名称前缀，如 ``e.bag_id``。
         """
         upper = sql.upper()
         if "BAG_ID" in upper or "SELECT *" in upper:
@@ -373,6 +376,27 @@ class AgentEngine:
             # AST 解析失败，回退到原始 SQL（不注入 bag_id）
             return sql
 
+        def _get_bag_id_col(select_node: sqlglot.exp.Select):
+            """根据当前 SELECT 的 FROM/JOIN 表数量决定 bag_id 的注入形式。"""
+            tables = []
+            from_node = select_node.args.get("from_")
+            if from_node:
+                for t in from_node.find_all(exp.Table):
+                    tables.append(t)
+            joins = select_node.args.get("joins") or []
+            for join in joins:
+                for t in join.find_all(exp.Table):
+                    tables.append(t)
+
+            if len(tables) == 0:
+                return None
+            if len(tables) == 1:
+                return exp.column("bag_id")
+            # 多表 JOIN：使用第一个表的别名/名称前缀避免歧义
+            first = tables[0]
+            ref = first.alias or first.name
+            return exp.column("bag_id", table=ref)
+
         modified = False
         for select in tree.find_all(exp.Select):
             # 检查当前 SELECT 是否已经有 bag_id
@@ -383,8 +407,11 @@ class AgentEngine:
             if has_bag_id:
                 continue
 
+            bag_id_col = _get_bag_id_col(select)
+            if bag_id_col is None:
+                continue
+
             # 注入 bag_id 到 SELECT 列表最前面
-            bag_id_col = exp.column("bag_id")
             select.set("expressions", [bag_id_col] + select.expressions)
             modified = True
 
