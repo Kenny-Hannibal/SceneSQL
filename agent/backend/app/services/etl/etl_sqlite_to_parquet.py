@@ -45,6 +45,19 @@ CORE_TABLES = [
     "dynamic_link",
 ]
 
+# 按 bag_id 分区的表（动态数据，每个 bag 独立）
+PARTITIONED_TABLES = {
+    "range_tag",
+    "intersection_info",
+    "ego",
+    "dynamic_obj",
+    "dynamic_lane",
+    "dynamic_link",
+}
+
+# 非分区表（静态地图数据，所有 bag 共用一份）
+NON_PARTITIONED_TABLES = set(CORE_TABLES) - PARTITIONED_TABLES
+
 BATCH_SIZE = 500  # 每批处理 500 个 DB
 OSS_MOUNT_PREFIX = "/mnt/gacrnd-oss"
 OSS_BUCKET_PREFIX = "oss://gacrnd-oss"
@@ -316,6 +329,7 @@ def _process_batch(
     conn = duckdb.connect()
     try:
         conn.execute("INSTALL sqlite; LOAD sqlite;")
+        is_partitioned = table_name in PARTITIONED_TABLES
 
         # 探测列名并集
         all_cols = set()
@@ -351,10 +365,17 @@ def _process_batch(
                     col_exprs.append(f'"{col}"')
                 else:
                     col_exprs.append(f'NULL AS "{col}"')
-            parts.append(
-                f"SELECT '{bag_id}' AS bag_id, {', '.join(col_exprs)} "
-                f"FROM sqlite_scan('{safe_path}', '{table_name}')"
-            )
+            if is_partitioned:
+                parts.append(
+                    f"SELECT '{bag_id}' AS bag_id, {', '.join(col_exprs)} "
+                    f"FROM sqlite_scan('{safe_path}', '{table_name}')"
+                )
+            else:
+                # 非分区表不注入 bag_id，避免重复
+                parts.append(
+                    f"SELECT {', '.join(col_exprs)} "
+                    f"FROM sqlite_scan('{safe_path}', '{table_name}')"
+                )
 
         if not parts:
             return None
@@ -388,9 +409,32 @@ def etl_table_parallel(
     并行策略：
     - 表间并行：每张表独立子进程
     - 表内并行：batch 级别并发写临时文件，最后串行合并
+
+    分区表（PARTITIONED_TABLES）：按 bag_id 分区输出到目录
+    非分区表（NON_PARTITIONED_TABLES）：只读第一个 .db，输出到单个文件
     """
-    parquet_path = output_dir / f"{table_name}.parquet"
+    is_partitioned = table_name in PARTITIONED_TABLES
     total = len(db_files)
+
+    if not is_partitioned:
+        # 非分区表：只处理第一个 .db 文件（静态地图数据所有 bag 相同）
+        if not db_files:
+            print(f"[WARN] {table_name}: 无 DB 文件可处理")
+            return None
+        first_db = db_files[0]
+        print(f"[INFO] {table_name}: 非分区表，只读取第一个 DB {Path(first_db).name}")
+        tmp = _process_batch(0, [first_db], table_name, str(output_dir))
+        if not tmp:
+            print(f"[WARN] {table_name}: 第一个 DB 无数据，跳过")
+            return None
+        parquet_path = output_dir / f"{table_name}.parquet"
+        os.rename(tmp, parquet_path)
+        print(f"[OK] {table_name} → {parquet_path}")
+        return str(parquet_path)
+
+    # 分区表：处理所有 .db 文件，按 bag_id 分区
+    parquet_path = output_dir / f"{table_name}.parquet"
+    parquet_dir = output_dir / table_name
 
     # 构造 batch 列表
     batches = []
@@ -434,30 +478,24 @@ def etl_table_parallel(
         print(f"[WARN] {table_name}: 所有 batch 均无数据，跳过")
         return None
 
-    # 串行合并所有临时 Parquet
-    print(f"[INFO] {table_name}: 合并 {len(tmp_parquets)} 个临时 Parquet → {parquet_path}")
+    # 串行合并所有临时 Parquet，按 bag_id 分区输出
+    print(f"[INFO] {table_name}: 合并 {len(tmp_parquets)} 个临时 Parquet → {parquet_dir}/ (PARTITION_BY bag_id)")
     conn = duckdb.connect()
     try:
-        if len(tmp_parquets) == 1:
-            # 只有一个 batch，直接重命名
-            os.rename(tmp_parquets[0], parquet_path)
-        else:
-            # 多个 batch：UNION ALL 合并
-            parts = [f"SELECT * FROM read_parquet('{p}')" for p in tmp_parquets]
-            union_sql = " UNION ALL ".join(parts)
-            conn.execute(
-                f"COPY ({union_sql}) TO '{parquet_path}' "
-                f"(FORMAT PARQUET, ROW_GROUP_SIZE 100000, COMPRESSION 'ZSTD')"
-            )
-            # 清理临时文件
-            for p in tmp_parquets:
-                try:
-                    os.unlink(p)
-                except OSError:
-                    pass
+        parts = [f"SELECT * FROM read_parquet('{p}')" for p in tmp_parquets]
+        union_sql = " UNION ALL ".join(parts)
+        conn.execute(
+            f"COPY ({union_sql}) TO '{parquet_dir}' "
+            f"(FORMAT PARQUET, PARTITION_BY (bag_id), COMPRESSION 'ZSTD')"
+        )
+        # 清理临时文件
+        for p in tmp_parquets:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
     except Exception as e:
         print(f"[ERROR] {table_name} 合并失败: {e}")
-        # 清理临时文件
         for p in tmp_parquets:
             try:
                 os.unlink(p)
@@ -467,8 +505,8 @@ def etl_table_parallel(
     finally:
         conn.close()
 
-    print(f"[OK] {table_name} → {parquet_path}")
-    return str(parquet_path)
+    print(f"[OK] {table_name} → {parquet_dir}/")
+    return str(parquet_dir)
 
 
 # ---------------------------------------------------------------------------
