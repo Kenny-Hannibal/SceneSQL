@@ -8,10 +8,12 @@ import { keymap } from '@codemirror/view';
  * 原生支持行号、SQL 语法高亮、滚动、Tab/快捷键
  */
 
+import { useMemo } from 'react';
+
 export default function SqlEditor({ value, onChange, onExecute, placeholder, disabled }) {
   const lineCount = Math.max((value || '').split('\n').length, 1);
 
-  const extensions = [
+  const extensions = useMemo(() => [
     sql(),
     keymap.of([
       {
@@ -22,7 +24,7 @@ export default function SqlEditor({ value, onChange, onExecute, placeholder, dis
         },
       },
     ]),
-  ];
+  ], [onExecute]);
 
   return (
     <div style={{

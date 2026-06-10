@@ -189,6 +189,7 @@ export default function AgentPanel() {
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
   const videoRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   // Extraction progress modal (replaces the bottom panel)
   const [extractModalOpen, setExtractModalOpen] = useState(false);
@@ -283,6 +284,13 @@ export default function AgentPanel() {
   const handleExecuteSql = async () => {
     const sql = sqlEditor.trim();
     if (!sql) return;
+    // 取消旧请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError('');
 
@@ -305,6 +313,7 @@ export default function AgentPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -328,6 +337,13 @@ export default function AgentPanel() {
   // LLM 查询（auto 模式：直接执行，preview 模式：仅填入编辑器）
   const handleSubmit = async () => {
     if (!question.trim()) return;
+    // 取消旧请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError('');
     setResult(null);
@@ -342,6 +358,7 @@ export default function AgentPanel() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildPayload()),
+          signal: controller.signal,
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -370,6 +387,7 @@ export default function AgentPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildPayload()),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -393,6 +411,13 @@ export default function AgentPanel() {
 
   const handleSubmitStream = async () => {
     if (!question.trim()) return;
+    // 取消旧请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError('');
     setResult(null);
@@ -407,6 +432,7 @@ export default function AgentPanel() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildPayload()),
+          signal: controller.signal,
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -434,6 +460,7 @@ export default function AgentPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildPayload()),
+        signal: controller.signal,
       });
 
       const reader = response.body.getReader();
@@ -880,8 +907,19 @@ export default function AgentPanel() {
     };
     syncWidth();
 
-    const onTopScroll = () => { bottomBar.scrollLeft = topBar.scrollLeft; };
-    const onBottomScroll = () => { topBar.scrollLeft = bottomBar.scrollLeft; };
+    let isSyncing = false;
+    const onTopScroll = () => {
+      if (isSyncing) return;
+      isSyncing = true;
+      bottomBar.scrollLeft = topBar.scrollLeft;
+      isSyncing = false;
+    };
+    const onBottomScroll = () => {
+      if (isSyncing) return;
+      isSyncing = true;
+      topBar.scrollLeft = bottomBar.scrollLeft;
+      isSyncing = false;
+    };
 
     topBar.addEventListener('scroll', onTopScroll);
     bottomBar.addEventListener('scroll', onBottomScroll);
