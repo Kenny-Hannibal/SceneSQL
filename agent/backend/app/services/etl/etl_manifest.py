@@ -127,10 +127,19 @@ class EtlManifestManager:
         # 为每张表创建视图
         for table_name, parquet_path in batch.tables.items():
             resolved_path = self._resolve_parquet_path(parquet_path, batch_id)
-            conn.execute(f"""
-                CREATE OR REPLACE VIEW {table_name} AS
-                SELECT * FROM read_parquet('{resolved_path}')
-            """)
+            if table_name.startswith("static_"):
+                # 静态地图表（static_link/static_lane/static_obj 等）在所有 bag 中数据相同，
+                # ETL UNION ALL 后会产生重复。去重并去掉 bag_id，避免 JOIN 时笛卡尔积。
+                conn.execute(f"""
+                    CREATE OR REPLACE VIEW {table_name} AS
+                    SELECT DISTINCT * EXCLUDE(bag_id)
+                    FROM read_parquet('{resolved_path}')
+                """)
+            else:
+                conn.execute(f"""
+                    CREATE OR REPLACE VIEW {table_name} AS
+                    SELECT * FROM read_parquet('{resolved_path}')
+                """)
 
         return conn
 
