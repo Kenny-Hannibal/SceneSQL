@@ -61,6 +61,12 @@
 - **③ agent_engine.py — `_validate_sql()` 去掉注释后再判断语句类型**
   - 原逻辑直接对原始 SQL 做 `strip().startswith("WITH")`，导致以 `-- 注释` 开头的 CTE 查询被误判为非 SELECT
   - 现先通过正则去掉 `--` 行注释和 `/* */` 块注释，再判断首词是否为 SELECT/WITH
+- **④ agent_engine.py — `_ensure_bag_id_in_select()` 升级为 AST 注入（sqlglot）**
+  - 原正则注入无法处理 CTE 链（如 `WITH a AS (...) b AS (...) SELECT ...`），导致 bag_id 列找不到或错位
+  - 现使用 `sqlglot` 解析 AST，对**每个 CTE 的 SELECT** 和**最外层 SELECT** 都注入 `bag_id`
+  - 同时自动把 `bag_id` 追加到 `GROUP BY` 列表，避免语法错误
+  - 如果 AST 解析失败，回退到原始 SQL（安全降级）
+  - 新增依赖：`sqlglot==30.10.0`
 - ⚠️ Windows Chrome 的 HEVC 硬件解码支持因系统而异
 
 ---

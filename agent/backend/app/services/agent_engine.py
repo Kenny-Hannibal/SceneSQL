@@ -351,7 +351,11 @@ class AgentEngine:
 
     @staticmethod
     def _ensure_bag_id_in_select(sql: str) -> str:
-        """如果 SQL 的 SELECT 中没有 bag_id，自动插入（跳过 SELECT * 和纯聚合查询）。"""
+        """如果 SQL 中没有 bag_id，通过 AST 自动注入（支持 CTE 链和 GROUP BY）。
+
+        对 CTE 中的每个 SELECT 以及最外层 SELECT 都注入 bag_id，
+        同时把 bag_id 追加到 GROUP BY 列表，避免语法错误。
+        """
         upper = sql.upper()
         if "BAG_ID" in upper or "SELECT *" in upper:
             return sql
@@ -360,14 +364,61 @@ class AgentEngine:
         has_group_by = "GROUP BY" in upper
         if has_aggregate and not has_group_by:
             return sql
-        return re.sub(r"(?i)^\s*(SELECT\s+DISTINCT\s+|SELECT\s+)", r"\1bag_id, ", sql)
+
+        try:
+            import sqlglot
+            from sqlglot import exp
+            tree = sqlglot.parse_one(sql, dialect="duckdb")
+        except Exception:
+            # AST 解析失败，回退到原始 SQL（不注入 bag_id）
+            return sql
+
+        modified = False
+        for select in tree.find_all(exp.Select):
+            # 检查当前 SELECT 是否已经有 bag_id
+            has_bag_id = any(
+                isinstance(e, exp.Column) and e.name.lower() == "bag_id"
+                for e in select.expressions
+            )
+            if has_bag_id:
+                continue
+
+            # 注入 bag_id 到 SELECT 列表最前面
+            bag_id_col = exp.column("bag_id")
+            select.set("expressions", [bag_id_col] + select.expressions)
+            modified = True
+
+            # 如果有 GROUP BY，也注入 bag_id
+            group = select.args.get("group")
+            if group and hasattr(group, "expressions"):
+                has_bag_id_in_group = any(
+                    isinstance(e, exp.Column) and e.name.lower() == "bag_id"
+                    for e in group.expressions
+                )
+                if not has_bag_id_in_group:
+                    group.expressions.insert(0, bag_id_col.copy())
+
+        if not modified:
+            return sql
+
+        return tree.sql(dialect="duckdb")
 
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
         """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
-        sql = self._ensure_bag_id_in_select(sql)
-        sql = self._inject_limit(sql, result_limit)
-        rows = self._execute_parquet(sql, result_limit)
+        original_sql = sql
+        sql_with_bag_id = self._ensure_bag_id_in_select(sql)
+        sql_with_bag_id = self._inject_limit(sql_with_bag_id, result_limit)
+        rows = self._execute_parquet(sql_with_bag_id, result_limit)
         errors = [r for r in rows if "_error" in r]
+
+        # 如果 bag_id 注入导致报错，回退到原始 SQL（不含 bag_id）
+        if errors and any("bag_id" in r.get("_error", "").lower() for r in errors):
+            sql = self._inject_limit(original_sql, result_limit)
+            rows = self._execute_parquet(sql, result_limit)
+            errors = [r for r in rows if "_error" in r]
+        else:
+            sql = sql_with_bag_id
+
         good_rows = [r for r in rows if "_error" not in r]
 
         # 收集所有唯一 bag_id
