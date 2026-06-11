@@ -404,38 +404,35 @@ def etl_table_parallel(
     batch_size: int = BATCH_SIZE,
     workers: int = 4,
 ) -> str | None:
-    """并行提取一张表：将 db_files 分批，每批独立写临时 Parquet，最后合并。
+    """并行提取一张表：将 db_files 分批，每批独立写临时 Parquet，最后合并为单文件。
 
     并行策略：
     - 表间并行：每张表独立子进程
     - 表内并行：batch 级别并发写临时文件，最后串行合并
 
-    分区表（PARTITIONED_TABLES）：按 bag_id 分区输出到目录
-    非分区表（NON_PARTITIONED_TABLES）：只读第一个 .db，输出到单个文件
+    动态表（PARTITIONED_TABLES）：单文件输出，注入 bag_id 列
+    静态表（NON_PARTITIONED_TABLES）：只读第一个 .db，单文件输出，无 bag_id
     """
     is_partitioned = table_name in PARTITIONED_TABLES
     total = len(db_files)
+    parquet_path = output_dir / f"{table_name}.parquet"
 
     if not is_partitioned:
-        # 非分区表：只处理第一个 .db 文件（静态地图数据所有 bag 相同）
+        # 静态表：只处理第一个 .db 文件（所有 bag 的地图数据相同）
         if not db_files:
             print(f"[WARN] {table_name}: 无 DB 文件可处理")
             return None
         first_db = db_files[0]
-        print(f"[INFO] {table_name}: 非分区表，只读取第一个 DB {Path(first_db).name}")
+        print(f"[INFO] {table_name}: 静态表，只读取第一个 DB {Path(first_db).name}")
         tmp = _process_batch(0, [first_db], table_name, str(output_dir))
         if not tmp:
             print(f"[WARN] {table_name}: 第一个 DB 无数据，跳过")
             return None
-        parquet_path = output_dir / f"{table_name}.parquet"
         os.rename(tmp, parquet_path)
         print(f"[OK] {table_name} → {parquet_path}")
         return str(parquet_path)
 
-    # 分区表：处理所有 .db 文件，按 bag_id 分区
-    parquet_path = output_dir / f"{table_name}.parquet"
-    parquet_dir = output_dir / table_name
-
+    # 动态表：处理所有 .db 文件，合并为单文件
     # 构造 batch 列表
     batches = []
     for i in range(0, total, batch_size):
@@ -478,22 +475,24 @@ def etl_table_parallel(
         print(f"[WARN] {table_name}: 所有 batch 均无数据，跳过")
         return None
 
-    # 串行合并所有临时 Parquet，按 bag_id 分区输出
-    print(f"[INFO] {table_name}: 合并 {len(tmp_parquets)} 个临时 Parquet → {parquet_dir}/ (PARTITION_BY bag_id)")
+    # 串行合并所有临时 Parquet 为单文件
+    print(f"[INFO] {table_name}: 合并 {len(tmp_parquets)} 个临时 Parquet → {parquet_path}")
     conn = duckdb.connect()
     try:
-        parts = [f"SELECT * FROM read_parquet('{p}')" for p in tmp_parquets]
-        union_sql = " UNION ALL ".join(parts)
-        conn.execute(
-            f"COPY ({union_sql}) TO '{parquet_dir}' "
-            f"(FORMAT PARQUET, PARTITION_BY (bag_id), COMPRESSION 'ZSTD')"
-        )
-        # 清理临时文件
-        for p in tmp_parquets:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
+        if len(tmp_parquets) == 1:
+            os.rename(tmp_parquets[0], parquet_path)
+        else:
+            parts = [f"SELECT * FROM read_parquet('{p}')" for p in tmp_parquets]
+            union_sql = " UNION ALL ".join(parts)
+            conn.execute(
+                f"COPY ({union_sql}) TO '{parquet_path}' "
+                f"(FORMAT PARQUET, ROW_GROUP_SIZE 100000, COMPRESSION 'ZSTD')"
+            )
+            for p in tmp_parquets:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
     except Exception as e:
         print(f"[ERROR] {table_name} 合并失败: {e}")
         for p in tmp_parquets:
@@ -505,8 +504,8 @@ def etl_table_parallel(
     finally:
         conn.close()
 
-    print(f"[OK] {table_name} → {parquet_dir}/")
-    return str(parquet_dir)
+    print(f"[OK] {table_name} → {parquet_path}")
+    return str(parquet_path)
 
 
 # ---------------------------------------------------------------------------

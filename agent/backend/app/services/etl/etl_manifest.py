@@ -127,18 +127,10 @@ class EtlManifestManager:
         # 为每张表创建视图
         for table_name, parquet_path in batch.tables.items():
             resolved_path = self._resolve_parquet_path(parquet_path, batch_id)
-            if os.path.isdir(resolved_path):
-                # 分区表：目录结构 table_name/bag_id=xxx/*.parquet
-                conn.execute(f"""
-                    CREATE OR REPLACE VIEW {table_name} AS
-                    SELECT * FROM read_parquet('{resolved_path}/*/*.parquet', hive_partitioning=1)
-                """)
-            else:
-                # 非分区表：单文件
-                conn.execute(f"""
-                    CREATE OR REPLACE VIEW {table_name} AS
-                    SELECT * FROM read_parquet('{resolved_path}')
-                """)
+            conn.execute(f"""
+                CREATE OR REPLACE VIEW {table_name} AS
+                SELECT * FROM read_parquet('{resolved_path}')
+            """)
 
         return conn
 

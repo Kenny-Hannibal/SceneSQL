@@ -323,6 +323,13 @@ class AgentEngine:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [loop.run_in_executor(executor, process_one, f) for f in db_files]
             for coro in asyncio.as_completed(futures):
+                if len(all_rows) >= result_limit:
+                    # 已收集够结果，取消剩余任务并提前退出
+                    for fut in futures:
+                        if not fut.done():
+                            fut.cancel()
+                    break
+
                 rows = await coro
                 for row in rows:
                     if "_error" in row:
@@ -331,10 +338,14 @@ class AgentEngine:
                         all_rows.append(row)
                         if not columns:
                             columns = list(row.keys())
+                        if len(all_rows) >= result_limit:
+                            break
                 if rows and "_error" not in rows[0]:
                     matched += 1
 
-        explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录"
+        # 截断到 result_limit
+        all_rows = all_rows[:result_limit]
+        explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（ LIMIT {result_limit} 提前终止）"
         error_msg = None
         if errors:
             error_msg = f"{len(errors)} 个 DB 执行失败（仅展示前 3 条）: " + "; ".join(errors[:3])
