@@ -275,32 +275,39 @@ class AgentEngine:
         columns: List[str] = []
         matched = 0
 
-        # 优化：SQLite 只读连接 + WAL 模式 + mmap
-        def process_one(db_file: str):
+        # ── P0: 预解析所有 bag_path（避免每个子任务重复 IO，resolver 可能是网络/OSS 瓶颈）──
+        def _resolve_one(db_file: str):
+            data_id = db_file.replace(".db", "")
+            try:
+                info = resolver.resolve(data_id)
+                return db_file, {
+                    "bag_id": info.origin_bag_id or data_id,
+                    "bag_path": info.local_path or info.oss_path or "",
+                }
+            except Exception as exc:
+                logger.debug("Resolver failed for %s: %s", data_id, exc)
+                return db_file, {"bag_id": data_id, "bag_path": ""}
+
+        bag_info_map: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=min(len(db_files), max_workers * 2)) as resolve_pool:
+            for db_file, info in resolve_pool.map(_resolve_one, db_files):
+                bag_info_map[db_file] = info
+
+        # ── P1: 纯数据库查询（无 resolver IO，sqlite3 C 层释放 GIL，ThreadPool 可真正并行）──
+        def process_one(db_file: str, bag_id: str, bag_path: str):
             db_path = os.path.join(self.db_path, db_file)
             conn = None
             try:
                 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
-                # 优化：禁用 journal + 加大 cache 加速只读查询
                 conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
-                conn.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+                conn.execute("PRAGMA cache_size=-64000")
+                conn.execute("PRAGMA mmap_size=268435456")
                 cursor = conn.execute(sql)
                 rows = cursor.fetchall()
                 if not rows:
                     conn.close()
                     return []
-
-                data_id = db_file.replace(".db", "")
-                bag_id = data_id
-                bag_path = ""
-                try:
-                    info = resolver.resolve(data_id)
-                    bag_id = info.origin_bag_id or data_id
-                    bag_path = info.local_path or info.oss_path or ""
-                except Exception as exc:
-                    logger.debug("Resolver failed for %s: %s", data_id, exc)
 
                 result = []
                 for row in rows:
@@ -320,11 +327,14 @@ class AgentEngine:
                 logger.warning("SQL execution failed on %s: %s", db_file, exc)
                 return [{"_error": str(exc), "db_file": db_file}]
 
+        # ── P2: 并行执行查询（提前退出）──
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [loop.run_in_executor(executor, process_one, f) for f in db_files]
+            futures = [
+                loop.run_in_executor(executor, process_one, f, bag_info_map[f]["bag_id"], bag_info_map[f]["bag_path"])
+                for f in db_files
+            ]
             for coro in asyncio.as_completed(futures):
                 if len(all_rows) >= result_limit:
-                    # 已收集够结果，取消剩余任务并提前退出
                     for fut in futures:
                         if not fut.done():
                             fut.cancel()
