@@ -330,7 +330,10 @@ class AgentEngine:
                 return [{"_error": str(exc), "db_file": db_file}]
 
         # ── P2: 并行执行查询（提前退出）──
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 手动管理 executor，收集够结果后立即 shutdown(wait=False)，
+        # 避免第一次查询的后台任务阻塞第二次查询。
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             futures = [
                 loop.run_in_executor(executor, process_one, f, bag_info_map[f]["bag_id"], bag_info_map[f]["bag_path"])
                 for f in db_files
@@ -354,6 +357,9 @@ class AgentEngine:
                             break
                 if rows and "_error" not in rows[0]:
                     matched += 1
+        finally:
+            # wait=False: 不等待已取消/正在执行的任务，立即释放线程池
+            executor.shutdown(wait=False)
 
         # 截断到 result_limit
         all_rows = all_rows[:result_limit]
