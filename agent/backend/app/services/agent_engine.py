@@ -300,7 +300,9 @@ class AgentEngine:
             try:
                 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
+                # 只读连接不要设置 journal_mode=WAL，FUSE/只读文件系统会报
+                # "attempt to write a readonly database"
+                # cache_size 和 mmap_size 是安全的只读优化
                 conn.execute("PRAGMA cache_size=-64000")
                 conn.execute("PRAGMA mmap_size=268435456")
                 cursor = conn.execute(sql)
