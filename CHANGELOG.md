@@ -2,6 +2,99 @@
 
 > 每次功能修改 commit 后，在此记录变更内容，方便回溯。
 
+## [2026-06-09] SQLite 批量模式取消 DB 数量限制 + 结果数量输入优化 + 修复可视化连接泄漏
+
+**Commit**: `待提交` — fix: SQLite 批量查询不再限制 DB 数量；结果数量支持无限制；修复可视化后连接卡死
+
+### 变更内容
+- **① agent_engine.py — SQLite 批量查询取消 `db_limit` 限制，改为按需并发**
+  - `_query_batch()` 不再截断 `db_files[:db_limit]`，默认扫描目录下全部 `.db`
+  - `db_limit` 参数保留以兼容旧 API，但实际不再生效
+  - 改为**按 `max_workers` 批次启动任务**，而非一次性提交所有 DB，避免连接/线程爆炸
+  - 收集够 `result_limit` 后立即停止启动新任务；剩余任务 `cancel()` + 2 秒超时清理
+- **② agent_engine.py — `result_limit <= 0` 表示不限制结果数量**
+  - `_inject_limit()` 在 `limit <= 0` 时不注入 `LIMIT` 子句
+  - `_query_batch()` 在 `result_limit <= 0` 时遍历全部 DB，不提前退出
+  - `_query_parquet()` 同样支持 `result_limit <= 0` 不限制
+- **③ agent_engine.py — bag_path 改为按需解析**
+  - 移除「预解析全部 bag_path」步骤，避免 `result_limit` 较小时白白解析剩余 DB
+  - 只有真正命中结果的 DB 才调用 `resolver.resolve()` 获取 `bag_id` / `bag_path`
+- **③ AgentPanel.jsx — 结果数量输入框体验优化**
+  - 移除已无意义的「DB 数量限制」输入框
+  - `resultLimit` 改为字符串状态，聚焦时允许清空，方便用户重新输入
+  - 仅在 `onBlur`（失焦）且值为空或非法时，才恢复默认值 `100`
+  - 新增「不限制结果数量」复选框，选中时后端返回全部匹配结果
+- **④ AgentPanel.jsx — 修复多次可视化后「正在加载 bag 信息」卡死**
+  - `startVisualization()` 开始时 abort 旧的 bag info SSE 请求和旧的 video stream fetch
+  - Topic modal 关闭时自动 abort 未完成的 `/api/bag/info-stream`
+  - Player modal 关闭时自动 abort 未完成的 `/api/video/stream-hevc`
+  - MSE 播放 effect 内使用 `AbortController` 发起 fetch，cleanup 时 `abort()` 彻底释放底层 TCP 连接
+- **⑤ video_extractor.py — stream finally 块增加超时保护**
+  - 避免客户端断开后，`feeder.join()` / `process.wait()` 无限等待占用线程池
+  - `feeder.join(timeout=5)`，仍未结束则关闭 stdin 再 join(timeout=2)
+  - `process.terminate()` + `wait(timeout=5)`，超时则 `process.kill()`
+- **⑥ 后端日志机制增强**
+  - `config.py` 新增 `LOG_DIR`、`LOG_FILE_MAX_BYTES`、`LOG_FILE_BACKUP_COUNT` 配置
+  - `logging.py` 在原有 stdout 日志基础上，增加 `RotatingFileHandler` 写入 `logs/app.log`
+  - 默认单文件 50MB，保留 7 个备份，自动轮转
+  - `main.py` 新增 HTTP 请求中间件，记录每个接口的 `method | path | status | duration`
+  - 状态码 >= 500 或耗时 > 2s 的请求自动记为 WARNING，方便定位卡死/慢请求
+- **⑦ agent_engine.py — 查询结果字段精简**
+  - SQLite 模式下 `bag_id` 改为直接使用 `.db` 文件名（去掉后缀），不再调用 resolver 倒查原始 bag id
+  - 返回结果中移除 `db_file` 和 `bag_path` 字段
+  - `bag_id` 始终放在返回字典的第一列，表格最左侧显示
+  - Parquet 模式同样只保留 `bag_id`，移除 `bag_path`/`db_file` 注入
+- **⑧ AgentPanel.jsx — SQL 执行进度弹窗**
+  - 点击「执行 SQL」后弹出进度窗口，显示已耗时秒数
+  - 进度条随时间增长；超过 5 秒提示"执行时间较长，请耐心等待"
+  - 超过 15 秒提示"可能已卡住，请检查后端日志"
+  - 提供「取消执行」按钮，可中断当前请求
+- **⑨ 修复连续播放几个包后再次播放卡住**
+  - `AgentPanel.jsx`：`startVisualization()` 开头强制关闭旧播放器弹窗并清空 video rows，避免多个 video stream 连接并发占满浏览器连接槽
+  - `video_extractor.py`：`extract_topic_hevc_stream()` 改为真正流式：边读 bag 边喂给 ffmpeg，不再先把所有帧读入内存
+  - 客户端断开时，ffmpeg 会更快结束，后端线程更快释放
+- **⑩ AgentPanel.jsx — 可视化按钮列固定在最右侧**
+  - Action 列使用 `position: sticky; right: 0` 固定
+  - 表格横向滚动时，「播包可视化」按钮始终可见，无需拖到底部
+- **⑪ 修复播包可视化卡死（全局串行锁 + 非 daemon 线程 + SQL 弹窗状态）**
+  - `video_extractor.py`：stream 的 feed 线程改为 daemon，并增加 `threading.Event` 停止标志
+  - 客户端断开后，立即设置停止标志、关闭 stdin、kill ffmpeg， feeder 在后台自行结束
+  - `finally` 块最多阻塞 0.5~1 秒，避免 FastAPI 线程池被长时间占用
+  - `AgentPanel.jsx`：当 topic/player modal 打开时，禁用表格中的「播包可视化」按钮，避免并发点击
+  - `AgentPanel.jsx`：MSE cleanup 全面加固：`video.pause()` / `removeAttribute('src')` / `load()` / `sourceBuffer.abort()` / `mediaSource.endOfStream()` / `streamController.abort()` / `reader.cancel()`
+  - `AgentPanel.jsx`：MSE 错误回调增加 `if (aborted) return`，避免组件卸载后 setState
+  - `AgentPanel.jsx`：MSE 所有事件监听器（MediaSource / SourceBuffer / Video）在 cleanup 时显式移除
+  - `AgentPanel.jsx`：新增 `mseCleanupRef`，`startVisualization()` 可同步调用旧 cleanup，避免旧 TCP 连接延迟释放
+  - `video_extractor.py`：改用 producer-consumer 带缓冲模式（60 帧 ≈ 2 秒缓冲），producer 边读 bag 边入队，consumer 写入 ffmpeg stdin
+  - 避免全部帧读入内存，同时保证 ffmpeg 有持续输入，播放更流畅
+  - `finally` 里清空队列、关闭 stdin、kill ffmpeg，尝试 `reader.close()` 强制 feed 线程退出
+  - `finally` 里 `del reader` + `gc.collect()`，尽可能释放 gsbag reader 资源
+  - `AgentPanel.jsx`：新增「播包可视化」按钮冷却机制，播放器关闭后 1.5 秒内按钮禁用，避免旧资源未释放时快速切换
+  - `AgentPanel.jsx`：`startVisualization()` 同步 cleanup 后等待 300ms 再发请求，给浏览器/后端释放连接的时间
+  - `AgentPanel.jsx`：SQL 执行弹窗增加多级状态：`pending` / `slow`（>5s 未响应） / `stuck`（>15s 未响应） / `loading_body`（已响应） / `error`
+  - 用户可直观区分「后端正在慢查询」和「后端已卡住」
+- **⑫ 修复播完第一个包后点第二个马上卡死**
+  - `video.py`：新增 `_hevc_stream_lock` 全局串行锁，`/api/video/stream-hevc` 同时只允许一个 stream 在处理
+  - `_locked_generator()` 用 `with _hevc_stream_lock:` 包裹 `extract_topic_hevc_stream()`，确保上一个 stream 的 finally 完全结束、锁释放后，下一个请求才能开始
+  - `video_extractor.py`：feed / writer 线程改为**非 daemon**，finally 块中等待线程退出（最多 2 秒），确保 gsbag reader / ffmpeg 资源完全释放后才释放全局锁
+  - 避免多个 gsbag_reader / ffmpeg 并发导致资源冲突和假死
+  - `video.py` / `bag.py`：stream-hevc 和 info-stream 响应头增加 `Connection: close`，避免浏览器保持长连接占用连接槽
+  - `AgentPanel.jsx`：`startVisualization()` 里 `mseCleanupRef.current()` 加 try-catch，cleanup 抛异常不阻塞新请求
+  - `AgentPanel.jsx`：同步 cleanup 后等待时间从 300ms 延长到 800ms，给 TCP 完全释放留时间
+  - `AgentPanel.jsx`：MSE cleanup 移除 `reader.cancel()`，避免未捕获的 `AbortError` promise rejection
+  - `AgentPanel.jsx`：新增全局 `unhandledrejection` 监听器，忽略 HEVC 相关的 `AbortError`，防止前端崩溃
+
+### 涉及文件
+- `agent/backend/app/services/agent_engine.py`
+- `visualizer/frontend/src/components/AgentPanel.jsx`
+- `visualizer/backend/app/services/video_extractor.py`
+
+### 测试验证
+- ✅ `agent_engine.py` Python 语法检查通过
+- ✅ `video_extractor.py` Python 语法检查通过
+- ✅ 前端 `npm run build` 编译通过
+- ⚠️ 需重新部署后验证：SQLite 大数量限制查询、无限制查询、连续点击多个结果可视化
+
 ---
 
 ## [2026-06-09] SqlEditor 替换为 CodeMirror 6 + HEVC 流式直传播放（方案 1.5）

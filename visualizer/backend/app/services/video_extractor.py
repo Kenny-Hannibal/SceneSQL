@@ -1,6 +1,8 @@
 import os
 import sys
+import gc
 import logging
+import queue
 import subprocess
 import threading
 from typing import List, Optional, Dict
@@ -245,32 +247,6 @@ def extract_topic_hevc_stream(
 
     if not _HAS_GSBAG:
         raise RuntimeError("gsbag SDK not available (not installed on this machine)")
-    reader = gsbag_reader.GsBagReader(bag_path)
-    reader.set_topic_filter([topic])
-
-    hevc_frames: List[bytes] = []
-    skipped_decode_errors = 0
-    for m in reader.read_messages():
-        ts = m.timestamp
-        if start_ts is not None and ts < start_ts:
-            continue
-        if end_ts is not None and ts > end_ts:
-            continue
-        try:
-            msg = image_encode_boleidl_pb2.Image()
-            image_data = []
-            gsbag_reader.HobotMessageSerializer.deserialize_image(m, msg, image_data)
-            if image_data:
-                hevc_frames.append(image_data[0])
-        except Exception as exc:
-            skipped_decode_errors += 1
-
-    total = len(hevc_frames)
-    if total == 0:
-        raise RuntimeError(f"No frames found for topic {topic} in the specified range")
-
-    if skipped_decode_errors > 0:
-        logger.info("[stream] Skipped %d decode-error frames", skipped_decode_errors)
 
     cmd = [
         "ffmpeg",
@@ -293,20 +269,77 @@ def extract_topic_hevc_stream(
         stderr=subprocess.PIPE,
     )
 
+    reader = gsbag_reader.GsBagReader(bag_path)
+    reader.set_topic_filter([topic])
+
+    # 使用带缓冲的 producer-consumer 模式：
+    # - producer 从 bag 读 HEVC 帧放入 frame_queue
+    # - consumer 从 frame_queue 取出写入 ffmpeg stdin
+    # 缓冲约 4 秒（120 帧），既避免全部读入内存，又保证播放流畅。
+    stop_event = threading.Event()
+    frame_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=60)
+
     def feed_input():
+        skipped_decode_errors = 0
+        total_frames = 0
         try:
-            for frame in hevc_frames:
+            for m in reader.read_messages():
+                if stop_event.is_set():
+                    break
+                ts = m.timestamp
+                if start_ts is not None and ts < start_ts:
+                    continue
+                if end_ts is not None and ts > end_ts:
+                    continue
+                try:
+                    msg = image_encode_boleidl_pb2.Image()
+                    image_data = []
+                    gsbag_reader.HobotMessageSerializer.deserialize_image(m, msg, image_data)
+                    if image_data:
+                        # 队列满时短暂阻塞；stop 后队列会被清空，不会无限阻塞
+                        frame_queue.put(image_data[0], timeout=1.0)
+                        total_frames += 1
+                except queue.Empty:
+                    pass
+                except (BrokenPipeError, OSError):
+                    break
+                except Exception as exc:
+                    skipped_decode_errors += 1
+                    if skipped_decode_errors <= 5:
+                        logger.warning("[stream] Frame decode error: %s", exc)
+        except Exception as exc:
+            logger.debug("[stream] Feed thread exited with: %s", exc)
+        finally:
+            logger.info("[stream] Feed thread finished: %d frames produced, %d decode errors", total_frames, skipped_decode_errors)
+            try:
+                frame_queue.put(None, timeout=1.0)
+            except Exception:
+                pass
+
+    def write_input():
+        written = 0
+        try:
+            while True:
+                frame = frame_queue.get()
+                if frame is None:
+                    break
                 process.stdin.write(frame)
+                written += 1
         except (BrokenPipeError, OSError):
             pass
         finally:
+            logger.info("[stream] Writer thread finished: %d frames written", written)
             try:
                 process.stdin.close()
             except Exception:
                 pass
 
+    # 使用非 daemon 线程：全局锁要求 generator 结束时 feed/writer 必须已经退出，
+    # 否则旧 reader 资源未释放，下一个 stream 会卡死。
     feeder = threading.Thread(target=feed_input)
+    writer = threading.Thread(target=write_input)
     feeder.start()
+    writer.start()
 
     try:
         while True:
@@ -315,14 +348,53 @@ def extract_topic_hevc_stream(
                 break
             yield chunk
     finally:
-        feeder.join()
-        returncode = process.wait()
+        # 客户端可能已断开。全局锁会等这个 finally 结束才释放，
+        # 因此必须确保 feed/writer 线程和 ffmpeg 进程都已清理。
+        logger.info("[stream] Client disconnected or stream ended, cleaning up...")
+        stop_event.set()
+        # 清空队列，避免 producer 卡在 frame_queue.put 上
+        while not frame_queue.empty():
+            try:
+                frame_queue.get_nowait()
+            except queue.Empty:
+                break
+        # 关闭 stdin，consumer 会退出
+        try:
+            process.stdin.close()
+        except Exception:
+            pass
+        feeder.join(timeout=1)
+        writer.join(timeout=1)
+        # 尝试关闭 bag reader，强制 feed 线程退出 read_messages() 循环
+        try:
+            if hasattr(reader, 'close'):
+                reader.close()
+        except Exception as exc:
+            logger.debug("[stream] reader.close() failed: %s", exc)
+        # 给 reader.close() 生效留一点时间
+        feeder.join(timeout=1)
+        writer.join(timeout=1)
+        try:
+            process.kill()
+        except Exception:
+            pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
         try:
             stderr_data = process.stderr.read().decode("utf-8", errors="ignore")
             if stderr_data:
                 logger.warning("[stream] ffmpeg stderr: %s", stderr_data)
-            if returncode != 0:
-                logger.error("[stream] ffmpeg exited with code %d", returncode)
+        except Exception:
+            pass
+        # 尝试释放 bag reader 资源并强制 GC
+        try:
+            del reader
+        except Exception:
+            pass
+        try:
+            gc.collect()
         except Exception:
             pass
 

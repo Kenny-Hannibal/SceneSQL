@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import threading
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -10,6 +11,10 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
+
+# 全局串行锁：HEVC 流式播放同时只允许一个 stream 在处理，
+# 避免多个 gsbag_reader / ffmpeg 进程并发导致资源冲突和卡死。
+_hevc_stream_lock = threading.Lock()
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -75,12 +80,19 @@ def stream_hevc(
         "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
         bag_path, topic, start_ts, end_ts,
     )
+
+    def _locked_generator():
+        # 等待上一个 stream 完全结束（包括 feed 线程释放），避免资源冲突
+        with _hevc_stream_lock:
+            yield from extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps)
+
     try:
         return StreamingResponse(
-            extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps),
+            _locked_generator(),
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="stream.mp4"',
+                "Connection": "close",
             },
         )
     except Exception as exc:

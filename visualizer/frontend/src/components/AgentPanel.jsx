@@ -168,8 +168,9 @@ function PaginationControls({ page, pageSize, totalRows, onPageChange }) {
 export default function AgentPanel() {
   const [question, setQuestion] = useState('');
   const [dbPath, setDbPath] = useState('');
-  const [dbLimit, setDbLimit] = useState(30);
-  const [resultLimit, setResultLimit] = useState(100);
+  // 结果数量限制：聚焦时允许为空字符串，失焦后再校验
+  const [resultLimitInput, setResultLimitInput] = useState('100');
+  const [resultLimitUnlimited, setResultLimitUnlimited] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -185,11 +186,35 @@ export default function AgentPanel() {
   const [sqlEditMode, setSqlEditMode] = useState('auto'); // 'auto' | 'preview'
   const [streamingSql, setStreamingSql] = useState(''); // 实时显示流式生成的 SQL
 
+  // SQL 执行进度弹窗
+  const [sqlExecModalOpen, setSqlExecModalOpen] = useState(false);
+  const [sqlExecElapsed, setSqlExecElapsed] = useState(0);
+  const [sqlExecStatus, setSqlExecStatus] = useState('pending'); // pending | slow | stuck | loading_body | error
+  const sqlExecTimerRef = useRef(null);
+  const sqlExecSlowTimerRef = useRef(null);
+  const sqlExecStuckTimerRef = useRef(null);
+
+  // 播包可视化冷却：关闭播放器后短时间内禁止再次点击，避免旧资源未释放导致卡死
+  const [visualizeCooldown, setVisualizeCooldown] = useState(false);
+  const cooldownTimerRef = useRef(null);
+
+  const startVisualizeCooldown = (ms = 1500) => {
+    setVisualizeCooldown(true);
+    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+    cooldownTimerRef.current = setTimeout(() => {
+      setVisualizeCooldown(false);
+      cooldownTimerRef.current = null;
+    }, ms);
+  };
+
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
   const videoRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const bagAbortControllerRef = useRef(null);
+  const streamAbortControllerRef = useRef(null);
+  const mseCleanupRef = useRef(null);
 
   // Extraction progress modal (replaces the bottom panel)
   const [extractModalOpen, setExtractModalOpen] = useState(false);
@@ -223,6 +248,41 @@ export default function AgentPanel() {
       setQueryMode('parquet');
     }
   }, [dbPath]);
+
+  // Topic modal 关闭时取消未完成的 bag info 请求
+  useEffect(() => {
+    if (!topicModalOpen && bagAbortControllerRef.current) {
+      bagAbortControllerRef.current.abort();
+      bagAbortControllerRef.current = null;
+    }
+  }, [topicModalOpen]);
+
+  // Player modal 关闭时强制断开 video stream，释放浏览器并发连接
+  useEffect(() => {
+    if (!playerModalOpen && streamAbortControllerRef.current) {
+      streamAbortControllerRef.current.abort();
+      streamAbortControllerRef.current = null;
+    }
+    // 播放器关闭后进入冷却，避免旧资源未释放时立即点击下一个导致卡死
+    if (!playerModalOpen) {
+      startVisualizeCooldown(1500);
+    }
+  }, [playerModalOpen]);
+
+  // 忽略 HEVC stream 相关的未捕获 AbortError，避免前端崩溃
+  useEffect(() => {
+    const handler = (e) => {
+      const reason = e.reason;
+      if (reason && (reason.name === 'AbortError' || reason.code === 20 || String(reason).includes('aborted'))) {
+        e.preventDefault();
+        console.warn('[HEVC] Ignored AbortError:', reason.message || reason);
+        return;
+      }
+      console.error('Unhandled rejection:', reason);
+    };
+    window.addEventListener('unhandledrejection', handler);
+    return () => window.removeEventListener('unhandledrejection', handler);
+  }, []);
 
   // 组件挂载时获取 batch 列表
   useEffect(() => {
@@ -261,14 +321,20 @@ export default function AgentPanel() {
     }
   }, [queryMode, batches]);
 
+  // 解析当前有效的 result_limit（无限制返回 0）
+  const getResultLimit = () => {
+    if (resultLimitUnlimited) return 0;
+    const v = parseInt(resultLimitInput, 10);
+    return Number.isFinite(v) && v > 0 ? v : 100;
+  };
+
   // 构建请求 payload（请求全量数据，翻页由前端完成）
   const buildPayload = () => {
     const payload = {
       question: question.trim(),
-      db_limit: Number(dbLimit) || 30,
-      result_limit: Number(resultLimit) || 100,
+      result_limit: getResultLimit(),
       page: 1,
-      page_size: Number(resultLimit) || 100,  // 取回全量数据，前端分页
+      page_size: getResultLimit() || 999999,  // 无限制时取回全部，前端分页
     };
 
     if (dbPath.trim()) {
@@ -293,14 +359,28 @@ export default function AgentPanel() {
 
     setLoading(true);
     setError('');
+    setSqlExecModalOpen(true);
+    setSqlExecElapsed(0);
+    setSqlExecStatus('pending');
+    if (sqlExecTimerRef.current) clearInterval(sqlExecTimerRef.current);
+    if (sqlExecSlowTimerRef.current) clearTimeout(sqlExecSlowTimerRef.current);
+    if (sqlExecStuckTimerRef.current) clearTimeout(sqlExecStuckTimerRef.current);
+    sqlExecTimerRef.current = setInterval(() => {
+      setSqlExecElapsed((prev) => prev + 1);
+    }, 1000);
+    sqlExecSlowTimerRef.current = setTimeout(() => {
+      setSqlExecStatus((s) => (s === 'pending' ? 'slow' : s));
+    }, 5000);
+    sqlExecStuckTimerRef.current = setTimeout(() => {
+      setSqlExecStatus((s) => (s === 'pending' || s === 'slow' ? 'stuck' : s));
+    }, 15000);
 
     try {
       const payload = {
         sql,
-        db_limit: Number(dbLimit) || 30,
-        result_limit: Number(resultLimit) || 100,
+        result_limit: getResultLimit(),
         page: 1,
-        page_size: Number(resultLimit) || 100,  // 取回全量数据
+        page_size: getResultLimit() || 999999,  // 取回全量数据
       };
       if (dbPath.trim()) {
         payload.db_path = dbPath.trim();
@@ -315,6 +395,8 @@ export default function AgentPanel() {
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
+      // 收到响应头，说明后端已经开始处理并返回，后续在接收 body
+      setSqlExecStatus('loading_body');
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
@@ -328,9 +410,17 @@ export default function AgentPanel() {
         setError(data.error);
       }
     } catch (e) {
+      setSqlExecStatus('error');
       setError(e.message);
     } finally {
       setLoading(false);
+      setSqlExecModalOpen(false);
+      if (sqlExecTimerRef.current) clearInterval(sqlExecTimerRef.current);
+      if (sqlExecSlowTimerRef.current) clearTimeout(sqlExecSlowTimerRef.current);
+      if (sqlExecStuckTimerRef.current) clearTimeout(sqlExecStuckTimerRef.current);
+      sqlExecTimerRef.current = null;
+      sqlExecSlowTimerRef.current = null;
+      sqlExecStuckTimerRef.current = null;
     }
   };
 
@@ -518,6 +608,33 @@ export default function AgentPanel() {
   };
 
   const startVisualization = async (row) => {
+    // 同步执行旧的 MSE cleanup，确保 TCP 连接立即释放
+    if (mseCleanupRef.current) {
+      try {
+        mseCleanupRef.current();
+      } catch (e) {
+        console.error('[HEVC] MSE cleanup error:', e);
+      }
+      mseCleanupRef.current = null;
+    }
+    // 取消旧的 bag info 请求
+    if (bagAbortControllerRef.current) {
+      bagAbortControllerRef.current.abort();
+      bagAbortControllerRef.current = null;
+    }
+    // 关闭旧 video stream（避免浏览器并发连接被占满）
+    if (streamAbortControllerRef.current) {
+      streamAbortControllerRef.current.abort();
+      streamAbortControllerRef.current = null;
+    }
+    // 强制关闭旧的播放器弹窗，避免多个 video stream 连接并发占满浏览器连接槽
+    setPlayerModalOpen(false);
+    setPlayerData(null);
+    setVideoRows([]);
+
+    // 给浏览器/后端一点时间彻底释放旧 video stream 的 TCP 连接和 ffmpeg 进程
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
     // 如果 bag_path 为空，尝试解析
     let bagPath = row.bag_path;
     if (!bagPath) {
@@ -549,13 +666,15 @@ export default function AgentPanel() {
     setTopicModalOpen(true);
 
     // 使用 SSE 流式获取 bag info（带进度反馈）
+    const controller = new AbortController();
+    bagAbortControllerRef.current = controller;
     let bagStartNs = null;
     let bagEndNs = null;
     let clampedMsg = '';
     let cameraTopics = [];
 
     try {
-      const response = await fetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
+      const response = await fetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST', signal: controller.signal });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -769,22 +888,39 @@ export default function AgentPanel() {
     let sourceBuffer = null;
     let reader = null;
     let aborted = false;
+    const streamController = new AbortController();
+    streamAbortControllerRef.current = streamController;
 
     const mimeCodec = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
 
     const cleanup = () => {
       if (aborted) return;
       aborted = true;
-      URL.revokeObjectURL(objectUrl);
-      if (mediaSource.readyState === 'open') {
-        try { mediaSource.endOfStream(); } catch (e) {}
+      // 1. 彻底断开 video 与 MediaSource / object URL 的绑定
+      try { video.pause(); } catch (e) {}
+      try {
+        video.removeAttribute('src');
+        video.load();
+      } catch (e) {}
+      try { URL.revokeObjectURL(objectUrl); } catch (e) {}
+      // 2. abort SourceBuffer 上 pending 的 append
+      if (sourceBuffer) {
+        try { sourceBuffer.abort(); } catch (e) {}
       }
-      if (reader) {
-        reader.cancel().catch(() => {});
-      }
+      // 3. 结束 MediaSource
+      try {
+        if (mediaSource.readyState === 'open') {
+          mediaSource.endOfStream();
+        }
+      } catch (e) {}
+      // 4. abort fetch，彻底关闭底层 TCP 连接
+      // 只 abort controller；reader.read() 会因此 reject，被外层 try-catch 处理。
+      // 不要单独调用 reader.cancel()，否则会触发未捕获的 AbortError promise rejection。
+      try { streamController.abort(); } catch (e) {}
     };
 
     const onMseError = (source, detail) => {
+      if (aborted) return; // 已 cleanup 后不再 setState，避免卸载后报错
       const videoErr = video.error;
       const msState = mediaSource.readyState;
       const sbState = sourceBuffer ? {
@@ -805,6 +941,24 @@ export default function AgentPanel() {
       cleanup();
     };
 
+    const onSourceBufferError = (e) => {
+      onMseError('SourceBuffer', e.message || 'SourceBuffer error');
+    };
+    const onMediaSourceError = (e) => {
+      onMseError('MediaSource', e.message || 'MediaSource error');
+    };
+    const onVideoError = () => {
+      if (aborted) return;
+      const ve = video.error;
+      if (ve) {
+        const codes = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
+        onMseError('VideoElement', `${codes[ve.code] || 'UNKNOWN'}: ${ve.message || ''}`);
+      }
+    };
+
+    mediaSource.addEventListener('error', onMediaSourceError);
+    video.addEventListener('error', onVideoError);
+
     mediaSource.addEventListener('sourceopen', async () => {
       if (aborted) return;
       try {
@@ -819,11 +973,9 @@ export default function AgentPanel() {
         }
 
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
-        // 使用默认 'segments' 模式，尊重 fMP4 内嵌时间戳；
-        // 'sequence' 模式可能导致 fMP4 fragment 时间戳冲突
-        // sourceBuffer.mode = 'sequence';
+        sourceBuffer.addEventListener('error', onSourceBufferError);
 
-        const response = await fetch(playerData.stream_url);
+        const response = await fetch(playerData.stream_url, { signal: streamController.signal });
         if (!response.ok) {
           throw new Error(`Stream HTTP ${response.status}`);
         }
@@ -844,18 +996,15 @@ export default function AgentPanel() {
           }
         };
 
-        sourceBuffer.addEventListener('updateend', () => {
+        const onUpdateEnd = () => {
           isUpdating = false;
           if (queue.length === 0 && reader === null) {
             try { mediaSource.endOfStream(); } catch (e) {}
             return;
           }
           processQueue();
-        });
-
-        sourceBuffer.addEventListener('error', (e) => {
-          onMseError('SourceBuffer', e.message || 'SourceBuffer error');
-        });
+        };
+        sourceBuffer.addEventListener('updateend', onUpdateEnd);
 
         while (!aborted) {
           const { done, value } = await reader.read();
@@ -869,28 +1018,24 @@ export default function AgentPanel() {
           queue.push(value);
           processQueue();
         }
+
+        sourceBuffer.removeEventListener('updateend', onUpdateEnd);
       } catch (e) {
         onMseError('Fetch/Setup', e.message || String(e));
       }
     });
 
-    // 监听 video 标签原生解码错误（有时比 MSE 事件更具体）
-    const onVideoError = () => {
-      const ve = video.error;
-      if (ve) {
-        const codes = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
-        onMseError('VideoElement', `${codes[ve.code] || 'UNKNOWN'}: ${ve.message || ''}`);
-      }
-    };
-    video.addEventListener('error', onVideoError);
-
-    mediaSource.addEventListener('error', (e) => {
-      onMseError('MediaSource', e.message || 'MediaSource error');
-    });
+    // 把 cleanup 暴露给外部，方便 startVisualization 里立即同步调用
+    mseCleanupRef.current = cleanup;
 
     return () => {
       video.removeEventListener('error', onVideoError);
+      mediaSource.removeEventListener('error', onMediaSourceError);
+      if (sourceBuffer) {
+        sourceBuffer.removeEventListener('error', onSourceBufferError);
+      }
       cleanup();
+      mseCleanupRef.current = null;
     };
   }, [playerModalOpen, playerData]);
 
@@ -947,8 +1092,7 @@ export default function AgentPanel() {
         db_path: dbPath || undefined,
         batch_id: batchId || undefined,
         query_mode: queryMode || undefined,
-        db_limit: Number(dbLimit) || 30,
-        result_limit: Number(resultLimit) || 100,
+        result_limit: getResultLimit(),
       };
       const res = await fetch(`${API_BASE}/api/agent/execute-sql-arrow`, {
         method: 'POST',
@@ -1082,25 +1226,38 @@ export default function AgentPanel() {
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <input
-            type="number"
-            value={dbLimit}
-            min={1}
-            max={10000}
-            onChange={(e) => setDbLimit(parseInt(e.target.value, 10) || 30)}
-            placeholder="DB 数量限制"
-            title="批量查询时最多扫描的 DB 数量"
-            style={{ width: 100, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
-          />
-          <input
-            type="number"
-            value={resultLimit}
-            min={1}
-            max={10000}
-            onChange={(e) => setResultLimit(parseInt(e.target.value, 10) || 100)}
+            type="text"
+            inputMode="numeric"
+            value={resultLimitUnlimited ? '' : resultLimitInput}
+            disabled={resultLimitUnlimited}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === '' || /^\d+$/.test(val)) {
+                setResultLimitInput(val);
+              }
+            }}
+            onBlur={(e) => {
+              const val = e.target.value.trim();
+              const n = parseInt(val, 10);
+              if (!val || !Number.isFinite(n) || n <= 0) {
+                setResultLimitInput('100');
+              } else {
+                setResultLimitInput(String(n));
+              }
+            }}
             placeholder="结果行数限制"
-            title="单条 SQL 返回的最大行数"
-            style={{ width: 100, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
+            title="单条 SQL 返回的最大行数（聚焦时允许清空以便输入）"
+            style={{ width: 110, padding: '10px', fontSize: 14, borderRadius: 4, border: '1px solid #ccc' }}
           />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#666', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={resultLimitUnlimited}
+              onChange={(e) => setResultLimitUnlimited(e.target.checked)}
+              style={{ cursor: 'pointer' }}
+            />
+            不限制结果数量
+          </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <label style={{ fontSize: 13, color: '#666', whiteSpace: 'nowrap' }}>每页显示:</label>
             <input
@@ -1197,7 +1354,7 @@ export default function AgentPanel() {
           {hasResults && (
             <div>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                Results ({totalRows} rows{totalRows >= resultLimit ? ' — may be truncated, increase result_limit' : ''}, showing page {page})
+                Results ({totalRows} rows{(!resultLimitUnlimited && totalRows >= getResultLimit()) ? ' — may be truncated, increase result_limit' : ''}, showing page {page})
                 {result?.scanned_dbs > 0 && (
                   <span style={{ marginLeft: 12, color: '#999' }}>
                     扫描 {result.scanned_dbs} 个 DB，命中 {result.matched_dbs} 个
@@ -1216,7 +1373,7 @@ export default function AgentPanel() {
                 <div id="top-scrollbar-content" style={{ height: 1 }}></div>
               </div>
               <div style={{ overflowX: 'auto' }} id="tbl-scroll-container">
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: '#fafafa' }}>
                       {columns.map((col) => (
@@ -1224,7 +1381,11 @@ export default function AgentPanel() {
                           {col}
                         </th>
                       ))}
-                      <th style={{ border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Action</th>
+                      <th style={{
+                        border: '1px solid #e8e8e8', padding: '8px 12px', textAlign: 'left', fontWeight: 600,
+                        position: 'sticky', right: 0, background: '#fafafa', zIndex: 2,
+                        boxShadow: '-2px 0 4px rgba(0,0,0,0.05)',
+                      }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1235,12 +1396,20 @@ export default function AgentPanel() {
                             {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col] ?? '')}
                           </td>
                         ))}
-                        <td style={{ border: '1px solid #e8e8e8', padding: '8px 12px' }}>
+                        <td style={{
+                          border: '1px solid #e8e8e8', padding: '8px 12px',
+                          position: 'sticky', right: 0, background: idx % 2 === 0 ? '#fff' : '#fafafa', zIndex: 1,
+                          boxShadow: '-2px 0 4px rgba(0,0,0,0.05)',
+                        }}>
                           <button
                             onClick={() => startVisualization(row)}
+                            disabled={topicModalOpen || playerModalOpen || visualizeCooldown}
+                            title={topicModalOpen || playerModalOpen ? '请先关闭当前弹窗' : visualizeCooldown ? '播放器刚关闭，请稍等' : '播包可视化'}
                             style={{
                               padding: '4px 10px', fontSize: 12, borderRadius: 4, border: 'none',
-                              background: '#1890ff', color: '#fff', cursor: 'pointer',
+                              background: (topicModalOpen || playerModalOpen || visualizeCooldown) ? '#ccc' : '#1890ff',
+                              color: '#fff', cursor: (topicModalOpen || playerModalOpen || visualizeCooldown) ? 'not-allowed' : 'pointer',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             📹 播包可视化
@@ -1414,6 +1583,58 @@ export default function AgentPanel() {
         </div>
       )}
 
+      {/* SQL 执行进度弹窗 */}
+      {sqlExecModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 28, minWidth: 360, maxWidth: 480, textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>⏳ 正在执行 SQL</h3>
+            <div style={{ fontSize: 14, color: '#555', marginBottom: 12 }}>
+              已耗时 <b>{sqlExecElapsed}</b> 秒
+            </div>
+            <div style={{ fontSize: 13, color: '#666', marginBottom: 16, minHeight: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {sqlExecStatus === 'pending' && <span>已发送请求，等待后端响应...</span>}
+              {sqlExecStatus === 'slow' && <span style={{ color: '#d48806' }}>后端响应较慢，可能正在遍历大量 DB，请耐心等待</span>}
+              {sqlExecStatus === 'stuck' && (
+                <span style={{ color: '#cf1322' }}>
+                  ⚠️ 超过 15 秒未收到后端响应，请求很可能已卡住。<br/>
+                  建议点击「取消执行」后检查后端日志。
+                </span>
+              )}
+              {sqlExecStatus === 'loading_body' && <span style={{ color: '#52c41a' }}>后端已开始返回结果，正在接收数据...</span>}
+              {sqlExecStatus === 'error' && <span style={{ color: '#cf1322' }}>请求出错，关闭弹窗后查看错误信息</span>}
+            </div>
+            <div style={{ width: '100%', height: 8, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{
+                width: `${Math.min(100, (sqlExecElapsed / 10) * 100)}%`,
+                height: '100%',
+                background: sqlExecStatus === 'stuck' ? '#cf1322' : (sqlExecStatus === 'slow' ? '#faad14' : (sqlExecStatus === 'loading_body' ? '#52c41a' : '#1890ff')),
+                borderRadius: 4,
+                transition: 'width 1s linear',
+              }} />
+            </div>
+            <button
+              onClick={() => {
+                if (abortControllerRef.current) abortControllerRef.current.abort();
+                setSqlExecModalOpen(false);
+                if (sqlExecTimerRef.current) clearInterval(sqlExecTimerRef.current);
+                if (sqlExecSlowTimerRef.current) clearTimeout(sqlExecSlowTimerRef.current);
+                if (sqlExecStuckTimerRef.current) clearTimeout(sqlExecStuckTimerRef.current);
+                sqlExecTimerRef.current = null;
+                sqlExecSlowTimerRef.current = null;
+                sqlExecStuckTimerRef.current = null;
+                setLoading(false);
+              }}
+              style={{ marginTop: 16, padding: '8px 24px', fontSize: 13, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer' }}
+            >
+              取消执行
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 视频播放弹窗 */}
       {playerModalOpen && playerData && (
         <div style={{
@@ -1438,7 +1659,7 @@ export default function AgentPanel() {
                 )}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); startVisualizeCooldown(1500); }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭

@@ -33,4 +33,8 @@ async def bag_info_stream(bag_path: str):
         except Exception as e:
             yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Connection": "close"},
+    )

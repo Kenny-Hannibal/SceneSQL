@@ -7,6 +7,8 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+import logging
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +19,7 @@ from app.core.logging import setup_logging
 from app.core.exceptions import setup_exception_handlers
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -27,6 +30,29 @@ app = FastAPI(
 )
 
 setup_exception_handlers(app)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """记录所有 HTTP 请求的耗时和状态码，便于定位卡死/慢请求。"""
+    start = time.time()
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except Exception as exc:
+        status = 500
+        logger.exception("Unhandled exception in request: %s %s", request.method, request.url.path)
+        raise
+    finally:
+        duration = time.time() - start
+        path = request.url.path
+        if path != "/health":  # 跳过健康检查，避免日志刷屏
+            if status >= 500 or duration > 2.0:
+                logger.warning("%s %s | status=%s | duration=%.3fs", request.method, path, status, duration)
+            else:
+                logger.info("%s %s | status=%s | duration=%.3fs", request.method, path, status, duration)
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -191,8 +191,13 @@ class AgentEngine:
         return None
 
     def _inject_limit(self, sql: str, limit: int) -> str:
-        """Inject LIMIT if not present. Replace if present."""
+        """Inject LIMIT if not present. Replace if present.
+
+        limit <= 0 表示不限制结果数量，直接返回原始 SQL（不注入 LIMIT）。
+        """
         import re
+        if limit <= 0:
+            return sql
         # Remove existing LIMIT clause (case insensitive)
         cleaned = re.sub(r'\s+LIMIT\s+\d+\s*$', '', sql, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s+LIMIT\s+\d+\s*;?\s*$', '', cleaned, flags=re.IGNORECASE)
@@ -202,8 +207,11 @@ class AgentEngine:
         # Append limit before the final semicolon
         return re.sub(r';\s*$', f' LIMIT {limit};', cleaned)
 
-    def _execute_single(self, sql: str, db_path: str, db_file: str, resolver) -> List[Dict[str, Any]]:
-        """Execute SQL on a single DB and return rows with bag_id & bag_path appended."""
+    def _execute_single(self, sql: str, db_path: str, db_file: str) -> List[Dict[str, Any]]:
+        """Execute SQL on a single DB and return rows with bag_id prepended.
+
+        bag_id 直接使用 .db 文件名（去掉后缀），不再倒查原始 bag id。
+        """
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             conn.row_factory = sqlite3.Row
@@ -213,23 +221,10 @@ class AgentEngine:
                 conn.close()
                 return []
 
-            # Resolve bag_id & local path
-            data_id = db_file.replace(".db", "")
-            bag_id = data_id
-            bag_path = ""
-            try:
-                info = resolver.resolve(data_id)
-                bag_id = info.origin_bag_id or data_id
-                bag_path = info.local_path or info.oss_path or ""
-            except Exception as exc:
-                logger.debug("Resolver failed for %s: %s", data_id, exc)
-
+            bag_id = db_file.replace(".db", "")
             result = []
             for row in rows:
-                d = dict(row)
-                d["bag_id"] = bag_id
-                d["db_file"] = db_file
-                d["bag_path"] = bag_path
+                d = {"bag_id": bag_id, **dict(row)}
                 result.append(d)
             conn.close()
             return result
@@ -265,7 +260,7 @@ class AgentEngine:
         total = len(db_files)
         if total == 0:
             return AgentResult(sql=sql, explanation="目录下没有 .db 文件", error="No DB files found")
-        db_files = db_files[:db_limit]
+        # 不再限制扫描的 DB 数量；db_limit 参数仅保留以兼容旧 API，实际扫描全部 .db
 
         resolver = await self._get_resolver()
         loop = asyncio.get_event_loop()
@@ -275,26 +270,11 @@ class AgentEngine:
         columns: List[str] = []
         matched = 0
 
-        # ── P0: 预解析所有 bag_path（避免每个子任务重复 IO，resolver 可能是网络/OSS 瓶颈）──
-        def _resolve_one(db_file: str):
-            data_id = db_file.replace(".db", "")
-            try:
-                info = resolver.resolve(data_id)
-                return db_file, {
-                    "bag_id": info.origin_bag_id or data_id,
-                    "bag_path": info.local_path or info.oss_path or "",
-                }
-            except Exception as exc:
-                logger.debug("Resolver failed for %s: %s", data_id, exc)
-                return db_file, {"bag_id": data_id, "bag_path": ""}
-
-        bag_info_map: dict[str, dict] = {}
-        with ThreadPoolExecutor(max_workers=min(len(db_files), max_workers * 2)) as resolve_pool:
-            for db_file, info in resolve_pool.map(_resolve_one, db_files):
-                bag_info_map[db_file] = info
-
-        # ── P1: 纯数据库查询（无 resolver IO，sqlite3 C 层释放 GIL，ThreadPool 可真正并行）──
-        def process_one(db_file: str, bag_id: str, bag_path: str):
+        # ── P1: 单 DB 查询 ──
+        # bag_id 直接使用 .db 文件名（去掉后缀），不再调用 resolver 倒查原始 bag。
+        # 返回字段中不再包含 db_file / bag_path；bag_id 放在字典最前面。
+        def process_one(db_file: str):
+            bag_id = db_file.replace(".db", "")
             db_path = os.path.join(self.db_path, db_file)
             conn = None
             try:
@@ -313,10 +293,7 @@ class AgentEngine:
 
                 result = []
                 for row in rows:
-                    d = dict(row)
-                    d["bag_id"] = bag_id
-                    d["db_file"] = db_file
-                    d["bag_path"] = bag_path
+                    d = {"bag_id": bag_id, **dict(row)}
                     result.append(d)
                 conn.close()
                 return result
@@ -329,23 +306,41 @@ class AgentEngine:
                 logger.warning("SQL execution failed on %s: %s", db_file, exc)
                 return [{"_error": str(exc), "db_file": db_file}]
 
-        # ── P2: 并行执行查询（提前退出）──
-        # 手动管理 executor，收集够结果后立即 shutdown(wait=False)，
-        # 避免第一次查询的后台任务阻塞第二次查询。
+        # ── P2: 并行执行查询（提前退出，限制并发）──
+        # 不再一次性提交所有 DB 的任务，而是按 max_workers 批次启动，
+        # 收集够 result_limit 后立即停止启动新任务，避免连接/线程爆炸。
+        # result_limit <= 0 表示不限制结果数量，此时遍历所有 DB。
+        unlimited = result_limit <= 0
+        effective_limit = result_limit if not unlimited else float('inf')
         executor = ThreadPoolExecutor(max_workers=max_workers)
-        try:
-            futures = [
-                loop.run_in_executor(executor, process_one, f, bag_info_map[f]["bag_id"], bag_info_map[f]["bag_path"])
-                for f in db_files
-            ]
-            for coro in asyncio.as_completed(futures):
-                if len(all_rows) >= result_limit:
-                    for fut in futures:
-                        if not fut.done():
-                            fut.cancel()
-                    break
 
-                rows = await coro
+        def run_one(f: str):
+            return loop.run_in_executor(executor, process_one, f)
+
+        pending: set[asyncio.Future] = set()
+        remaining = list(db_files)
+        stopped = False
+
+        async def wait_one():
+            nonlocal stopped
+            # 保持最多 max_workers 个并发任务
+            while len(pending) < max_workers and remaining and not stopped:
+                pending.add(run_one(remaining.pop(0)))
+            if not pending:
+                return None
+            done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            completed = next(iter(done))
+            pending.discard(completed)
+            return await completed
+
+        try:
+            while True:
+                if not unlimited and len(all_rows) >= effective_limit:
+                    stopped = True
+                    break
+                rows = await wait_one()
+                if rows is None:
+                    break
                 for row in rows:
                     if "_error" in row:
                         errors.append(f"{row['db_file']}: {row['_error']}")
@@ -353,17 +348,27 @@ class AgentEngine:
                         all_rows.append(row)
                         if not columns:
                             columns = list(row.keys())
-                        if len(all_rows) >= result_limit:
+                        if not unlimited and len(all_rows) >= effective_limit:
+                            stopped = True
                             break
                 if rows and "_error" not in rows[0]:
                     matched += 1
         finally:
-            # wait=False: 不等待已取消/正在执行的任务，立即释放线程池
+            # 取消还未开始执行的任务
+            for fut in pending:
+                fut.cancel()
+            # 等待已在执行的任务尽快结束，最多等 2 秒
+            if pending:
+                await asyncio.wait(pending, timeout=2)
+            # 不等待正在执行的任务，立即释放线程池
             executor.shutdown(wait=False)
 
-        # 截断到 result_limit
-        all_rows = all_rows[:result_limit]
-        explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（ LIMIT {result_limit} 提前终止）"
+        # 截断到 result_limit（仅在有限制时）
+        if not unlimited:
+            all_rows = all_rows[:result_limit]
+            explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（ LIMIT {result_limit} 提前终止）"
+        else:
+            explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（无结果数量限制）"
         error_msg = None
         if errors:
             error_msg = f"{len(errors)} 个 DB 执行失败（仅展示前 3 条）: " + "; ".join(errors[:3])
@@ -460,11 +465,11 @@ class AgentEngine:
         return tree.sql(dialect="duckdb")
 
     async def _query_parquet(self, sql: str, result_limit: int = 100) -> AgentResult:
-        """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id 和 bag_path。"""
+        """Parquet 模式：在聚合后的 Parquet 上执行单次查询，注入 bag_id。"""
         original_sql = sql
         sql_with_bag_id = self._ensure_bag_id_in_select(sql)
         sql_with_bag_id = self._inject_limit(sql_with_bag_id, result_limit)
-        rows = self._execute_parquet(sql_with_bag_id, result_limit)
+        rows = self._execute_parquet(sql_with_bag_id, 0 if result_limit <= 0 else result_limit)
         errors = [r for r in rows if "_error" in r]
 
         # 如果 bag_id 注入导致报错，回退到原始 SQL（不含 bag_id）
@@ -484,27 +489,10 @@ class AgentEngine:
             if bid:
                 bag_id_set.add(bid)
 
-        # 批量解析 bag_path（利用 async resolver）
-        bag_path_map: Dict[str, str] = {}
-        if bag_id_set:
-            try:
-                resolver = await self._get_resolver()
-                for bid in bag_id_set:
-                    try:
-                        info = resolver.resolve(bid)
-                        bag_path_map[bid] = info.local_path or info.oss_path or ""
-                    except Exception as exc:
-                        logger.debug("Parquet resolver failed for %s: %s", bid, exc)
-                        bag_path_map[bid] = ""
-            except Exception as exc:
-                logger.warning("Resolver init failed, bag_path will be empty: %s", exc)
-
-        # 注入 bag_id / bag_path / db_file 到每行
-        for r in good_rows:
-            bid = r.get("bag_id", "")
-            r["bag_id"] = bid
-            r["bag_path"] = bag_path_map.get(bid, "")
-            r["db_file"] = f"{bid}.db" if bid else ""
+        # 确保 bag_id 始终是第一列（Parquet 模式 SQL 中可能已有 bag_id）
+        for i, r in enumerate(good_rows):
+            if "bag_id" in r:
+                good_rows[i] = {"bag_id": r.pop("bag_id"), **r}
 
         columns = list(good_rows[0].keys()) if good_rows else []
 
@@ -526,9 +514,8 @@ class AgentEngine:
     async def _query_single(self, sql: str, result_limit: int = 100) -> AgentResult:
         sql = self._inject_limit(sql, result_limit)
         db_file = os.path.basename(self.db_path)
-        resolver = await self._get_resolver()
 
-        rows = self._execute_single(sql, self.db_path, db_file, resolver)
+        rows = self._execute_single(sql, self.db_path, db_file)
         errors = [r for r in rows if "_error" in r]
         good_rows = [r for r in rows if "_error" not in r]
         columns = list(good_rows[0].keys()) if good_rows else []
