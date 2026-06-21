@@ -210,6 +210,7 @@ export default function AgentPanel() {
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
+  const pollCancelledRef = useRef(false);
   const videoRef = useRef(null);
   const abortControllerRef = useRef(null);
   const bagAbortControllerRef = useRef(null);
@@ -838,7 +839,13 @@ export default function AgentPanel() {
       return;
     }
 
+    // 新一轮轮询开始，标记未取消
+    pollCancelledRef.current = false;
+
     intervalRef.current = setInterval(async () => {
+      // 如果在 fetch 之前已经被取消（如用户关闭播放器），直接退出
+      if (pollCancelledRef.current) return;
+
       let newlyCompleted = null;
       const currentRows = [];
       for (const v of videoRows) {
@@ -848,6 +855,7 @@ export default function AgentPanel() {
         }
         try {
           const res = await fetch(`${API_BASE}/api/video/status/${v.task_id}`);
+          if (pollCancelledRef.current) return;
           if (!res.ok) {
             currentRows.push({ ...v, status: 'failed', message: 'Status fetch failed' });
             continue;
@@ -873,6 +881,8 @@ export default function AgentPanel() {
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      // 清理时标记取消，防止已发出的 fetch 回调写入 stale 数据
+      pollCancelledRef.current = true;
     };
   }, [videoRows]);
 
@@ -1659,7 +1669,7 @@ export default function AgentPanel() {
                 )}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); startVisualizeCooldown(1500); }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } startVisualizeCooldown(1500); }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭

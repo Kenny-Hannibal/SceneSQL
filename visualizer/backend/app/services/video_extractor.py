@@ -383,11 +383,20 @@ def extract_topic_hevc_stream(
         except subprocess.TimeoutExpired:
             pass
         try:
-            stderr_data = process.stderr.read().decode("utf-8", errors="ignore")
-            if stderr_data:
-                logger.warning("[stream] ffmpeg stderr: %s", stderr_data)
-        except Exception:
-            pass
+            # 非阻塞读取 stderr，2秒超时防止卡死
+            import selectors
+            sel = selectors.DefaultSelector()
+            sel.register(process.stderr, selectors.EVENT_READ)
+            stderr_data = b''
+            ready = sel.select(timeout=2)
+            if ready:
+                stderr_data = process.stderr.read(65536)  # 最多读 64KB
+            sel.close()
+            stderr_text = stderr_data.decode("utf-8", errors="ignore")
+            if stderr_text:
+                logger.warning("[stream] ffmpeg stderr: %s", stderr_text[:2000])
+        except Exception as exc:
+            logger.debug("[stream] stderr read failed: %s", exc)
         # 尝试释放 bag reader 资源并强制 GC
         try:
             del reader
