@@ -159,13 +159,24 @@ class AgentEngine:
         raw = raw.strip()
         if raw.lower().startswith("sql"):
             raw = raw[3:].strip()
-        # Find the last line that looks like a SQL statement
+        # ── 提取完整SQL ──
+        # 策略：去markdown标记后，如果文本以SELECT/WITH开头，直接返回全文（多行SQL含子查询）
+        # 仅在LLM混入解释文字时，才用逐行回退策略找SQL起始行并拼接后续行
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
-        for line in reversed(lines):
-            upper = line.upper()
+
+        # 优先：首行就是SQL开头 → 返回全文
+        if lines:
+            first_upper = lines[0].upper()
+            if first_upper.startswith("SELECT") or first_upper.startswith("WITH"):
+                return raw
+
+        # 回退：找最后一个SELECT/WITH开头的行，从该行开始拼接（处理LLM先输出解释再输出SQL的情况）
+        for i in range(len(lines) - 1, -1, -1):
+            upper = lines[i].upper()
             if upper.startswith("SELECT") or upper.startswith("WITH"):
-                return line
-        # Fallback: return the whole text
+                return "\n".join(lines[i:])
+
+        # 最终回退：返回全文
         return raw
 
     def _validate_sql(self, sql: str) -> Optional[str]:
