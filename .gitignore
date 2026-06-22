@@ -46,3 +46,10 @@ three_party/gsbag_x86_Release_4.2.18_20260227_Linux/external/platform_sdk/lib/ga
 
 # test_data
 ./test_data
+# VL validation runtime outputs (keep scripts + manifest/labels)
+vl_validation/**/clip_*/
+vl_validation/**/*.jpg
+vl_validation/**/*.csv
+vl_validation/**/results_*/
+vl_validation/**/validation_report*.json
+vl_validation/**/cutin_anchor_comparison*.json

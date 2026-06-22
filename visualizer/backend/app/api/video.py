@@ -1,20 +1,25 @@
 import os
 import uuid
 import logging
-import threading
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, Query
-from fastapi.responses import FileResponse, StreamingResponse
-from app.models.schemas import ExtractRequest, ExtractResponse, VideoStatus
+from fastapi import APIRouter, BackgroundTasks, Query, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from app.models.schemas import (
+    ExtractRequest, ExtractResponse, VideoStatus,
+    ExtractBatchRequest, ExtractBatchResponse, ClipTaskResult, FrameTaskStatus,
+)
 from app.services.video_extractor import extract_topic_to_mp4, extract_topic_hevc_stream, get_task
+from app.services.frame_extractor import (
+    extract_frames_from_bag,
+    _resolve_bag_path_via_dm, _resolve_bag_path_local,
+    _find_default_camera_topic, _download_bag_from_oss,
+    create_batch_task, update_batch_clip, update_batch_status, get_batch_task,
+    FRAME_OUTPUT_DIR,
+)
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
-
-# 全局串行锁：HEVC 流式播放同时只允许一个 stream 在处理，
-# 避免多个 gsbag_reader / ffmpeg 进程并发导致资源冲突和卡死。
-_hevc_stream_lock = threading.Lock()
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -80,22 +85,164 @@ def stream_hevc(
         "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
         bag_path, topic, start_ts, end_ts,
     )
-
-    def _locked_generator():
-        # 等待上一个 stream 完全结束（包括 feed 线程释放），避免资源冲突
-        with _hevc_stream_lock:
-            yield from extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps)
-
     try:
         return StreamingResponse(
-            _locked_generator(),
+            extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps),
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="stream.mp4"',
-                "Connection": "close",
             },
         )
     except Exception as exc:
         logger.exception("HEVC stream failed")
         from app.core.exceptions import AppException
         raise AppException(str(exc), 500)
+
+
+# ── VL 验证：批量提取 + 抽帧 API ──
+
+DEFAULT_CAMERA_TOPIC = "/gac/cam/ft30_encoded"
+
+
+def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
+    """后台任务：逐条处理 clips"""
+    import time
+    update_batch_status(task_id, "processing", "Starting batch extraction")
+
+    for idx, clip in enumerate(req.clips):
+        clip_result = {
+            "bag_id": clip.bag_id,
+            "status": "processing",
+            "frame_count": 0,
+            "frame_urls": [],
+            "message": "",
+        }
+        update_batch_clip(task_id, idx, clip_result)
+
+        try:
+            # 1. 解析 bag 路径
+            bag_path = None
+            oss_path = None
+
+            if req.resolve_bag_path:
+                dm_result = _resolve_bag_path_via_dm(clip.bag_id)
+                bag_path = dm_result.local_path
+                oss_path = dm_result.oss_path
+
+            if not bag_path:
+                local_result = _resolve_bag_path_local(clip.bag_id)
+                bag_path = local_result.local_path
+                if not oss_path:
+                    oss_path = local_result.oss_path
+
+            if not bag_path:
+                # 最后尝试：当作直接路径
+                if os.path.exists(clip.bag_id):
+                    bag_path = clip.bag_id
+
+            # 2. 本地路径不存在时，尝试 OSS 下载
+            if not bag_path and oss_path:
+                update_batch_clip(task_id, idx, {
+                    **clip_result, "message": f"Downloading from OSS: {oss_path}"
+                })
+                bag_path = _download_bag_from_oss(oss_path, f"{task_id}/clip{idx}", clip.bag_id)
+
+            if not bag_path:
+                clip_result.update(status="failed", message=f"Cannot resolve bag_id={clip.bag_id} (local not mounted, OSS not available)")
+                update_batch_clip(task_id, idx, clip_result)
+                continue
+
+            # 2. 确定 camera topic
+            topic = clip.topic
+            if not topic:
+                topic = _find_default_camera_topic(bag_path)
+            if not topic:
+                topic = DEFAULT_CAMERA_TOPIC
+
+            # 3. 抽帧
+            clip_output_dir = os.path.join(FRAME_OUTPUT_DIR, task_id, f"clip_{idx:03d}")
+            frame_paths = extract_frames_from_bag(
+                bag_path=bag_path,
+                topic=topic,
+                output_dir=clip_output_dir,
+                start_ts=clip.start_ts,
+                end_ts=clip.end_ts,
+                sample_fps=req.sample_fps,
+                max_frames=req.max_frames_per_clip,
+                task_id=f"{task_id}/clip{idx}",
+            )
+
+            # 4. 生成帧下载 URL
+            frame_urls = []
+            for fi, fpath in enumerate(frame_paths):
+                fname = os.path.basename(fpath)
+                frame_urls.append(f"/api/video/frames/{task_id}/{idx}/{fname}")
+
+            clip_result.update(
+                status="completed",
+                frame_count=len(frame_paths),
+                frame_urls=frame_urls,
+                message=f"Extracted {len(frame_paths)} frames from {topic}",
+            )
+            update_batch_clip(task_id, idx, clip_result)
+
+        except Exception as exc:
+            logger.exception("[%s] clip %d failed", task_id, idx)
+            clip_result.update(status="failed", message=str(exc))
+            update_batch_clip(task_id, idx, clip_result)
+
+    update_batch_status(task_id, "completed", "Batch extraction done")
+
+
+@router.post("/extract-batch", response_model=ExtractBatchResponse)
+def extract_batch(req: ExtractBatchRequest, background_tasks: BackgroundTasks):
+    """批量提取视频 + 抽帧：输入 SQL 查询结果列表（bag_id + 时间范围），自动解析路径、提取帧、输出 JPEG"""
+    task_id = str(uuid.uuid4())[:8]
+    logger.info("Starting batch extraction task=%s with %d clips", task_id, len(req.clips))
+
+    # 初始化任务状态
+    clip_results = [
+        ClipTaskResult(bag_id=c.bag_id, status="pending")
+        for c in req.clips
+    ]
+    create_batch_task(task_id, len(req.clips))
+
+    # 启动后台处理
+    background_tasks.add_task(_process_batch_clips, task_id, req)
+
+    return ExtractBatchResponse(
+        task_id=task_id,
+        clips=clip_results,
+        status="pending",
+        message="Batch extraction started",
+    )
+
+
+@router.get("/extract-batch/{task_id}", response_model=FrameTaskStatus)
+def batch_status(task_id: str):
+    """查询批量抽帧任务状态"""
+    task = get_batch_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Batch task {task_id} not found")
+    clips = [
+        ClipTaskResult(**c) if c else ClipTaskResult(bag_id="unknown", status="pending")
+        for c in task["clips"]
+    ]
+    return FrameTaskStatus(
+        task_id=task_id,
+        status=task["status"],
+        clips=clips,
+        message=task.get("message", ""),
+    )
+
+
+@router.get("/frames/{task_id}/{clip_idx}/{filename}")
+def serve_frame(task_id: str, clip_idx: int, filename: str):
+    """下载抽帧 JPEG 图片"""
+    # 安全检查：防止路径穿越
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    fpath = os.path.join(FRAME_OUTPUT_DIR, task_id, f"clip_{clip_idx:03d}", filename)
+    if not os.path.exists(fpath):
+        raise HTTPException(status_code=404, detail="Frame not found")
+    return FileResponse(fpath, media_type="image/jpeg", filename=filename)

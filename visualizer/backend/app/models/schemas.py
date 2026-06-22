@@ -71,3 +71,42 @@ class ExecuteSQLRequest(BaseModel):
     page: int = 1
     page_size: int = 50
     max_workers: int = 32
+
+
+# ── VL 验证：批量视频提取 + 抽帧 ──
+
+class VideoClipSpec(BaseModel):
+    """单条视频片段规格：bag_id + 时间范围"""
+    bag_id: str                    # 回灌 bag_id（db 文件名），用于 resolve-bag-path
+    start_ts: Optional[int] = None  # 纳秒
+    end_ts: Optional[int] = None    # 纳秒
+    topic: Optional[str] = None     # camera topic，不传则用默认 /gac/cam/ft30_encoded
+
+class ExtractBatchRequest(BaseModel):
+    """批量提取 + 抽帧请求"""
+    clips: List[VideoClipSpec]
+    sample_fps: float = 1.0        # 抽帧采样帧率（每秒抽几帧），默认 1fps
+    max_frames_per_clip: int = 10   # 每段视频最多抽多少帧
+    resolve_bag_path: bool = True   # 是否通过 dm_sdk 解析 bag_id→本地路径
+
+class ClipTaskResult(BaseModel):
+    """单条 clip 的处理结果"""
+    bag_id: str
+    status: str                     # pending / processing / completed / failed
+    frame_count: int = 0
+    frame_urls: List[str] = []      # 帧图片下载 URL 列表
+    message: str = ""
+
+class ExtractBatchResponse(BaseModel):
+    """批量提取响应"""
+    task_id: str
+    clips: List[ClipTaskResult]
+    status: str = "pending"
+    message: str = ""
+
+class FrameTaskStatus(BaseModel):
+    """抽帧任务状态查询"""
+    task_id: str
+    status: str
+    clips: List[ClipTaskResult] = []
+    message: str = ""
