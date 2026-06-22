@@ -555,7 +555,6 @@ class AgentEngine:
             question=question,
             schema_text=schema_text,
             route=route,
-            query_mode=self.query_mode,
         )
 
         logger.info(
