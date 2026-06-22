@@ -81,6 +81,13 @@ TABLE_DOMAIN_MAP = {
     "static_lane": "road",
     "static_link": "road",
 }
+# 跨表关联映射到 cross / trajectory domain
+CROSS_TABLE_COMBOS = {
+    frozenset({"range_tag", "ego"}): "cross",
+    frozenset({"range_tag", "dynamic_obj"}): "cross",
+    frozenset({"range_tag", "ego", "dynamic_obj"}): "cross",
+    frozenset({"ego", "dynamic_obj"}): "trajectory",
+}
 
 
 # ──────────────────────────────────────────────
@@ -369,150 +376,57 @@ def format_cross_table_join_hint(involved_tables: Set[str]) -> str:
 # 模板检索（P0: 关键词匹配，P2: 升级为 RAG）
 # ──────────────────────────────────────────────
 
-# 内置 few-shot 模板（P0 最小集，后续迁移到 templates.jsonl）
-BUILTIN_TEMPLATES = [
-    {
-        "id": "t01",
-        "domain": "scenario",
-        "nl": "找出所有变道的片段",
-        "sql": (
-            "SELECT start_ts, end_ts, tag_name, "
-            "json_extract(param, '$.sub_tag') AS sub_tag "
-            "FROM range_tag "
-            "WHERE tag_name IN ('LaneChange') "
-            "ORDER BY start_ts"
-        ),
-    },
-    {
-        "id": "t02",
-        "domain": "scenario",
-        "nl": "找出切入事件的片段",
-        "sql": (
-            "SELECT start_ts, end_ts, tag_name, "
-            "json_extract(param, '$.sub_tag') AS sub_tag "
-            "FROM range_tag "
-            "WHERE tag_name = 'Cutin' "
-            "ORDER BY start_ts"
-        ),
-    },
-    {
-        "id": "t03",
-        "domain": "scenario",
-        "nl": "找出急刹车的片段",
-        "sql": (
-            "SELECT start_ts, end_ts, tag_name, "
-            "json_extract(param, '$.sub_tag') AS sub_tag "
-            "FROM range_tag "
-            "WHERE tag_name = 'Jerk' "
-            "AND json_extract(param, '$.sub_tag') = 'brake' "
-            "ORDER BY start_ts"
-        ),
-    },
-    {
-        "id": "t04",
-        "domain": "cross",
-        "nl": "变道时周围有什么动态目标",
-        "sql": (
-            "SELECT r.start_ts, r.end_ts, d.obj_id, d.type, d.x, d.y "
-            "FROM range_tag r "
-            "JOIN dynamic_obj d "
-            "ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9 "
-            "WHERE r.tag_name = 'LaneChange' "
-            "AND d.is_static = 0 "
-            "ORDER BY r.start_ts, d.ts"
-        ),
-    },
-    {
-        "id": "t05",
-        "domain": "cross",
-        "nl": "急刹时自车速度是多少",
-        "sql": (
-            "SELECT r.start_ts, r.end_ts, e.ts, e.speed "
-            "FROM range_tag r "
-            "JOIN ego e "
-            "ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9 "
-            "WHERE r.tag_name = 'Jerk' "
-            "AND json_extract(r.param, '$.sub_tag') = 'brake' "
-            "ORDER BY r.start_ts, e.ts"
-        ),
-    },
-    {
-        "id": "t06",
-        "domain": "scenario",
-        "nl": "找出路口直行的片段",
-        "sql": (
-            "SELECT start_ts, end_ts, tag_name "
-            "FROM range_tag "
-            "WHERE tag_name = 'INTERSECTION_STRAIGHT' "
-            "ORDER BY start_ts"
-        ),
-    },
-    {
-        "id": "t07",
-        "domain": "scenario",
-        "nl": "找出闯红灯的片段",
-        "sql": (
-            "SELECT start_ts, end_ts, tag_name "
-            "FROM range_tag "
-            "WHERE tag_name = 'RunRedLight' "
-            "ORDER BY start_ts"
-        ),
-    },
-    {
-        "id": "t08",
-        "domain": "perception",
-        "nl": "找出检测到行人的片段",
-        "sql": (
-            "SELECT ts, obj_id, x, y, type "
-            "FROM dynamic_obj "
-            "WHERE type = 'pedestrian' "
-            "AND is_static = 0 "
-            "ORDER BY ts"
-        ),
-    },
-    {
-        "id": "t09",
-        "domain": "ego_state",
-        "nl": "找出速度超过120的片段",
-        "sql": (
-            "SELECT ts, speed "
-            "FROM ego "
-            "WHERE speed > 120 "
-            "ORDER BY ts"
-        ),
-    },
-    {
-        "id": "t10",
-        "domain": "scenario",
-        "nl": "统计各种标签出现的次数",
-        "sql": (
-            "SELECT tag_name, COUNT(*) AS cnt "
-            "FROM range_tag "
-            "GROUP BY tag_name "
-            "ORDER BY cnt DESC"
-        ),
-    },
-]
+_TEMPLATES_JSONL_PATH = _SCHEMA_DIR / "templates.jsonl"
 
 
-def retrieve_templates(query: str, involved_tables: Set[str], top_k: int = 3) -> str:
-    """检索 few-shot 模板（P0: 关键词匹配 + 表名匹配）。"""
+def _load_templates_from_jsonl() -> List[Dict[str, str]]:
+    """从 templates.jsonl 加载模板列表。"""
+    if not _TEMPLATES_JSONL_PATH.exists():
+        return []
+    templates = []
+    with _TEMPLATES_JSONL_PATH.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            import json
+            try:
+                t = json.loads(line)
+                if "id" in t and "domain" in t and "nl" in t and "sql" in t:
+                    templates.append(t)
+            except json.JSONDecodeError:
+                continue
+    return templates
+
+
+# 启动时一次性加载，避免每次请求读文件
+BUILTIN_TEMPLATES = _load_templates_from_jsonl()
+
+
+def retrieve_templates(query: str, involved_tables: Set[str], top_k: int = 5) -> str:
+    """检索 few-shot 模板（P0: 关键词匹配 + 表名/Domain匹配 + CTE偏好）。"""
     scored = []
     for tmpl in BUILTIN_TEMPLATES:
         score = 0
-        # NL 关键词重叠
-        for word in query:
-            if word in tmpl["nl"]:
-                score += 1
+        # NL 关键词重叠（用2-4字中文片段匹配，比逐字好）
+        for seg in re.findall(r'[\u4e00-\u9fff]{2,4}', query):
+            if seg in tmpl["nl"]:
+                score += 2
         # 表名匹配
         for t in involved_tables:
             if t in tmpl["sql"].lower():
-                score += 0.5
+                score += 1
         # Domain 匹配
         for t in involved_tables:
             domain = TABLE_DOMAIN_MAP.get(t, "")
             if domain and domain == tmpl.get("domain", ""):
-                score += 1
+                score += 1.5
+        # CTE偏好：如果query涉及复杂分析（多表、博弈、趋势），优先返回CTE模板
+        if "CTE" in tmpl.get("nl", ""):
+            complex_keywords = ["博弈", "趋势", "变化", "延迟", "反应", "分类",
+                                "严重程度", "最低", "最高", "CTE", "逐帧", "前车"]
+            if any(kw in query for kw in complex_keywords):
+                score += 2
         if score > 0:
             scored.append((tmpl, score))
 

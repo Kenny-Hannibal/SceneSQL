@@ -1,0 +1,317 @@
+[
+  {
+    "clip_idx": 0,
+    "bag_id": "6ibeshFacVqdL19rGoJB6b202605",
+    "tag_name": "AVOIDANCE_MULTIOBSTACLEAROUNDEGO",
+    "start_ts": 1772536923,
+    "end_ts": 1772536927,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/AVOIDANCE_MULTIOBSTACLEAROUNDEGO/clip_00_6ibeshFacV"
+  },
+  {
+    "clip_idx": 1,
+    "bag_id": "5artDsUr98VCuV2AhDAJus202605",
+    "tag_name": "AVOIDANCE_MULTIOBSTACLEAROUNDEGO",
+    "start_ts": 1772582272,
+    "end_ts": 1772582276,
+    "frame_count": 4,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/AVOIDANCE_MULTIOBSTACLEAROUNDEGO/clip_01_5artDsUr98"
+  },
+  {
+    "clip_idx": 2,
+    "bag_id": "5artDsUr98VCuV2AhDAJus202605",
+    "tag_name": "AVOIDANCE_MULTIOBSTACLEAROUNDEGO",
+    "start_ts": 1772582277,
+    "end_ts": 1772582281,
+    "frame_count": 4,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/AVOIDANCE_MULTIOBSTACLEAROUNDEGO/clip_02_5artDsUr98"
+  },
+  {
+    "clip_idx": 3,
+    "bag_id": "2AIbXVcCrrW8k7t4XgV22t202605",
+    "tag_name": "CloseFollow",
+    "start_ts": 1772578442,
+    "end_ts": 1772578447,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CloseFollow/clip_03_2AIbXVcCrr"
+  },
+  {
+    "clip_idx": 4,
+    "bag_id": "4ZeFN1bIPL7KMRqZH80wBL202605",
+    "tag_name": "CloseFollow",
+    "start_ts": 1772582848,
+    "end_ts": 1772582853,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CloseFollow/clip_04_4ZeFN1bIPL"
+  },
+  {
+    "clip_idx": 5,
+    "bag_id": "3Oelxz7ldra1PjgLE5q3Ok202605",
+    "tag_name": "CloseFollow",
+    "start_ts": 1772589876,
+    "end_ts": 1772589881,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CloseFollow/clip_05_3Oelxz7ldr"
+  },
+  {
+    "clip_idx": 6,
+    "bag_id": "5NR09nKLlikVTQXfT0rG1L202605",
+    "tag_name": "CrossConflict",
+    "start_ts": 1772522632,
+    "end_ts": 1772522639,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CrossConflict/clip_06_5NR09nKLli"
+  },
+  {
+    "clip_idx": 7,
+    "bag_id": "28KpoNkJTwRx2Gw50wQyy6202605",
+    "tag_name": "CrossConflict",
+    "start_ts": 1772530323,
+    "end_ts": 1772530327,
+    "frame_count": 4,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CrossConflict/clip_07_28KpoNkJTw"
+  },
+  {
+    "clip_idx": 8,
+    "bag_id": "28KpoNkJTwRx2Gw50wQyy6202605",
+    "tag_name": "CrossConflict",
+    "start_ts": 1772530327,
+    "end_ts": 1772530331,
+    "frame_count": 4,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/CrossConflict/clip_08_28KpoNkJTw"
+  },
+  {
+    "clip_idx": 9,
+    "bag_id": "1Zds14nCrpsyEZ8SqL0Uzk202605",
+    "tag_name": "Cutin",
+    "start_ts": 1772545245,
+    "end_ts": 1772545250,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/Cutin/clip_09_1Zds14nCrp"
+  },
+  {
+    "clip_idx": 10,
+    "bag_id": "5A3NabsyQ9AljP2im3knkM202605",
+    "tag_name": "Cutin",
+    "start_ts": 1772545278,
+    "end_ts": 1772545284,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/Cutin/clip_10_5A3NabsyQ9"
+  },
+  {
+    "clip_idx": 11,
+    "bag_id": "5A3NabsyQ9AljP2im3knkM202605",
+    "tag_name": "Cutin",
+    "start_ts": 1772545325,
+    "end_ts": 1772545336,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/Cutin/clip_11_5A3NabsyQ9"
+  },
+  {
+    "clip_idx": 12,
+    "bag_id": "4NwhWjtOb8xzFPrzkX6Vyx202605",
+    "tag_name": "INTERSECTION_LEFTTURN",
+    "start_ts": 1772549290,
+    "end_ts": 1772549300,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_LEFTTURN/clip_12_4NwhWjtOb8"
+  },
+  {
+    "clip_idx": 13,
+    "bag_id": "2RcmXmeQlHya0Qr7U75W1A202605",
+    "tag_name": "INTERSECTION_LEFTTURN",
+    "start_ts": 1772581218,
+    "end_ts": 1772581226,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_LEFTTURN/clip_13_2RcmXmeQlH"
+  },
+  {
+    "clip_idx": 14,
+    "bag_id": "5artDsUr98VCuV2AhDAJus202605",
+    "tag_name": "INTERSECTION_LEFTTURN",
+    "start_ts": 1772582231,
+    "end_ts": 1772582242,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_LEFTTURN/clip_14_5artDsUr98"
+  },
+  {
+    "clip_idx": 15,
+    "bag_id": "2RcmXmeQlHya0Qr7U75W1A202605",
+    "tag_name": "INTERSECTION_RIGHTTURN",
+    "start_ts": 1772581254,
+    "end_ts": 1772581260,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_RIGHTTURN/clip_15_2RcmXmeQlH"
+  },
+  {
+    "clip_idx": 16,
+    "bag_id": "8IKl6FfcSVHDcJoosxIHV202605",
+    "tag_name": "INTERSECTION_RIGHTTURN",
+    "start_ts": 1772612860,
+    "end_ts": 1772612866,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_RIGHTTURN/clip_16_8IKl6FfcSV"
+  },
+  {
+    "clip_idx": 17,
+    "bag_id": "4nucJiFk0VtXDzghmLV8Bg202605",
+    "tag_name": "INTERSECTION_RIGHTTURN",
+    "start_ts": 1772637780,
+    "end_ts": 1772637784,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_RIGHTTURN/clip_17_4nucJiFk0V"
+  },
+  {
+    "clip_idx": 18,
+    "bag_id": "6SAmCn54xPUIpQBUPkPwxD202605",
+    "tag_name": "INTERSECTION_STRAIGHT",
+    "start_ts": 1772520721,
+    "end_ts": 1772520729,
+    "frame_count": 5,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg",
+      "frame_0004.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_STRAIGHT/clip_18_6SAmCn54xP"
+  },
+  {
+    "clip_idx": 19,
+    "bag_id": "6SAmCn54xPUIpQBUPkPwxD202605",
+    "tag_name": "INTERSECTION_STRAIGHT",
+    "start_ts": 1772520745,
+    "end_ts": 1772520748,
+    "frame_count": 4,
+    "frames": [
+      "frame_0000.jpg",
+      "frame_0001.jpg",
+      "frame_0002.jpg",
+      "frame_0003.jpg"
+    ],
+    "clip_dir": "/data/var/workspace/projects/projects/SceneSQL/vl_validation/0603_batch/INTERSECTION_STRAIGHT/clip_19_6SAmCn54xP"
+  }
+]
