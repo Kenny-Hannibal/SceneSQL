@@ -2,6 +2,36 @@
 
 > 每次功能修改 commit 后，在此记录变更内容，方便回溯。
 
+## [2026-06-23] 两轮NL2SQL引擎初版（v0.1-alpha）
+
+**Commit**: db4e018 (后续硬修正待提交)
+
+### 新增
+- 两轮LLM架构：Round 1 概念识别 + Round 2 SQL生成
+- `concept_groups.yaml` — 概念→tag_name映射（~25个概念组）
+- `concept_router.py` — Round 1识别+Round 2上下文组装
+- 7种组合模式：single_tag / multi_tag / tag_join_ego / tag_join_dynamic_obj / tag_join_dynamic_lane / cross_table / cte_analysis
+- `schema_dictionary.yaml` 增强 DR trajectory 列描述（json_extract漂移值计算方法）
+
+### 修复
+- 移除错误的时间戳转换 `* 1e9`：`range_tag.start_ts/end_ts` 与 `ego.ts`/`dynamic_obj.ts` 单位相同（秒级），无需乘1e9
+- `_clean_sql` 增加硬修正：自动剥离 LLM 仍输出的 `* 1e9`
+- 修复 YAML ScannerError（schema_dictionary 中 json_extract 示例含冒号需加引号）
+
+### 已知局限性（v0.1-alpha）
+1. **复杂CTE/轨迹交叉SQL质量差**：#17"无保护左转轨迹交叉"只生成简单range_tag查询，无轨迹交叉计算逻辑
+2. **LLM偶尔仍输出 `* 1e9`**：DeepSeek-v4-flash 从训练数据"记住"了错误模式，需 `_clean_sql` 硬修正兜底
+3. **复合标签空结果**：部分场景（如#10闯红灯+ego速度）SQL正确但数据中可能无匹配
+4. **行人类型字段值不确定**：`d.type = 'PEDESTRIAN'` 可能不匹配实际数据值（需确认是 pedestrian/PEDESTRIAN/行人）
+5. **cte_analysis 模式过于宽泛**：当前只有占位模板，无法引导LLM生成精确CTE
+6. **生产模板(templates.jsonl)中的 `* 1e9` 尚未修复**：历史遗留问题，同事写的模板可能也有此bug
+
+### 0616数据集测试结果（20场景）
+- 15/20 SQL正确且有结果
+- 4/20 LLM仍输出 `* 1e9`（硬修正兜底后可工作）
+- 1/20 空结果（SQL正确但数据无匹配）
+- 复杂CTE场景（#17）SQL质量不合格
+
 ## [2026-06-09] SQLite 批量模式取消 DB 数量限制 + 结果数量输入优化 + 修复可视化连接泄漏
 
 **Commit**: `待提交` — fix: SQLite 批量查询不再限制 DB 数量；结果数量支持无限制；修复可视化后连接卡死
