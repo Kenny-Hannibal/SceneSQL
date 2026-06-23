@@ -196,7 +196,9 @@ class AgentEngine:
             return "SQL 不完整，缺少 FROM 子句"
         forbidden = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE"]
         for kw in forbidden:
-            if kw in upper:
+            # Use word boundary matching to avoid false positives
+            # e.g. "speed_drop_total_kmh" should NOT match "DROP"
+            if re.search(rf'\b{kw}\b', upper):
                 return f"禁止执行 {kw}"
         # P0 增强：检查 SQL 中引用的表名是否存在于 schema
         known_tables = {t.name for t in self.schema}
