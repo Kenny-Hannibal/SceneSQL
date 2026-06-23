@@ -13,6 +13,7 @@ import logging
 from agent.backend.app.core.schema_reader import read_schema, format_schema_for_prompt
 from agent.backend.app.core.llm_client import LLMClient
 from agent.backend.app.core.tag_router import TagRouter, build_prompt, RouteResult
+from agent.backend.app.core.concept_router import ConceptRouter
 
 logger = logging.getLogger(__name__)
 

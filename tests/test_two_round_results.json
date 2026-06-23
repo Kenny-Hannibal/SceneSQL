@@ -1,0 +1,530 @@
+[
+  {
+    "id": 1,
+    "nl": "找出变道的片段",
+    "difficulty": "easy",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "变道"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ({tag_names})\nORDER BY start_ts\n```\n将tag_names替换为 'LaneChange', 'LANECHANGE_ABANDON'</think>SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ('LaneChange', 'LANECHANGE_ABANDON')\nORDER BY start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "变道"
+    ],
+    "expected_composition": "single_tag"
+  },
+  {
+    "id": 2,
+    "nl": "找出急刹车的片段",
+    "difficulty": "easy",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "急刹"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT start_ts, end_ts, tag_name, param\n        FROM range_tag\n        WHERE tag_name IN ('Jerk') AND json_extract(param, '$.sub_tag') = 'brake'\n        ORDER BY start_ts\n        ```\n5.  **格式要求**：只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ('Jerk') AND json_extract(param, '$.sub_tag') = 'brake'\nORDER BY start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "急刹"
+    ],
+    "expected_composition": "single_tag"
+  },
+  {
+    "id": 3,
+    "nl": "找出路口直行的片段",
+    "difficulty": "easy",
+    "status": "issues",
+    "r1_result": {
+      "concepts": [
+        "路口直行"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "1.  **分析用户问题**：用户想要找出“路口直行”的片段。\n2.  **匹配概念**：根据命中概念详情，“路口直行”对应的tag_name是 `INTERSECTION_STRAIGHT`。\n3.  **确定组合规则**：当前组合方式是 `single_tag`，即1个range_tag概念，直接查range_tag。\n4.  **构建SQL**：\n    *   SELECT部分：`start_ts, end_ts, tag_name, param`\n    *   FROM部分：`range_tag`\n    *   WHERE部分：`tag_name IN ('INTERSECTION_STRAIGHT')`\n    *   ORDER BY部分：`ORDER BY start_ts`\n5.  **检查规则**：\n    *   纯SQL输出，无解释，无markdown标记。\n6.  **最终SQL**：\n    `SELECT start_ts, end_ts, tag_name, param FROM range_tag WHERE tag_name IN ('INTERSECTION_STRAIGHT') ORDER BY start_ts`</think>SELECT start_ts, end_ts, tag_name, param FROM range_tag WHERE tag_name IN ('INTERSECTION_STRAIGHT') ORDER BY start_ts",
+    "sql_issues": [
+      "SQL应以SELECT或WITH开头"
+    ],
+    "expected_concepts": [
+      "路口直行"
+    ],
+    "expected_composition": "single_tag"
+  },
+  {
+    "id": 4,
+    "nl": "找出闯红灯的片段",
+    "difficulty": "easy",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "闯红灯"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT start_ts, end_ts, tag_name, param\n    FROM range_tag\n    WHERE tag_name IN ('RunRedLight')\n    ORDER BY start_ts\n    ```\n7.  **格式要求**：只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ('RunRedLight')\nORDER BY start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "闯红灯"
+    ],
+    "expected_composition": "single_tag"
+  },
+  {
+    "id": 5,
+    "nl": "找出跟车太近的片段",
+    "difficulty": "easy",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "跟车太近"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT start_ts, end_ts, tag_name, param\n    FROM range_tag\n    WHERE tag_name IN ('CloseFollow')\n    ORDER BY start_ts\n    ```\n7.  **格式要求**：只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ('CloseFollow')\nORDER BY start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "跟车太近"
+    ],
+    "expected_composition": "single_tag"
+  },
+  {
+    "id": 6,
+    "nl": "找出路口且为绿灯的场景",
+    "difficulty": "medium",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "路口",
+        "绿灯"
+      ],
+      "composition": "multi_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS intersection_tag, r2.tag_name AS greenlight_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE (r1.tag_name IN ('Intersection', 'TrafficIntersection') OR r1.tag_name LIKE 'INTERSECTION_%')\n  AND r2.tag_name IN ('STOPANDGO_FIRSTCARSTARTATGREENLIGHT', 'GreenLightNotProceeding', 'STOPANDGO_TRAFFICLIGHTGREENFLASHGO')\nORDER BY r1.start_ts\n```\n\n检查一下，是否需要加`r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts`，是的，这是时间窗口交叉。\n注意：只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS intersection_tag, r2.tag_name AS greenlight_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE (r1.tag_name IN ('Intersection', 'TrafficIntersection') OR r1.tag_name LIKE 'INTERSECTION_%')\n  AND r2.tag_name IN ('STOPANDGO_FIRSTCARSTARTATGREENLIGHT', 'GreenLightNotProceeding', 'STOPANDGO_TRAFFICLIGHTGREENFLASHGO')\nORDER BY r1.start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口",
+      "绿灯"
+    ],
+    "expected_composition": "multi_tag"
+  },
+  {
+    "id": 7,
+    "nl": "找出路口且有红绿灯的场景",
+    "difficulty": "medium",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "路口",
+        "红绿灯"
+      ],
+      "composition": "multi_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS intersection_tag, r2.tag_name AS traffic_light_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE (r1.tag_name IN ('Intersection', 'TrafficIntersection') OR r1.tag_name LIKE 'INTERSECTION_%')\n  AND r2.tag_name IN ('TrafficLightAbnormal', 'RunRedLight', 'CrossStopLineOnYellowLight', 'GreenLightNotProceeding', 'YellowLightStop', 'STOPANDGO_FIRSTCARSTOPATREDLIGHT', 'STOPANDGO_FIRSTCARSTARTATGREENLIGHT')\nORDER BY r1.start_ts\n```\n只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS intersection_tag, r2.tag_name AS traffic_light_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE (r1.tag_name IN ('Intersection', 'TrafficIntersection') OR r1.tag_name LIKE 'INTERSECTION_%')\n  AND r2.tag_name IN ('TrafficLightAbnormal', 'RunRedLight', 'CrossStopLineOnYellowLight', 'GreenLightNotProceeding', 'YellowLightStop', 'STOPANDGO_FIRSTCARSTOPATREDLIGHT', 'STOPANDGO_FIRSTCARSTARTATGREENLIGHT')\nORDER BY r1.start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口",
+      "红绿灯"
+    ],
+    "expected_composition": "multi_tag"
+  },
+  {
+    "id": 8,
+    "nl": "找出同时有切入和急刹的片段",
+    "difficulty": "medium",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "切入",
+        "急刹"
+      ],
+      "composition": "multi_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS cutin_tag, r2.tag_name AS jerk_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE r1.tag_name IN ('Cutin')\n  AND r2.tag_name IN ('Jerk')\n  AND json_extract(r2.param, '$.sub_tag') = 'brake'\nORDER BY r1.start_ts\n```\n\n检查：\n- r1代表切入，r2代表急刹\n- r1.tag_name IN ('Cutin')\n- r2.tag_name IN ('Jerk') AND json_extract(r2.param, '$.sub_tag') = 'brake'\n- 时间窗口交叉：r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\n- 别名：cutin_tag, jerk_tag\n\n生成SQL。</think>SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS cutin_tag, r2.tag_name AS jerk_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE r1.tag_name IN ('Cutin')\n  AND r2.tag_name IN ('Jerk')\n  AND json_extract(r2.param, '$.sub_tag') = 'brake'\nORDER BY r1.start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "切入",
+      "急刹"
+    ],
+    "expected_composition": "multi_tag"
+  },
+  {
+    "id": 9,
+    "nl": "路口左转时自车速度",
+    "difficulty": "medium",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "路口左转"
+      ],
+      "composition": "tag_join_ego",
+      "ego_fields": [
+        "speed"
+      ],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n           e.speed\n    FROM range_tag r\n    JOIN ego e\n      ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\n    WHERE r.tag_name IN ('INTERSECTION_LEFTTURN')\n    ORDER BY r.start_ts, e.ts\n    ```\n5.  **检查细节**：\n    *   `tag_name` 值：`INTERSECTION_LEFTTURN`。\n    *   `ego` 字段：`speed`。\n    *   时间对齐：`e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9`。\n    *   排序：`ORDER BY r.start_ts, e.ts`。\n6.  **生成最终SQL**：只输出纯SQL，不带markdown标记。</think>SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       e.speed\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('INTERSECTION_LEFTTURN')\nORDER BY r.start_ts, e.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口左转"
+    ],
+    "expected_composition": "tag_join_ego"
+  },
+  {
+    "id": 10,
+    "nl": "闯红灯时自车速度",
+    "difficulty": "medium",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "闯红灯"
+      ],
+      "composition": "tag_join_ego",
+      "ego_fields": [
+        "speed"
+      ],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n           e.speed\n    FROM range_tag r\n    JOIN ego e\n      ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\n    WHERE r.tag_name IN ('RunRedLight')\n    ORDER BY r.start_ts, e.ts\n    ```\n5.  **检查细节**：\n    *   `tag_name` 值：`RunRedLight`。\n    *   `ego_fields`：`speed`。\n    *   时间对齐：`e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9`。\n    *   排序：`ORDER BY r.start_ts, e.ts`。\n6.  **生成最终SQL**：只输出纯SQL，无解释，无markdown标记。</think>SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       e.speed\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('RunRedLight')\nORDER BY r.start_ts, e.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "闯红灯"
+    ],
+    "expected_composition": "tag_join_ego"
+  },
+  {
+    "id": 11,
+    "nl": "变道时前方有什么目标",
+    "difficulty": "hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "变道"
+      ],
+      "composition": "tag_join_dynamic_obj",
+      "ego_fields": [],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "前方目标",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x, d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\nFROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('LaneChange', 'LANECHANGE_ABANDON')\n  AND d.is_static = 0\n  AND d.x > 0\nORDER BY r.start_ts, d.ts\n```\n\n检查x>0是否为前方目标。在自动驾驶中，一般x>0表示前方。所以加上 `AND d.x > 0`。</think>SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x, d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\nFROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('LaneChange', 'LANECHANGE_ABANDON')\n  AND d.is_static = 0\n  AND d.x > 0\nORDER BY r.start_ts, d.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "变道"
+    ],
+    "expected_composition": "tag_join_dynamic_obj"
+  },
+  {
+    "id": 12,
+    "nl": "切入时旁车的位置和速度",
+    "difficulty": "hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "切入"
+      ],
+      "composition": "tag_join_dynamic_obj",
+      "ego_fields": [],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "旁车",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x, d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\nFROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\n  AND d.obj_id = json_extract(r.param, '$.obj_id')\nWHERE r.tag_name = 'Cutin'",
+    "sql_issues": [],
+    "expected_concepts": [
+      "切入"
+    ],
+    "expected_composition": "tag_join_dynamic_obj"
+  },
+  {
+    "id": 13,
+    "nl": "路口左转时对向来车的位置",
+    "difficulty": "hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "路口左转"
+      ],
+      "composition": "tag_join_dynamic_obj",
+      "ego_fields": [],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "对向来车",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x, d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\nFROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name = 'INTERSECTION_LEFTTURN'\n  AND d.is_static = 0\n  AND d.relative_velocity_x < 0\nORDER BY r.start_ts, d.ts</think>SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x, d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\nFROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口左转"
+    ],
+    "expected_composition": "tag_join_dynamic_obj"
+  },
+  {
+    "id": 14,
+    "nl": "变道时自车速度和前方目标",
+    "difficulty": "hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "变道"
+      ],
+      "composition": "cross_table",
+      "ego_fields": [
+        "speed"
+      ],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "前方目标",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name,\n       e.speed,\n       d.obj_id, d.x, d.y, d.type\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('LaneChange', 'LANECHANGE_ABANDON')\n  AND d.is_static = 0\n  AND d.x > 0\nORDER BY r.start_ts, e.ts\n```\n检查前方目标条件：通常x表示纵向距离（前方），y表示横向距离。所以d.x > 0表示前方目标。\n\n不需要markdown标记，只输出纯SQL。</think>SELECT r.start_ts, r.end_ts, r.tag_name,\n       e.speed,\n       d.obj_id, d.x, d.y, d.type\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('LaneChange', 'LANECHANGE_ABANDON')\n  AND d.is_static = 0\n  AND d.x > 0\nORDER BY r.start_ts, e.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "变道"
+    ],
+    "expected_composition": "cross_table"
+  },
+  {
+    "id": 15,
+    "nl": "黄灯过线时自车速度和红绿灯状态",
+    "difficulty": "hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "黄灯过线",
+        "红绿灯"
+      ],
+      "composition": "tag_join_ego",
+      "ego_fields": [
+        "speed"
+      ],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       e.speed, e.latest_traffic_light_status\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('CrossStopLineOnYellowLight')\nORDER BY r.start_ts, e.ts</think>SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       e.speed, e.latest_traffic_light_status\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('CrossStopLineOnYellowLight')\nORDER BY r.start_ts, e.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "黄灯过线"
+    ],
+    "expected_composition": "tag_join_ego"
+  },
+  {
+    "id": 16,
+    "nl": "找出路口右转时距离最近的行人",
+    "difficulty": "very_hard",
+    "status": "issues",
+    "r1_result": {
+      "concepts": [
+        "路口右转"
+      ],
+      "composition": "tag_join_dynamic_obj",
+      "ego_fields": [],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "距离最近的行人",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [
+      "缺失概念: {'行人横穿'}",
+      "组合方式不符: 期望=cte_analysis, 实际=tag_join_dynamic_obj"
+    ],
+    "sql": "SELECT start_ts, end_ts, tag_name, obj_id, x, y, type, heading, absolute_velocity_x, absolute_velocity_y\nFROM MatchedObjs\nWHERE rn =",
+    "sql_issues": [
+      "概念'路口右转'的tag_name(INTERSECTION_RIGHTTURN...)未出现在SQL中",
+      "tag_join_dynamic_obj组合应包含dynamic_obj表"
+    ],
+    "expected_concepts": [
+      "行人横穿",
+      "路口右转"
+    ],
+    "expected_composition": "cte_analysis"
+  },
+  {
+    "id": 17,
+    "nl": "找出无保护左转轨迹交叉场景",
+    "difficulty": "very_hard",
+    "status": "issues",
+    "r1_result": {
+      "concepts": [
+        "路口左转"
+      ],
+      "composition": "single_tag",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [
+      "组合方式不符: 期望=cte_analysis, 实际=single_tag"
+    ],
+    "sql": "SELECT start_ts, end_ts, tag_name, param FROM range_tag WHERE tag_name IN ('INTERSECTION_LEFTTURN') ORDER BY start_ts</think>SELECT start_ts, end_ts, tag_name, param\nFROM range_tag\nWHERE tag_name IN ('INTERSECTION_LEFTTURN')\nORDER BY start_ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口左转"
+    ],
+    "expected_composition": "cte_analysis"
+  },
+  {
+    "id": 18,
+    "nl": "在第几车道进行掉头",
+    "difficulty": "very_hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "掉头"
+      ],
+      "composition": "tag_join_dynamic_lane",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": true,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       dl.lane_id, dl.lane_type, dl.lane_turn_type,\n       dl.ref_link_id, dl.predecessors, dl.successors\nFROM range_tag r\nJOIN dynamic_lane dl\n  ON dl.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('INTERSECTION_UTURN')\nORDER BY r.start_ts, dl.ts</think>SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       dl.lane_id, dl.lane_type, dl.lane_turn_type,\n       dl.ref_link_id, dl.predecessors, dl.successors\nFROM range_tag r\nJOIN dynamic_lane dl\n  ON dl.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('INTERSECTION_UTURN')\nORDER BY r.start_ts, dl.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "掉头"
+    ],
+    "expected_composition": "tag_join_dynamic_lane"
+  },
+  {
+    "id": 19,
+    "nl": "避障时借道避让的车道信息",
+    "difficulty": "very_hard",
+    "status": "ok",
+    "r1_result": {
+      "concepts": [
+        "避障借道"
+      ],
+      "composition": "tag_join_dynamic_lane",
+      "ego_fields": [],
+      "need_dynamic_obj": false,
+      "dynamic_obj_filters": "",
+      "need_dynamic_lane": true,
+      "need_intersection_info": false,
+      "analysis_description": ""
+    },
+    "r1_issues": [],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       dl.lane_id, dl.lane_type, dl.lane_turn_type,\n       dl.ref_link_id, dl.predecessors, dl.successors\nFROM range_tag r\nJOIN dynamic_lane dl\n  ON dl.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('AvoidanceBorrowLane')\nORDER BY r.start_ts, dl.ts\n```\n\n检查是否需要提取param中的sub_tag。用户问的是“避障时借道避让的车道信息”，骨架中已经包含了 `r.param`，所以可以不用单独提取，或者提取出来也可以。骨架里直接select了r.param，符合要求。\n\n只输出纯SQL，不要解释，不要markdown代码块标记。</think>SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       dl.lane_id, dl.lane_type, dl.lane_turn_type,\n       dl.ref_link_id, dl.predecessors, dl.successors\nFROM range_tag r\nJOIN dynamic_lane dl\n  ON dl.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('AvoidanceBorrowLane')\nORDER BY r.start_ts, dl.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "避障借道"
+    ],
+    "expected_composition": "tag_join_dynamic_lane"
+  },
+  {
+    "id": 20,
+    "nl": "路口左转时自车和障碍物的DR轨迹漂移值",
+    "difficulty": "very_hard",
+    "status": "issues",
+    "r1_result": {
+      "concepts": [
+        "路口左转"
+      ],
+      "composition": "cross_table",
+      "ego_fields": [],
+      "need_dynamic_obj": true,
+      "dynamic_obj_filters": "障碍物",
+      "need_dynamic_lane": false,
+      "need_intersection_info": false,
+      "analysis_description": "计算自车和障碍物的DR轨迹漂移值"
+    },
+    "r1_issues": [
+      "组合方式不符: 期望=cte_analysis, 实际=cross_table"
+    ],
+    "sql": "SELECT r.start_ts, r.end_ts, r.tag_name,\n       e.ego_dr_trajectory,\n       d.obj_id, d.type, d.obs_dr_trajectory\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('INTERSECTION_LEFTTURN')\n  AND d.is_static = 0\nORDER BY r.start_ts, e.ts\n```\n只输出纯SQL。</think>SELECT r.start_ts, r.end_ts, r.tag_name,\n       e.ego_dr_trajectory,\n       d.obj_id, d.type, d.obs_dr_trajectory\nFROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9\nWHERE r.tag_name IN ('INTERSECTION_LEFTTURN')\n  AND d.is_static = 0\nORDER BY r.start_ts, e.ts",
+    "sql_issues": [],
+    "expected_concepts": [
+      "路口左转"
+    ],
+    "expected_composition": "cte_analysis"
+  }
+]
