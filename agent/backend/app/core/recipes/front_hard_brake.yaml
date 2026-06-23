@@ -1,0 +1,204 @@
+# Recipe: front_hard_brake
+# Purpose: 前车急刹：前方车辆急刹车
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: front_hard_brake
+version: "1.0"
+description: |
+  前车急刹：前方车辆急刹车
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: front_hard_brake
+    raw_sql: |
+      -- ==============================================================================
+      -- Scene: Front Hard Brake Scenario (V4.0)
+      -- Description: Detects scenarios where the lead vehicle performs hard braking
+      --              and ego responds with defensive braking. Uses 0.2s DR trajectory
+      --              for precise deceleration calculation.
+      -- Version: v4.0
+      -- ==============================================================================
+      
+      WITH 
+      -- Step 1: Calculate lead vehicle deceleration per frame (km/h/s)
+      -- Prefer 0.2s DR trajectory, fallback to 1s difference
+      obj_accel AS (
+          SELECT d1.ts, d1.obj_id, d1.x, d1.y, d1.type, d1.absolute_velocity_x,
+                 COALESCE(
+                     CASE 
+                         WHEN json_extract(d1.obs_dr_trajectory, '$.exists[0]') = 1
+                              AND json_extract(d1.obs_dr_trajectory, '$.exists[4]') = 1
+                         THEN (json_extract(d1.obs_dr_trajectory, '$.speed[4]') - 
+                               json_extract(d1.obs_dr_trajectory, '$.speed[0]')) / 0.8
+                     END,
+                     d1.absolute_velocity_x - d0.absolute_velocity_x
+                 ) AS obj_accel
+          FROM dynamic_obj d1
+          INNER JOIN dynamic_obj d0 ON d0.obj_id = d1.obj_id AND d0.ts = d1.ts - 1
+          WHERE d1.type IN ('car', 'truck', 'bus')
+            AND d1.x > 0 AND d1.x < 50
+            AND ABS(d1.y) < 2.5
+            AND d1.absolute_velocity_x > 5
+      ),
+      -- Step 2: Filter lead hard brake frames (deceleration < -2.0 km/h/s)
+      lead_hard_brake AS (
+          SELECT ts, obj_id, x, y, type, obj_accel
+          FROM obj_accel
+          WHERE obj_accel < -2.0
+      ),
+      -- Step 3: gaps-and-islands aggregate lead hard brake time periods (allow 2s gap)
+      lead_numbered AS (
+          SELECT ts, obj_id, x, y, type, obj_accel,
+                 ROW_NUMBER() OVER (PARTITION BY obj_id ORDER BY ts) AS rn
+          FROM lead_hard_brake
+      ),
+      lead_pairs AS (
+          SELECT a.ts, a.obj_id, a.x, a.y, a.type, a.obj_accel, a.rn,
+                 b.ts AS prev_ts
+          FROM lead_numbered a
+          LEFT JOIN lead_numbered b ON a.obj_id = b.obj_id AND a.rn = b.rn + 1
+      ),
+      lead_grouped AS (
+          SELECT ts, obj_id, x, y, type, obj_accel,
+                 SUM(CASE WHEN prev_ts IS NULL OR ts - prev_ts > 2 THEN 1 ELSE 0 END) 
+                     OVER (PARTITION BY obj_id ORDER BY ts) AS grp
+          FROM lead_pairs
+      ),
+      -- Step 3.5: Segment-level merge - merge adjacent segments within 5s
+      lead_segments_raw AS (
+          SELECT obj_id, MIN(ts) AS start_ts, MAX(ts) AS end_ts, COUNT(*) AS duration,
+                 MIN(obj_accel) AS min_lead_accel, MIN(x) AS min_dist, type
+          FROM lead_grouped
+          GROUP BY obj_id, grp, type
+      ),
+      lead_seg_numbered AS (
+          SELECT obj_id, type, start_ts, end_ts, duration, min_lead_accel, min_dist,
+                 ROW_NUMBER() OVER (ORDER BY start_ts) AS seg_rn
+          FROM lead_segments_raw
+      ),
+      lead_seg_pairs AS (
+          SELECT a.*, b.end_ts AS prev_end_ts
+          FROM lead_seg_numbered a
+          LEFT JOIN lead_seg_numbered b ON a.seg_rn = b.seg_rn + 1
+      ),
+      lead_seg_grouped AS (
+          SELECT obj_id, type, start_ts, end_ts, duration, min_lead_accel, min_dist,
+                 SUM(CASE WHEN prev_end_ts IS NULL OR start_ts - prev_end_ts > 5 THEN 1 ELSE 0 END)
+                     OVER (ORDER BY start_ts) AS seg_grp
+          FROM lead_seg_pairs
+      ),
+      lead_segments AS (
+          SELECT GROUP_CONCAT(DISTINCT obj_id) AS obj_id,
+                 GROUP_CONCAT(DISTINCT type) AS type,
+                 MIN(start_ts) AS start_ts, MAX(end_ts) AS end_ts,
+                 MAX(end_ts) - MIN(start_ts) + 1 AS duration,
+                 MIN(min_lead_accel) AS min_lead_accel,
+                 MIN(min_dist) AS min_dist
+          FROM lead_seg_grouped
+          GROUP BY seg_grp
+      ),
+      -- Step 3.6: Segment extension - extend all duration < 8 segments backward to 8s
+      lead_extended AS (
+          SELECT obj_id, type,
+                 start_ts,
+                 CASE 
+                     WHEN duration < 8 THEN end_ts + (8 - duration)
+                     ELSE end_ts 
+                 END AS end_ts,
+                 CASE 
+                     WHEN duration < 8 THEN 8
+                     ELSE duration 
+                 END AS duration,
+                 min_lead_accel,
+                 min_dist
+          FROM lead_segments
+      ),
+      
+      -- Step 4: Calculate ego deceleration per frame
+      -- Prefer 0.2s DR trajectory, fallback to 1s difference
+      ego_accel AS (
+          SELECT e1.ts,
+                 COALESCE(
+                     CASE 
+                         WHEN json_extract(e1.ego_dr_trajectory, '$.exists[0]') = 1
+                              AND json_extract(e1.ego_dr_trajectory, '$.exists[4]') = 1
+                         THEN (json_extract(e1.ego_dr_trajectory, '$.speed[4]') - 
+                               json_extract(e1.ego_dr_trajectory, '$.speed[0]')) / 0.8
+                     END,
+                     e1.speed - e0.speed
+                 ) AS ego_accel
+          FROM ego e1
+          INNER JOIN ego e0 ON e0.ts = e1.ts - 1
+      ),
+      ego_decel AS (
+          SELECT ts, ego_accel
+          FROM ego_accel
+          WHERE ego_accel < -1.5
+      ),
+      -- Step 5: Match - ego deceleration occurs within 3s after lead hard braking
+      matched AS (
+          SELECT le.*, ed.ts AS ego_ts, ed.ego_accel
+          FROM lead_segments le
+          LEFT JOIN ego_decel ed ON ed.ts BETWEEN le.start_ts AND le.end_ts + 3
+      ),
+      -- Step 6: Calculate segment statistics
+      segment_stats AS (
+          SELECT obj_id, start_ts, end_ts, duration, min_lead_accel, min_dist, type,
+                 COUNT(ego_ts) AS ego_decel_frames,
+                 MIN(ego_accel) AS min_ego_accel,
+                 (SELECT AVG(e.speed) FROM ego e WHERE e.ts BETWEEN start_ts AND end_ts) AS avg_ego_speed,
+                 (SELECT MIN(e.speed) FROM ego e WHERE e.ts BETWEEN start_ts AND end_ts) AS min_ego_speed,
+                 (SELECT MAX(e.speed) FROM ego e WHERE e.ts BETWEEN start_ts AND end_ts) AS max_ego_speed,
+                 (SELECT AVG(e.speed) FROM ego e WHERE e.ts BETWEEN start_ts - 3 AND start_ts - 1) AS pre_avg_ego_speed
+          FROM matched
+          GROUP BY obj_id, start_ts, end_ts, duration, min_lead_accel, min_dist, type
+      )
+      -- Final output
+      SELECT 
+          'front_hard_brake' AS tag_name,
+          start_ts,
+          end_ts,
+          duration,
+          obj_id,
+          type AS lead_type,
+          ROUND(min_lead_accel, 2) AS min_lead_accel,
+          ROUND(min_dist, 1) AS min_dist,
+          ego_decel_frames,
+          ROUND(min_ego_accel, 2) AS min_ego_accel,
+          ROUND(avg_ego_speed, 1) AS avg_ego_speed,
+          ROUND(min_ego_speed, 1) AS min_ego_speed,
+          ROUND(max_ego_speed, 1) AS max_ego_speed,
+          ROUND(COALESCE(pre_avg_ego_speed, avg_ego_speed) - min_ego_speed, 1) AS ego_speed_drop,
+          CASE 
+              WHEN min_lead_accel < -4.0 AND min_ego_accel < -3.0 THEN 'hard_lead_hard_ego_brake'
+              WHEN min_lead_accel < -4.0 AND min_ego_accel < -2.0 THEN 'hard_lead_moderate_ego_brake'
+              WHEN min_lead_accel < -4.0 THEN 'hard_lead_light_ego_brake'
+              WHEN min_lead_accel < -3.0 AND min_ego_accel < -3.0 THEN 'moderate_lead_hard_ego_brake'
+              WHEN min_lead_accel < -3.0 AND min_ego_accel < -2.0 THEN 'moderate_lead_moderate_ego_brake'
+              ELSE 'moderate_lead_light_ego_brake'
+          END AS sub_scenario,
+          json_object(
+              'obj_id', obj_id,
+              'lead_type', type,
+              'min_lead_accel', ROUND(min_lead_accel, 2),
+              'min_ego_accel', ROUND(min_ego_accel, 2),
+              'min_dist', ROUND(min_dist, 1),
+              'ego_speed_drop', ROUND(COALESCE(pre_avg_ego_speed, avg_ego_speed) - min_ego_speed, 1),
+              'sub_scenario', CASE 
+                  WHEN min_lead_accel < -4.0 AND min_ego_accel < -3.0 THEN 'hard_lead_hard_ego_brake'
+                  WHEN min_lead_accel < -4.0 AND min_ego_accel < -2.0 THEN 'hard_lead_moderate_ego_brake'
+                  WHEN min_lead_accel < -4.0 THEN 'hard_lead_light_ego_brake'
+                  WHEN min_lead_accel < -3.0 AND min_ego_accel < -3.0 THEN 'moderate_lead_hard_ego_brake'
+                  WHEN min_lead_accel < -3.0 AND min_ego_accel < -2.0 THEN 'moderate_lead_moderate_ego_brake'
+                  ELSE 'moderate_lead_light_ego_brake'
+              END,
+              'avg_ego_speed', ROUND(avg_ego_speed, 1)
+          ) AS param
+      FROM segment_stats
+      WHERE ego_decel_frames >= 1
+        AND min_dist < 35
+        AND duration >= 8
+      ORDER BY start_ts

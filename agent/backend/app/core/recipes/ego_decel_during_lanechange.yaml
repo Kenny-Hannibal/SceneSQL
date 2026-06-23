@@ -1,0 +1,340 @@
+# Recipe: ego_decel_during_lanechange
+# Purpose: 变道过程中减速：自车在变道期间发生减速
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: ego_decel_during_lanechange
+version: "1.0"
+description: |
+  变道过程中减速：自车在变道期间发生减速
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: ego_decel_during_lanechange
+    raw_sql: |
+      -- ==============================================================================
+      -- Scene: Ego Deceleration During Lane Change (V1.2)
+      -- Description: Detects ego decelerating during lane change due to lead vehicle
+      --              in ego lane or target lane.
+      -- Changes v1.1->v1.2:
+      --   1. Introduce acc_magnitude as auxiliary verification to improve accuracy.
+      --      Deceleration events typically show higher combined acceleration
+      --      (avg 0.7-1.4 m/s^2 vs normal 0.2-0.7). Filter out sensor-noise events.
+      --   2. Introduce obs_lane_id from dynamic_obj for future lane-classification
+      --      enhancement (100% fill rate, currently stored for potential use).
+      --   3. Merge logic: global merge regardless of obj_id (gap <=5s).
+      --   4. Output: GROUP_CONCAT multiple ego/target lead IDs as comma-separated text.
+      -- ==============================================================================
+      
+      WITH
+      lane_change_periods AS (
+          SELECT
+              start_ts, end_ts, end_ts - start_ts AS lc_duration,
+              tag_name AS lc_tag,
+              json_extract(param, '$.sub_tag') AS sub_tag,
+              CASE
+                  WHEN json_extract(param, '$.sub_tag') = 'LeftLaneChange' THEN 'left'
+                  WHEN json_extract(param, '$.sub_tag') = 'RightLaneChange' THEN 'right'
+                  ELSE NULL
+              END AS lc_direction
+          FROM range_tag
+          WHERE tag_name IN ('LaneChange', 'LANECHANGE_MERGELANECHANGEDROP', 'LANECHANGE_NAVIGATION',
+              'LANECHANGE_FREEWAY', 'LANECHANGE_AVOIDANCE', 'LANECHANGE_OVERTAKELEFTCARORTRUCK',
+              'LANECHANGE_OVERTAKERIGHTCARORTRUCK', 'LANECHANGE_MERGELANECHANGEZIPPER',
+              'LANECHANGE_MERGELANECHANGEMAINROAD', 'LANECHANGE_NAVLANECHANGERAMP')
+            AND (end_ts - start_ts) >= 2
+      ),
+      
+      analysis_window AS (
+          SELECT
+              start_ts, end_ts, lc_duration, lc_tag, sub_tag, lc_direction,
+              start_ts - 2 AS analysis_start,
+              end_ts AS analysis_end
+          FROM lane_change_periods
+          WHERE lc_direction IS NOT NULL
+      ),
+      
+      ego_stats AS (
+          SELECT
+              aw.start_ts, aw.end_ts, aw.lc_duration, aw.lc_tag, aw.sub_tag, aw.lc_direction,
+              aw.analysis_start, aw.analysis_end,
+              COUNT(e.ts) AS ego_frames,
+              MAX(e.speed) AS max_speed,
+              MIN(e.speed) AS min_speed,
+              MAX(e.speed) - MIN(e.speed) AS speed_drop,
+              AVG(e.speed) AS avg_speed
+          FROM analysis_window aw
+          LEFT JOIN ego e ON e.ts BETWEEN aw.analysis_start AND aw.analysis_end
+          GROUP BY aw.start_ts, aw.end_ts, aw.lc_duration, aw.lc_tag, aw.sub_tag, aw.lc_direction,
+                   aw.analysis_start, aw.analysis_end
+      ),
+      
+      ego_accel_raw AS (
+          SELECT e1.ts,
+                 COALESCE(
+                     CASE
+                         WHEN json_extract(e1.ego_dr_trajectory, '$.exists[0]') = 1
+                              AND json_extract(e1.ego_dr_trajectory, '$.exists[4]') = 1
+                         THEN (json_extract(e1.ego_dr_trajectory, '$.speed[4]') -
+                               json_extract(e1.ego_dr_trajectory, '$.speed[0]')) / 0.8
+                     END,
+                     e1.speed - e0.speed
+                 ) AS ego_accel
+          FROM ego e1
+          INNER JOIN ego e0 ON e0.ts = e1.ts - 1
+      ),
+      
+      ego_decel AS (
+          SELECT
+              aw.start_ts,
+              MIN(ea.ego_accel) AS min_accel,
+              COUNT(CASE WHEN ea.ego_accel < -1.0 THEN 1 END) AS decel_frames
+          FROM analysis_window aw
+          LEFT JOIN ego_accel_raw ea ON ea.ts BETWEEN aw.analysis_start AND aw.analysis_end
+          GROUP BY aw.start_ts
+      ),
+      
+      -- v1.1: lateral displacement check using ego_to_centerline_dist
+      ego_lateral AS (
+          SELECT
+              aw.start_ts,
+              MAX(e.ego_to_centerline_dist) AS max_centerline,
+              MIN(e.ego_to_centerline_dist) AS min_centerline,
+              ABS(MAX(e.ego_to_centerline_dist) - MIN(e.ego_to_centerline_dist)) AS lateral_delta
+          FROM analysis_window aw
+          LEFT JOIN ego e ON e.ts BETWEEN aw.analysis_start AND aw.analysis_end
+          GROUP BY aw.start_ts
+      ),
+      
+      -- v1.2: auxiliary acceleration magnitude check
+      ego_accel_v2 AS (
+          SELECT
+              aw.start_ts,
+              MAX(e.acc_magnitude) AS max_acc_magnitude,
+              AVG(e.acc_magnitude) AS avg_acc_magnitude
+          FROM analysis_window aw
+          LEFT JOIN ego e ON e.ts BETWEEN aw.analysis_start AND aw.analysis_end
+          GROUP BY aw.start_ts
+      ),
+      
+      lc_obj_frames AS (
+          SELECT
+              aw.start_ts, aw.end_ts, aw.lc_direction,
+              d.ts, d.obj_id, d.x, d.y, d.type,
+              d.obs_lane_id,
+              d.absolute_velocity_x, d.relative_velocity_x,
+              e.speed AS ego_speed
+          FROM analysis_window aw
+          INNER JOIN dynamic_obj d ON d.ts BETWEEN aw.analysis_start AND aw.analysis_end
+          INNER JOIN ego e ON e.ts = d.ts
+          WHERE d.type IN ('car', 'truck', 'bus')
+            AND d.x > -15 AND d.x < 60
+            AND (d.is_static = 0 OR d.is_static IS NULL)
+      ),
+      
+      all_lead_stats AS (
+          SELECT
+              lof.start_ts, lof.obj_id, lof.type,
+              COUNT(*) AS frames,
+              AVG(lof.y) AS avg_y,
+              MIN(lof.x) AS min_x,
+              AVG(lof.absolute_velocity_x) AS avg_abs_vx,
+              MIN(lof.x*lof.x + lof.y*lof.y) AS min_dist_sq
+          FROM lc_obj_frames lof
+          WHERE lof.x > 0 AND lof.x < 40
+          GROUP BY lof.start_ts, lof.obj_id, lof.type
+          HAVING COUNT(*) >= 3
+      ),
+      
+      classified_leads AS (
+          SELECT
+              als.*,
+              CASE
+                  WHEN lc_direction = 'left' AND avg_y > 0.3 THEN 'target_lane'
+                  WHEN lc_direction = 'left' AND avg_y <= 0.3 THEN 'ego_lane'
+                  WHEN lc_direction = 'right' AND avg_y < -0.3 THEN 'target_lane'
+                  WHEN lc_direction = 'right' AND avg_y >= -0.3 THEN 'ego_lane'
+                  ELSE 'unknown'
+              END AS lane_type
+          FROM all_lead_stats als
+          JOIN lane_change_periods lcp ON lcp.start_ts = als.start_ts
+      ),
+      
+      ego_lane_lead AS (
+          SELECT start_ts, obj_id AS ego_lead_id, type AS ego_lead_type,
+                 min_dist_sq AS ego_lead_dist_sq, avg_abs_vx AS ego_lead_vx
+          FROM (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY start_ts ORDER BY min_dist_sq ASC) AS rn
+              FROM classified_leads WHERE lane_type = 'ego_lane'
+          ) WHERE rn = 1
+      ),
+      
+      target_lane_lead AS (
+          SELECT start_ts, obj_id AS target_lead_id, type AS target_lead_type,
+                 min_dist_sq AS target_lead_dist_sq, avg_abs_vx AS target_lead_vx
+          FROM (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY start_ts ORDER BY min_dist_sq ASC) AS rn
+              FROM classified_leads WHERE lane_type = 'target_lane'
+          ) WHERE rn = 1
+      ),
+      
+      all_stats AS (
+          SELECT
+              es.start_ts, es.end_ts, es.lc_duration, es.lc_tag, es.sub_tag, es.lc_direction,
+              es.analysis_start, es.analysis_end,
+              es.ego_frames, es.max_speed, es.min_speed, es.speed_drop, es.avg_speed,
+              COALESCE(ed.min_accel, 0) AS min_accel,
+              COALESCE(ed.decel_frames, 0) AS decel_frames,
+              el.max_centerline, el.min_centerline, el.lateral_delta,
+              eav.max_acc_magnitude, eav.avg_acc_magnitude,
+              ell.ego_lead_id, ell.ego_lead_type, ell.ego_lead_dist_sq, ell.ego_lead_vx,
+              tll.target_lead_id, tll.target_lead_type, tll.target_lead_dist_sq, tll.target_lead_vx,
+              CASE
+                  WHEN ell.ego_lead_id IS NOT NULL AND tll.target_lead_id IS NOT NULL THEN 'both'
+                  WHEN ell.ego_lead_id IS NOT NULL THEN 'ego_lane'
+                  WHEN tll.target_lead_id IS NOT NULL THEN 'target_lane'
+                  ELSE 'none'
+              END AS decel_reason
+          FROM ego_stats es
+          LEFT JOIN ego_decel ed ON ed.start_ts = es.start_ts
+          LEFT JOIN ego_lateral el ON el.start_ts = es.start_ts
+          LEFT JOIN ego_accel_v2 eav ON eav.start_ts = es.start_ts
+          LEFT JOIN ego_lane_lead ell ON ell.start_ts = es.start_ts
+          LEFT JOIN target_lane_lead tll ON tll.start_ts = es.start_ts
+      ),
+      
+      hit_events AS (
+          SELECT *
+          FROM all_stats
+          WHERE
+              speed_drop >= 4
+              AND speed_drop <= 25
+              AND avg_speed >= 3
+              AND ego_frames >= 3
+              AND decel_frames >= 1
+              AND lc_duration BETWEEN 2 AND 10
+              AND (ego_lead_id IS NOT NULL OR target_lead_id IS NOT NULL)
+              AND (ego_lead_dist_sq <= 400 OR ego_lead_dist_sq IS NULL)
+              AND (target_lead_dist_sq <= 400 OR target_lead_dist_sq IS NULL)
+              AND lateral_delta >= 1.5
+              AND (max_acc_magnitude >= 0.3 OR max_acc_magnitude IS NULL)
+      ),
+      
+      -- v1.2: Global merge regardless of obj_id (time gap <= 5s)
+      merged_groups AS (
+          SELECT
+              start_ts, end_ts, lc_duration, lc_tag, sub_tag, lc_direction,
+              analysis_start, analysis_end, ego_frames, max_speed, min_speed,
+              speed_drop, avg_speed, min_accel, decel_frames,
+              ego_lead_id, ego_lead_type, ego_lead_dist_sq, ego_lead_vx,
+              target_lead_id, target_lead_type, target_lead_dist_sq, target_lead_vx,
+              decel_reason,
+              SUM(is_new_group) OVER (ORDER BY start_ts) AS merge_group_id
+          FROM (
+              SELECT *,
+                  CASE
+                      WHEN start_ts - LAG(end_ts) OVER (ORDER BY start_ts) > 5
+                      THEN 1 ELSE 0
+                  END AS is_new_group
+              FROM hit_events
+          )
+      ),
+      
+      merged_bounds AS (
+          SELECT
+              merge_group_id,
+              MIN(start_ts) AS merged_start,
+              MAX(end_ts) AS merged_end
+          FROM merged_groups
+          GROUP BY merge_group_id
+      ),
+      
+      -- v1.2: Aggregate lead info within each merge group using GROUP_CONCAT
+      merged_leads AS (
+          SELECT
+              merge_group_id,
+              GROUP_CONCAT(DISTINCT CAST(ego_lead_id AS TEXT)) AS all_ego_lead_ids,
+              GROUP_CONCAT(DISTINCT ego_lead_type) AS all_ego_lead_types,
+              MIN(ego_lead_dist_sq) AS min_ego_lead_dist_sq,
+              GROUP_CONCAT(DISTINCT CAST(target_lead_id AS TEXT)) AS all_target_lead_ids,
+              GROUP_CONCAT(DISTINCT target_lead_type) AS all_target_lead_types,
+              MIN(target_lead_dist_sq) AS min_target_lead_dist_sq,
+              CASE
+                  WHEN COUNT(DISTINCT ego_lead_id) > 0 AND COUNT(DISTINCT target_lead_id) > 0 THEN 'both'
+                  WHEN COUNT(DISTINCT ego_lead_id) > 0 THEN 'ego_lane'
+                  WHEN COUNT(DISTINCT target_lead_id) > 0 THEN 'target_lane'
+                  ELSE 'none'
+              END AS merged_decel_reason
+          FROM merged_groups
+          GROUP BY merge_group_id
+      ),
+      
+      merged_events AS (
+          SELECT
+              m.start_ts, m.end_ts, m.lc_duration, m.lc_tag, m.sub_tag, m.lc_direction,
+              m.analysis_start, m.analysis_end, m.ego_frames, m.max_speed, m.min_speed,
+              m.speed_drop, m.avg_speed, m.min_accel, m.decel_frames,
+              ml.all_ego_lead_ids, ml.all_ego_lead_types, ml.min_ego_lead_dist_sq,
+              ml.all_target_lead_ids, ml.all_target_lead_types, ml.min_target_lead_dist_sq,
+              ml.merged_decel_reason,
+              b.merged_start, b.merged_end,
+              CASE
+                  WHEN b.merged_end - b.merged_start < 3
+                  THEN b.merged_start - (3 - (b.merged_end - b.merged_start)) / 2.0
+                  ELSE b.merged_start
+              END AS event_start,
+              CASE
+                  WHEN b.merged_end - b.merged_start < 3
+                  THEN b.merged_end + (3 - (b.merged_end - b.merged_start)) / 2.0
+                  ELSE b.merged_end
+              END AS event_end,
+              ROW_NUMBER() OVER (PARTITION BY m.merge_group_id ORDER BY m.start_ts) AS rn
+          FROM merged_groups m
+          INNER JOIN merged_bounds b ON m.merge_group_id = b.merge_group_id
+          INNER JOIN merged_leads ml ON m.merge_group_id = ml.merge_group_id
+      )
+      
+      SELECT
+          'ego_decel_during_lanechange' AS tag_name,
+          ROUND(event_start, 0) AS start_ts,
+          ROUND(event_end, 0) AS end_ts,
+          ROUND(event_end - event_start, 1) AS merged_duration,
+          lc_tag,
+          sub_tag,
+          lc_direction,
+          analysis_start,
+          analysis_end,
+          ego_frames,
+          ROUND(max_speed, 1) AS max_speed,
+          ROUND(min_speed, 1) AS min_speed,
+          ROUND(speed_drop, 1) AS speed_drop,
+          ROUND(avg_speed, 1) AS avg_speed,
+          ROUND(min_accel, 2) AS min_accel,
+          decel_frames,
+          all_ego_lead_ids AS ego_lead_id,
+          all_ego_lead_types AS ego_lead_type,
+          ROUND(min_ego_lead_dist_sq, 1) AS ego_lead_dist_sq,
+          NULL AS ego_lead_vx,
+          all_target_lead_ids AS target_lead_id,
+          all_target_lead_types AS target_lead_type,
+          ROUND(min_target_lead_dist_sq, 1) AS target_lead_dist_sq,
+          NULL AS target_lead_vx,
+          merged_decel_reason AS decel_reason,
+          json_object(
+              'lc_direction', lc_direction,
+              'lc_tag', lc_tag,
+              'sub_tag', sub_tag,
+              'decel_reason', merged_decel_reason,
+              'ego_lead_ids', all_ego_lead_ids,
+              'target_lead_ids', all_target_lead_ids,
+              'speed_drop', ROUND(speed_drop, 1),
+              'avg_speed', ROUND(avg_speed, 1),
+              'decel_frames', decel_frames,
+              'lateral_delta', NULL,
+              'max_acc_magnitude', NULL
+          ) AS param
+      FROM merged_events
+      WHERE rn = 1
+      ORDER BY event_start

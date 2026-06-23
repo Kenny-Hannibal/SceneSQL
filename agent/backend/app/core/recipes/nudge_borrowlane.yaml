@@ -1,0 +1,311 @@
+# Recipe: nudge_borrowlane
+# Purpose: 借道避让：自车微调方向借用相邻车道避让
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: nudge_borrowlane
+version: "1.0"
+description: |
+  借道避让：自车微调方向借用相邻车道避让
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: nudge_borrowlane
+    raw_sql: |
+      -- =============================================================================
+      -- Scene: Borrow-Lane Nudge Detection (V8.7)
+      -- Description: Detects ego vehicle temporarily crossing or pressing the lane
+      --              boundary to avoid a front obstacle, then returning to original lane.
+      --              Based purely on raw data (ego + dynamic_obj), no range_tag dependency.
+      -- Note: This dataset has very few true boundary-crossing frames; threshold relaxed
+      --       to <= 0.75m to capture "lane pressing" behavior as proxy for borrowing.
+      -- Enhancement (V8.7): Single-file dynamic tag_name mapping.
+      --   - SQL output maps borrow_dir to nudge_left / nudge_right dynamically.
+      --   - No need to split into separate rule files since left/right are mutually exclusive.
+      -- Enhancement (V8.7): Centerline perception jump filtering.
+      --   - Computes per-frame centerline_delta in lagged CTE.
+      --   - Filters out segments with max_centerline_delta > 2.0m to remove perception noise.
+      -- Enhancement (V8.6): Boundary obstacle direction consistency check.
+      --   - Checks segment_start_ts - 1 frame to prevent false positives caused by
+      --     perception ID switch or y-coordinate jump at segment boundary.
+      --   - Rejects segment if target obstacle crossed centerline at the boundary.
+      -- Enhancement (V8.4): Both pre and post return-to-center required (AND instead of OR).
+      --   - Pre-segment centerline must also be close to center (< 0.8m), ensuring
+      --     the segment starts from a centered state, not an already-offset state.
+      -- Enhancement (V8.3): Tolerate 1-frame in_lane interruptions in borrow sequences.
+      -- Enhancement (V8.2): Dynamic jump threshold based on ego_lane_width.
+      --   - Jump threshold = MAX(ego_lane_width * 0.4, 1.0) instead of fixed 1.5m
+      --   - Detects frames AFTER crossing into adjacent lane (centerline jump with sign flip)
+      --   - Marks segments with has_jump flag to distinguish lane-crossing borrow from lane-pressing
+      --   - Locks onto the most relevant obstacle at segment start
+      --   - Tracks the same obj_id throughout the segment
+      --   - Verifies ego overtakes the target obstacle
+      -- Key Constraints:
+      --   - Lane boundary proximity: ego_to_left/right_boundary_dist <= 0.75m
+      --   - Lane crossing: centerline jump > MAX(lane_width*0.4, 1.0m) with sign change (crossed into adjacent lane)
+      --   - Direction consistency: all frames in segment on same side of centerline
+      --   - Return-to-center: BOTH pre-segment AND post-segment centerline must be within 0.8m
+      --   - Obstacle presence: front dynamic obstacle (x>0, x<40, ABS(y)<3.5)
+      --   - Obstacle tracking: same obj_id tracked, present >= 50% frames, overtaken
+      --   - Avoidance consistency: ego must offset AWAY from obstacle direction
+      --   - Boundary consistency: obstacle direction must not cross centerline at segment boundary
+      --   - Centerline jump filter: max_centerline_delta <= 2.0m (V8.7)
+      --   - Dynamic tag_name: nudge_left / nudge_right based on borrow_dir (V8.7)
+      --   - No intersection: ego_lane_successor_count <= 1 AND ego_lane_predecessor_count <= 1
+      --   - Duration: 2~12 seconds (shorter than formal lane change)
+      -- =============================================================================
+      
+      WITH
+      -- V8: Detect centerline jumps using LAG window function
+      lagged AS (
+          SELECT ts,
+                 ego_to_centerline_dist,
+                 ego_to_left_boundary_dist,
+                 ego_to_right_boundary_dist,
+                 ego_lane_width,
+                 speed,
+                 LAG(ego_to_left_boundary_dist) OVER (ORDER BY ts) AS prev_left,
+                 LAG(ego_to_right_boundary_dist) OVER (ORDER BY ts) AS prev_right,
+                 LAG(ego_to_centerline_dist) OVER (ORDER BY ts) AS prev_centerline,
+                 ABS(ego_to_centerline_dist - LAG(ego_to_centerline_dist) OVER (ORDER BY ts)) AS centerline_delta
+          FROM ego
+          WHERE ego_to_centerline_dist != -1.0
+            AND ego_to_left_boundary_dist != -1.0
+            AND ego_to_right_boundary_dist != -1.0
+            AND ego_lane_width != -1.0
+            AND speed > 0.5
+      ),
+      lane_state AS (
+          SELECT ts,
+                 ego_to_centerline_dist,
+                 ego_to_left_boundary_dist,
+                 ego_to_right_boundary_dist,
+                 speed,
+                 centerline_delta,
+                 CASE
+                     -- Normal lane pressing
+                     WHEN ego_to_left_boundary_dist <= 0.75 THEN 'borrow_left'
+                     WHEN ego_to_right_boundary_dist <= 0.75 THEN 'borrow_right'
+                     -- Just crossed into adjacent lane (left): prev frame pressed left, now large negative offset
+                     WHEN prev_left <= 0.75 AND prev_left != -1.0
+                          AND ABS(ego_to_centerline_dist) > CASE WHEN ego_lane_width * 0.35 > 0.8 THEN ego_lane_width * 0.35 ELSE 0.8 END AND ego_to_centerline_dist < 0
+                     THEN 'borrow_left'
+                     -- Just crossed into adjacent lane (right): prev frame pressed right, now large positive offset
+                     WHEN prev_right <= 0.75 AND prev_right != -1.0
+                          AND ABS(ego_to_centerline_dist) > CASE WHEN ego_lane_width * 0.35 > 0.8 THEN ego_lane_width * 0.35 ELSE 0.8 END AND ego_to_centerline_dist > 0
+                     THEN 'borrow_right'
+                     ELSE 'in_lane'
+                 END AS state,
+                 -- Detect centerline jump (sign change with dynamic threshold based on lane width)
+                 CASE
+                     WHEN prev_centerline IS NOT NULL AND prev_centerline != -1.0
+                          AND ABS(ego_to_centerline_dist - prev_centerline) > CASE WHEN ego_lane_width * 0.4 > 1.0 THEN ego_lane_width * 0.4 ELSE 1.0 END
+                          AND (
+                              (prev_centerline > 0 AND ego_to_centerline_dist < 0)
+                              OR (prev_centerline < 0 AND ego_to_centerline_dist > 0)
+                          )
+                     THEN 1 ELSE 0
+                 END AS is_jump
+          FROM lagged
+      ),
+      -- V8.3: Fill isolated 1-frame in_lane gaps surrounded by same-direction borrow
+      filled_frames AS (
+          SELECT ts, ego_to_centerline_dist, state, is_jump, centerline_delta,
+                 LAG(state) OVER (ORDER BY ts) AS prev_state,
+                 LEAD(state) OVER (ORDER BY ts) AS next_state
+          FROM lane_state
+      ),
+      state_with_fill AS (
+          SELECT ts, ego_to_centerline_dist, is_jump, centerline_delta,
+                 CASE
+                     WHEN state IN ('borrow_left', 'borrow_right') THEN state
+                     WHEN state = 'in_lane'
+                          AND prev_state = next_state
+                          AND prev_state IN ('borrow_left', 'borrow_right')
+                     THEN prev_state
+                     ELSE state
+                 END AS state
+          FROM filled_frames
+      ),
+      borrow_frames AS (
+          SELECT ts, ego_to_centerline_dist, state, is_jump, centerline_delta
+          FROM state_with_fill
+          WHERE state IN ('borrow_left', 'borrow_right')
+      ),
+      numbered AS (
+          SELECT ts, ego_to_centerline_dist, state, is_jump, centerline_delta,
+                 ts - ROW_NUMBER() OVER (ORDER BY ts) AS grp
+          FROM borrow_frames
+      ),
+      segments AS (
+          SELECT grp,
+                 MIN(ts) AS segment_start_ts,
+                 MAX(ts) AS segment_end_ts,
+                 COUNT(*) AS nudge_duration,
+                 (SELECT state FROM numbered n2 WHERE n2.grp = numbered.grp ORDER BY n2.ts ASC LIMIT 1) AS borrow_dir,
+                 (SELECT ego_to_centerline_dist FROM numbered n2 WHERE n2.grp = numbered.grp ORDER BY n2.ts ASC LIMIT 1) AS first_centerline,
+                 (SELECT ego_to_centerline_dist FROM numbered n2 WHERE n2.grp = numbered.grp ORDER BY n2.ts DESC LIMIT 1) AS last_centerline,
+                 MIN(ego_to_centerline_dist) AS centerline_min,
+                 MAX(ego_to_centerline_dist) AS centerline_max,
+                 MAX(is_jump) AS has_jump,
+                 MAX(centerline_delta) AS max_centerline_delta
+          FROM numbered
+          GROUP BY grp
+          HAVING COUNT(*) BETWEEN 2 AND 12
+      ),
+      -- V7 Enhancement: Exclude intersection frames
+      intersection_filter AS (
+          SELECT s.*
+          FROM segments s
+          WHERE NOT EXISTS (
+              SELECT 1 FROM ego e
+              WHERE e.ts BETWEEN s.segment_start_ts AND s.segment_end_ts
+                AND (e.ego_lane_successor_count > 1 OR e.ego_lane_predecessor_count > 1)
+          )
+      ),
+      -- V8.3: Lookup pre/post return-to-center timestamps and compute tag boundaries
+      pre_post_lookup AS (
+          SELECT s.grp,
+                 (SELECT ts FROM ego e
+                  WHERE e.ts < s.segment_start_ts
+                    AND e.ts >= s.segment_start_ts - 3
+                    AND e.ts >= (SELECT MIN(ts) FROM ego)
+                    AND e.ego_to_centerline_dist != -1.0
+                  ORDER BY ABS(e.ego_to_centerline_dist) ASC LIMIT 1) AS pre_ts,
+                 (SELECT ego_to_centerline_dist FROM ego e
+                  WHERE e.ts < s.segment_start_ts
+                    AND e.ts >= s.segment_start_ts - 3
+                    AND e.ts >= (SELECT MIN(ts) FROM ego)
+                    AND e.ego_to_centerline_dist != -1.0
+                  ORDER BY ABS(e.ego_to_centerline_dist) ASC LIMIT 1) AS pre_centerline,
+                 (SELECT ts FROM ego e
+                  WHERE e.ts > s.segment_end_ts
+                    AND e.ts <= s.segment_end_ts + 3
+                    AND e.ts <= (SELECT MAX(ts) FROM ego)
+                    AND e.ego_to_centerline_dist != -1.0
+                  ORDER BY ABS(e.ego_to_centerline_dist) ASC LIMIT 1) AS post_ts,
+                 (SELECT ego_to_centerline_dist FROM ego e
+                  WHERE e.ts > s.segment_end_ts
+                    AND e.ts <= s.segment_end_ts + 3
+                    AND e.ts <= (SELECT MAX(ts) FROM ego)
+                    AND e.ego_to_centerline_dist != -1.0
+                  ORDER BY ABS(e.ego_to_centerline_dist) ASC LIMIT 1) AS post_centerline
+          FROM intersection_filter s
+      ),
+      validated AS (
+          SELECT s.*,
+                 pp.pre_ts,
+                 pp.pre_centerline,
+                 pp.post_ts,
+                 pp.post_centerline,
+                 COALESCE(pp.pre_ts, s.segment_start_ts) AS start_ts,
+                 COALESCE(pp.post_ts, s.segment_end_ts) AS end_ts
+          FROM intersection_filter s
+          JOIN pre_post_lookup pp ON pp.grp = s.grp
+      ),
+      -- V6 Enhancement: Target obstacle locking
+      target_obstacle_candidates AS (
+          SELECT s.grp, d.obj_id, d.type AS obj_type,
+                 COUNT(*) AS appear_count,
+                 MIN(d.x) AS min_x,
+                 AVG(ABS(d.y)) AS avg_abs_y
+          FROM intersection_filter s
+          JOIN dynamic_obj d ON d.ts BETWEEN s.segment_start_ts AND s.segment_end_ts
+          WHERE d.x > 0 AND d.x < 40 AND ABS(d.y) < 3.5
+            AND d.type IN ('car', 'truck', 'bus', 'pedestrian', 'motorcycle', 'bicycle')
+          GROUP BY s.grp, d.obj_id, d.type
+      ),
+      target_obstacle_ranked AS (
+          SELECT grp, obj_id, obj_type, appear_count, min_x,
+                 ROW_NUMBER() OVER (PARTITION BY grp ORDER BY appear_count DESC, min_x, avg_abs_y) AS rn
+          FROM target_obstacle_candidates
+      ),
+      locked_obstacle AS (
+          SELECT grp, obj_id AS target_obj_id, obj_type AS target_obj_type, min_x AS start_x
+          FROM target_obstacle_ranked
+          WHERE rn = 1
+      ),
+      obstacle_tracking AS (
+          SELECT lo.grp, lo.target_obj_id,
+                 COUNT(DISTINCT d.ts) AS tracked_count,
+                 MAX(CASE WHEN d.ts = s.segment_end_ts THEN d.x END) AS end_x
+          FROM locked_obstacle lo
+          JOIN intersection_filter s ON s.grp = lo.grp
+          JOIN dynamic_obj d ON d.obj_id = lo.target_obj_id
+                             AND d.ts BETWEEN s.segment_start_ts AND s.segment_end_ts
+          GROUP BY lo.grp, lo.target_obj_id
+      ),
+      -- V7 Fix: Add avoidance consistency check - ego must offset AWAY from obstacle
+      -- V8.5 Enhancement: Obstacle direction must remain consistent throughout the entire segment
+      -- V8.6 Enhancement: Boundary obstacle direction consistency - check segment_start_ts - 1 frame
+      --   to prevent false positives caused by perception ID switch or y-coordinate jump at segment boundary
+      obstacle_avoidance_check AS (
+          SELECT v.*, lo.target_obj_id, lo.target_obj_type, lo.start_x,
+                 ot.tracked_count, ot.end_x,
+                 (SELECT y FROM dynamic_obj d WHERE d.ts = v.segment_start_ts AND d.obj_id = lo.target_obj_id LIMIT 1) AS obs_y,
+                 (SELECT MIN(y) FROM dynamic_obj d WHERE d.obj_id = lo.target_obj_id AND d.ts BETWEEN v.segment_start_ts AND v.segment_end_ts) AS min_obs_y,
+                 (SELECT MAX(y) FROM dynamic_obj d WHERE d.obj_id = lo.target_obj_id AND d.ts BETWEEN v.segment_start_ts AND v.segment_end_ts) AS max_obs_y,
+                 (SELECT y FROM dynamic_obj d WHERE d.ts = v.segment_start_ts - 1 AND d.obj_id = lo.target_obj_id LIMIT 1) AS prev_obs_y
+          FROM validated v
+          JOIN locked_obstacle lo ON lo.grp = v.grp
+          JOIN obstacle_tracking ot ON ot.grp = v.grp AND ot.target_obj_id = lo.target_obj_id
+          WHERE ot.tracked_count >= CAST(v.nudge_duration * 0.5 AS INTEGER)
+            AND lo.start_x > 0
+            AND (ot.end_x IS NULL OR ot.end_x < lo.start_x)
+      ),
+      obstacle_linked AS (
+          SELECT *
+          FROM obstacle_avoidance_check
+          WHERE (
+                    (obs_y > 0 AND centerline_max < 0)   -- obstacle on LEFT, ego offsets RIGHT (away)
+                 OR (obs_y < 0 AND centerline_min > 0)   -- obstacle on RIGHT, ego offsets LEFT (away)
+                )
+            AND (
+                    (obs_y > 0 AND min_obs_y > 0)        -- obstacle stays on LEFT throughout segment
+                 OR (obs_y < 0 AND max_obs_y < 0)        -- obstacle stays on RIGHT throughout segment
+                )
+            AND (
+                    prev_obs_y IS NULL                   -- no obstacle data before segment, cannot verify, pass conservatively
+                 OR (obs_y > 0 AND prev_obs_y > 0)       -- obstacle was on LEFT before segment started
+                 OR (obs_y < 0 AND prev_obs_y < 0)       -- obstacle was on RIGHT before segment started
+                )
+      )
+      SELECT
+          CASE
+              WHEN borrow_dir = 'borrow_left' THEN 'nudge_left'
+              WHEN borrow_dir = 'borrow_right' THEN 'nudge_right'
+              ELSE 'nudge_borrowlane'
+          END AS tag_name,
+          start_ts,
+          end_ts,
+          (end_ts - start_ts) AS total_duration,
+          nudge_duration,
+          CASE
+              WHEN centerline_min > 0 THEN 'borrow_left'
+              WHEN centerline_max < 0 THEN 'borrow_right'
+              ELSE borrow_dir
+          END AS sub_tag,
+          ROUND(centerline_min, 3) AS centerline_min,
+          ROUND(centerline_max, 3) AS centerline_max,
+          ROUND(first_centerline, 3) AS first_centerline,
+          ROUND(last_centerline, 3) AS last_centerline,
+          ROUND(pre_centerline, 3) AS pre_centerline,
+          ROUND(post_centerline, 3) AS post_centerline,
+          segment_start_ts,
+          segment_end_ts,
+          target_obj_id,
+          target_obj_type,
+          has_jump,
+          '{' ||
+          '"borrow_dir":"' || borrow_dir || '",' ||
+          '"max_offset":' || ROUND(CASE WHEN ABS(centerline_min) > ABS(centerline_max) THEN ABS(centerline_min) ELSE ABS(centerline_max) END, 3) || ',' ||
+          '"pre_center":' || ROUND(pre_centerline, 3) || ',' ||
+          '"post_center":' || ROUND(post_centerline, 3) || ',' ||
+          '"segment_start_ts":' || segment_start_ts || ',' ||
+          '"segment_end_ts":' || segment_end_ts || ',' ||
+          '"total_duration":' || (end_ts - start_ts) || ',' ||
+          '"nudge_duration":' || nudge_duration || ',' ||
+          '"target_obj_id":"' || COALESCE(target_obj_id, '') || '",' ||
+          '"target_obj_type":"' || COALESCE(target_obj_type, '') ||

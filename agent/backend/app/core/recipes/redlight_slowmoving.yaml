@@ -1,0 +1,237 @@
+# Recipe: redlight_slowmoving
+# Purpose: 红灯缓行：红灯期间车辆缓慢移动
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: redlight_slowmoving
+version: "1.0"
+description: |
+  红灯缓行：红灯期间车辆缓慢移动
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: redlight_slowmoving
+    raw_sql: |
+      WITH stop_frames AS (
+          -- 找到所有停车帧（红灯 + 停止线范围内 + speed < 0.5）
+          SELECT 
+              e.ts,
+              e.speed,
+              e.latest_stop_line_direction
+          FROM ego e
+          WHERE e.latest_traffic_light_status = '红'
+            AND e.latest_stop_line_direction != 0
+            AND e.latest_stop_line_direction >= -15
+            AND e.latest_stop_line_direction <= 15
+            AND ABS(e.speed) < 0.5
+      ),
+      first_stop AS (
+          SELECT MIN(ts) AS first_stop_ts
+          FROM stop_frames
+      ),
+      -- 从第一个停车帧开始，找到所有满足条件的帧（红灯 + 停止线范围内）
+      valid_frames AS (
+          SELECT 
+              e.ts,
+              e.speed,
+              e.latest_stop_line_direction,
+              CASE WHEN e.speed > 0.5 AND e.speed <= 10.8 THEN 1 ELSE 0 END AS is_slow,
+              CASE WHEN ABS(e.speed) < 0.5 THEN 1 ELSE 0 END AS is_stop,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM (
+                      SELECT
+                          d_inner.*,
+                          LAG(d_inner.absolute_velocity_x) OVER (PARTITION BY d_inner.obj_id ORDER BY d_inner.ts) AS prev_abs_vx,
+                          ROW_NUMBER() OVER (PARTITION BY d_inner.ts ORDER BY d_inner.x ASC) AS rn
+                      FROM dynamic_obj d_inner
+                      JOIN ego e_inner ON e_inner.ts = d_inner.ts
+                      WHERE d_inner.ts = e.ts
+                        AND d_inner.x > 0
+                        AND ABS(d_inner.y) < 2
+                        AND d_inner.type IN ('car', 'truck', 'bus', 'suv')
+                        AND d_inner.absolute_velocity_x IS NOT NULL
+                        AND NOT (
+                            d_inner.obs_dr_trajectory IS NOT NULL
+                            AND e_inner.ego_dr_trajectory IS NOT NULL
+                            AND COS(json_extract(d_inner.obs_dr_trajectory, '$.theta[0]') - json_extract(e_inner.ego_dr_trajectory, '$.theta[0]')) <= 0
+                        )
+                  ) d
+                  WHERE d.rn = 1
+                    AND (
+                        -- 距离在减小且满足距离/TTC条件
+                        (e.speed - d.absolute_velocity_x) > 0
+                        AND (
+                            -- 低速场景(<=5km/h)：距离<10米
+                            (e.speed <= 5 AND d.x < 10)
+                            OR
+                            -- 高速场景(>5km/h)：TTC<=5秒
+                            (e.speed > 5 AND (d.x / NULLIF((e.speed - d.absolute_velocity_x) / 3.6, 0)) <= 5)
+                        )
+                        -- 近距离且前车正在减速
+                        OR (
+                            d.x <= 15
+                            AND d.prev_abs_vx IS NOT NULL
+                            AND d.absolute_velocity_x < d.prev_abs_vx
+                        )
+                    )
+              ) THEN 1 ELSE 0 END AS has_dangerous_front_obj
+          FROM ego e
+          JOIN first_stop fs ON e.ts >= fs.first_stop_ts
+          WHERE e.latest_traffic_light_status = '红'
+            AND e.latest_stop_line_direction != 0
+            AND e.latest_stop_line_direction >= -15
+            AND e.latest_stop_line_direction <= 15
+      ),
+      -- 找到连续停车帧的结束位置（遇到非停车帧停止）
+      stop_period AS (
+          SELECT 
+              vf.ts,
+              vf.speed,
+              vf.latest_stop_line_direction,
+              vf.is_slow,
+              vf.is_stop,
+              vf.has_dangerous_front_obj,
+              -- 检查从first_stop_ts到当前帧是否都是停车帧
+              CASE WHEN NOT EXISTS (
+                  SELECT 1 FROM valid_frames vf2
+                  WHERE vf2.ts >= (SELECT first_stop_ts FROM first_stop)
+                    AND vf2.ts < vf.ts
+                    AND vf2.is_stop = 0
+              ) THEN 1 ELSE 0 END AS is_in_stop_period
+          FROM valid_frames vf
+      ),
+      -- 找到停车期间的最后一帧
+      last_stop_in_period AS (
+          SELECT MAX(ts) AS last_stop_ts
+          FROM stop_period
+          WHERE is_in_stop_period = 1 AND is_stop = 1
+      ),
+      -- 从停车期间结束后，找到低速帧
+      slow_frames AS (
+          SELECT 
+              vf.ts,
+              vf.speed,
+              vf.latest_stop_line_direction,
+              vf.has_dangerous_front_obj
+          FROM valid_frames vf
+          CROSS JOIN last_stop_in_period lsp
+          WHERE vf.ts > lsp.last_stop_ts
+            AND vf.is_slow = 1
+      ),
+      -- 使用ROW_NUMBER生成连续组ID
+      slow_sequences AS (
+          SELECT 
+              ts,
+              speed,
+              latest_stop_line_direction,
+              ts - ROW_NUMBER() OVER (ORDER BY ts) AS grp
+          FROM slow_frames
+      ),
+      -- 聚合连续低速片段
+      creeping_segments AS (
+          SELECT 
+              MIN(ts) AS creeping_start_ts,
+              MAX(ts) AS creeping_end_ts,
+              COUNT(*) AS frame_count,
+              MAX(speed) AS max_speed,
+              MIN(speed) AS min_speed,
+              AVG(speed) AS avg_speed,
+              MAX(latest_stop_line_direction) AS closest_to_stop_line
+          FROM slow_sequences
+          GROUP BY grp
+          HAVING COUNT(*) >= 2
+      ),
+      -- 添加检查：
+      -- 1. 确保低速片段期间（包含边界）没有停车帧
+      -- 2. 确保creeping_start_ts的前一帧是停车帧（红灯+停止线范围内）
+      creeping_candidates AS (
+          SELECT 
+              cs.*,
+              (SELECT first_stop_ts FROM first_stop) AS first_stop_ts,
+              (SELECT last_stop_ts FROM last_stop_in_period) AS last_stop_ts
+          FROM creeping_segments cs
+          WHERE NOT EXISTS (
+              -- 检查1：片段期间没有停车帧
+              SELECT 1 FROM valid_frames vf
+              WHERE vf.ts >= cs.creeping_start_ts
+                AND vf.ts <= cs.creeping_end_ts
+                AND vf.is_stop = 1
+          )
+          AND EXISTS (
+              -- 检查2：creeping_start_ts的前一帧必须是停车帧（红灯+停止线范围内）
+              SELECT 1 FROM ego e
+              WHERE e.ts < cs.creeping_start_ts
+                AND e.latest_traffic_light_status = '红'
+                AND e.latest_stop_line_direction != 0
+                AND e.latest_stop_line_direction >= -15
+                AND e.latest_stop_line_direction <= 15
+                AND ABS(e.speed) < 0.5
+                AND e.ts = (SELECT MAX(ts) FROM ego e2 WHERE e2.ts < cs.creeping_start_ts)
+          )
+      ),
+      bag_range AS (
+          SELECT MIN(ts) AS bag_start_ts, MAX(ts) AS bag_end_ts FROM ego
+      ),
+      final_result AS (
+          SELECT 
+              cc.first_stop_ts,
+              cc.last_stop_ts,
+              cc.creeping_start_ts,
+              cc.creeping_end_ts,
+              -- 整个片段开始时间：creeping_start_ts的前一帧（带bag起始时间边界保护）
+              COALESCE(
+                  (SELECT MAX(e.ts) 
+                   FROM ego e 
+                   WHERE e.ts < cc.creeping_start_ts),
+                  -- 边界保护：如果没有前一帧，使用creeping_start_ts，但不能早于bag开始时间
+                  CASE 
+                      WHEN cc.creeping_start_ts < br.bag_start_ts THEN br.bag_start_ts
+                      ELSE cc.creeping_start_ts
+                  END
+              ) AS start_ts,
+              -- 整个片段结束时间：溜车结束时间帧+5秒（带边界保护，不超过bag结束时间）
+              CASE 
+                  WHEN cc.creeping_end_ts + 5 < br.bag_end_ts 
+                  THEN cc.creeping_end_ts + 5 
+                  ELSE br.bag_end_ts 
+              END AS end_ts,
+              -- 判断倒计时起步溜车：溜车结束后5秒内是否有绿灯
+              CASE
+                  WHEN EXISTS (
+                      SELECT 1 FROM ego e
+                      WHERE e.ts > cc.creeping_end_ts
+                        AND e.ts <= cc.creeping_end_ts + 5
+                        AND (
+                            e.latest_traffic_light_status IN ('绿', '未知')
+                            OR e.speed > 10
+                        )
+                  ) THEN 1
+                  ELSE 0
+              END AS is_countdown_start
+          FROM creeping_candidates cc
+          CROSS JOIN bag_range br
+      )
+      SELECT 
+          fr.start_ts,
+          fr.end_ts,
+          fr.creeping_start_ts,
+          fr.creeping_end_ts,
+          fr.end_ts - fr.start_ts + 1 AS total_duration,    fr.creeping_end_ts - fr.creeping_start_ts + 1 AS creeping_duration,
+          ROUND(AVG(vf.speed), 2) AS avg_speed,
+          ROUND(MAX(vf.speed), 2) AS max_speed,
+          ROUND(MAX(vf.latest_stop_line_direction), 2) AS closest_to_stop_line,
+          CASE
+              WHEN MAX(vf.latest_stop_line_direction) < 0 THEN '未过停止线'
+              ELSE '已过停止线'
+          END AS position_type,
+          CASE 
+              WHEN fr.is_countdown_start = 1 THEN '倒计时起步溜车'
+              ELSE '普通红灯溜车'
+          END AS creeping_type,
+          MAX(vf.has_dangerous_front_obj) AS has_dangerous_front_obj
+      FROM final_result fr
+      JOIN valid_frames vf ON vf.ts BETWEEN fr.creeping_start_ts AND fr.creeping_end_ts
+      GROUP BY fr.start_ts, fr.end_ts, fr.creeping_start_ts, fr.creeping_end_ts, fr.is_countdown_start
+      ORDER BY fr.start_ts;

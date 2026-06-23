@@ -1,0 +1,299 @@
+# Recipe: meeting_oncoming
+# Purpose: 会车/对向来车：与对向车辆会车
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: meeting_oncoming
+version: "1.0"
+description: |
+  会车/对向来车：与对向车辆会车
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: meeting_oncoming
+    raw_sql: |
+      -- ==============================================================================
+      -- Scene: Meeting Oncoming Detection
+      -- Description: 检测对向来车会车场景，识别与自车方向相反行驶的障碍车辆
+      -- ==============================================================================
+      
+      WITH opposite_vehicles AS (
+        -- 第一步：筛选出相对自车方向行驶的车辆
+        SELECT 
+          d.ts,
+          d.obj_id,
+          d.x,
+          d.y,
+          d.absolute_velocity_x,
+          d.absolute_velocity_y,
+          d.heading,
+          d.type,
+          e.speed as ego_speed
+        FROM dynamic_obj d
+        JOIN ego e ON d.ts = e.ts
+        WHERE 
+          -- 筛选车辆类型（排除行人、自行车等）
+          d.type IN ('car', 'truck', 'bus', 'suv', 'unknown_vehicle')
+          -- 目标在自车左右一定范围内
+          AND ABS(d.y) < 2
+          -- 障碍车的heading绝对值大于2弧度
+          AND ABS(d.heading) > 2.5
+          AND d.absolute_velocity_x <= 0
+      ),
+      passing_vehicles AS (
+        -- 第二步：找出从前方经过到后方的车辆
+        SELECT 
+          ov.obj_id,
+          ov.type,
+          MIN(ov.x) AS min_x,
+          MAX(ov.x) AS max_x,
+          MIN(ov.y) AS min_y,
+          MAX(ov.y) AS max_y,
+          MIN(ABS(ov.y)) AS min_abs_y,
+          AVG(ov.ego_speed) AS avg_ego_speed,
+          MAX(ov.absolute_velocity_x) AS max_obstacle_speed,
+          COUNT(*) AS sample_count
+        FROM opposite_vehicles ov
+        GROUP BY ov.obj_id, ov.type
+        HAVING 
+          -- 车辆至少要有足够的样本点
+          sample_count >= 3
+          -- 车辆从前方（x>0）经过到了后方（x<0）
+          AND MAX(ov.x) > 0 
+          AND MIN(ov.x) < 0
+          -- 在某些时刻位于前方（x > 0）
+          AND EXISTS (SELECT 1 FROM opposite_vehicles ov2 WHERE ov2.obj_id = ov.obj_id AND ov2.x > 0)
+          -- 在某些时刻位于后方（x < 0）
+          AND EXISTS (SELECT 1 FROM opposite_vehicles ov3 WHERE ov3.obj_id = ov.obj_id AND ov3.x < 0)
+          -- y轴上的最小绝对值距离小于3米
+          AND MIN(ABS(ov.y)) < 1.5
+          -- 障碍车的最大速度绝对值大于5
+          AND MIN(ov.absolute_velocity_x) < -5
+      ),
+      vehicle_passing_moments AS (
+        -- 第三步：找到每个通过车辆的具体时间范围
+        SELECT 
+          pv.obj_id,
+          pv.type,
+          MIN(ov.ts) AS start_ts,
+          MAX(ov.ts) AS end_ts,
+          pv.min_abs_y AS closest_y_distance,
+          pv.avg_ego_speed
+        FROM passing_vehicles pv
+        JOIN opposite_vehicles ov ON pv.obj_id = ov.obj_id
+        WHERE 
+          -- 车辆在时间序列上确实从前方移动到后方
+          EXISTS (SELECT 1 FROM opposite_vehicles ov2 WHERE ov2.obj_id = pv.obj_id AND ov2.x > 0 AND ov2.ts <= (SELECT AVG(ts) FROM opposite_vehicles WHERE obj_id = pv.obj_id))
+          AND EXISTS (SELECT 1 FROM opposite_vehicles ov3 WHERE ov3.obj_id = pv.obj_id AND ov3.x < 0 AND ov3.ts >= (SELECT AVG(ts) FROM opposite_vehicles WHERE obj_id = pv.obj_id))
+        GROUP BY pv.obj_id, pv.type, pv.min_abs_y, pv.avg_ego_speed
+        HAVING 
+          -- 确保时间范围有效
+          MIN(ov.ts) < MAX(ov.ts)
+      ),
+      extended_events AS (
+        -- 第四步：扩展时间范围，包含会车前后一段时间，以便分析完整场景
+        SELECT 
+          vp.obj_id,
+          vp.type,
+          -- 开始时间：会车事件开始前2秒
+          (SELECT MAX(ts) FROM ego e WHERE e.ts <= vp.start_ts - 1) AS start_ts,
+          -- 结束时间：会车事件结束后2秒
+          (SELECT MIN(ts) FROM ego e WHERE e.ts >= vp.end_ts + 1) AS end_ts
+        FROM vehicle_passing_moments vp
+        WHERE 
+          -- 确保扩展的时间点存在
+          (SELECT MAX(ts) FROM ego e WHERE e.ts <= vp.start_ts - 1) IS NOT NULL
+          AND (SELECT MIN(ts) FROM ego e WHERE e.ts >= vp.end_ts + 1) IS NOT NULL
+          -- 确保自车平均速度大于5km/h
+          AND vp.avg_ego_speed > 5
+      ),
+      -- 筛选相邻y值差值绝对值最大值小于5的事件
+      y_variation_filter AS (
+        SELECT DISTINCT ee.obj_id
+        FROM extended_events ee
+        JOIN (
+          SELECT 
+            obj_id,
+            ts,
+            y,
+            LAG(y) OVER (PARTITION BY obj_id ORDER BY ts) AS prev_y
+          FROM dynamic_obj
+        ) d ON d.obj_id = ee.obj_id AND d.ts BETWEEN ee.start_ts AND ee.end_ts
+        WHERE d.prev_y IS NOT NULL
+        GROUP BY ee.obj_id
+        HAVING MAX(ABS(d.y - d.prev_y)) < 5
+      ),
+      -- 过滤后的扩展事件
+      filtered_extended_events AS (
+        SELECT ee.*
+        FROM extended_events ee
+        JOIN y_variation_filter yvf ON ee.obj_id = yvf.obj_id
+      ),
+      -- 计算每个扩展事件时间段内的最小横向距离
+      min_distances AS (
+        SELECT 
+          ee.obj_id,
+          ee.type,
+          ee.start_ts,
+          ee.end_ts,
+          MIN(ABS(d.y)) AS min_lateral_distance
+        FROM filtered_extended_events ee
+        JOIN dynamic_obj d ON d.obj_id = ee.obj_id AND d.ts BETWEEN ee.start_ts AND ee.end_ts
+        GROUP BY ee.obj_id, ee.type, ee.start_ts, ee.end_ts
+      ),
+      -- 对于相同类型且时间重叠的事件进行合并
+      first_merge AS (
+        SELECT 
+          type,
+          obj_id,
+          MIN(start_ts) AS start_ts,
+          MAX(end_ts) AS end_ts,
+          MIN(min_lateral_distance) AS min_lateral_distance
+        FROM (
+          SELECT 
+            type,
+            obj_id,
+            start_ts,
+            end_ts,
+            min_lateral_distance,
+            -- 使用窗口函数来标识哪些时间段应该被合并
+            SUM(is_new_group) OVER (PARTITION BY type, obj_id ORDER BY start_ts ROWS UNBOUNDED PRECEDING) AS group_id
+          FROM (
+            SELECT 
+              type,
+              obj_id,
+              start_ts,
+              end_ts,
+              min_lateral_distance,
+              CASE 
+                WHEN start_ts <= LAG(end_ts, 1, -999999) OVER (PARTITION BY type, obj_id ORDER BY start_ts) 
+                THEN 0 
+                ELSE 1 
+              END AS is_new_group
+            FROM min_distances
+            ORDER BY type, obj_id, start_ts
+          ) marked_groups
+        ) grouped_events
+        GROUP BY type, obj_id, group_id
+      ),
+      -- 计算每个事件的开始和结束时的自车速度，并得出博弈论结果
+      speed_analysis AS (
+        SELECT
+          fm.type,
+          fm.obj_id,
+          fm.start_ts,
+          fm.end_ts,
+          fm.min_lateral_distance,
+          -- 获取开始时间点附近的自车速度（会车前的速度）
+          (SELECT e.speed 
+           FROM ego e 
+           WHERE e.ts <= fm.start_ts 
+           ORDER BY e.ts DESC 
+           LIMIT 1) AS start_ego_speed,
+          -- 获取结束时间点附近的自车速度（会车后的速度）
+          (SELECT e.speed 
+           FROM ego e 
+           WHERE e.ts >= fm.end_ts 
+           ORDER BY e.ts ASC 
+           LIMIT 1) AS end_ego_speed
+        FROM first_merge fm
+      ),
+      -- 计算博弈论结果
+      game_theory_results AS (
+        SELECT
+          sa.type,
+          sa.obj_id,
+          sa.start_ts,
+          sa.end_ts,
+          sa.min_lateral_distance,
+          sa.start_ego_speed,
+          sa.end_ego_speed,
+          CASE 
+            WHEN sa.start_ego_speed IS NOT NULL AND sa.end_ego_speed IS NOT NULL THEN
+              CASE 
+                WHEN sa.start_ego_speed - sa.end_ego_speed > 10 AND sa.end_ego_speed > 5 THEN 'ego_yielded'
+                WHEN sa.end_ego_speed < 5 THEN 'mantul stop'
+                ELSE 'ego_proceed_clear'
+              END
+            ELSE 'ego_proceed_clear'
+          END AS game_theory_result
+        FROM speed_analysis sa
+      ),
+      -- 为每个对象收集y值的中间步骤
+      y_values_by_event AS (
+        SELECT 
+          ee.obj_id,
+          ee.start_ts,
+          ee.end_ts,
+          GROUP_CONCAT(ROUND(d.y, 1), ',') AS all_y_values
+        FROM filtered_extended_events ee
+        JOIN dynamic_obj d ON d.obj_id = ee.obj_id AND d.ts BETWEEN ee.start_ts AND ee.end_ts
+        GROUP BY ee.obj_id, ee.start_ts, ee.end_ts
+      ),
+      -- 合并相同类型和博弈论结果的时间重叠片段
+      final_merged_events AS (
+        SELECT 
+          GROUP_CONCAT(DISTINCT obj_id) AS obj_ids,
+          type,
+          game_theory_result,
+          MIN(start_ts) AS start_ts,
+          MAX(end_ts) AS end_ts,
+          MIN(min_lateral_distance) AS min_lateral_distance
+        FROM (
+          SELECT 
+            obj_id,
+            type,
+            game_theory_result,
+            start_ts,
+            end_ts,
+            min_lateral_distance,
+            -- 使用窗口函数来标识哪些时间段应该被合并
+            SUM(is_new_group) OVER (PARTITION BY type, game_theory_result ORDER BY start_ts ROWS UNBOUNDED PRECEDING) AS group_id
+          FROM (
+            SELECT 
+              obj_id,
+              type,
+              game_theory_result,
+              start_ts,
+              end_ts,
+              min_lateral_distance,
+              CASE 
+                WHEN start_ts <= LAG(end_ts, 1, -999999) OVER (PARTITION BY type, game_theory_result ORDER BY start_ts) 
+                THEN 0 
+                ELSE 1 
+              END AS is_new_group
+            FROM game_theory_results
+            ORDER BY type, game_theory_result, start_ts
+          ) marked_groups
+        ) grouped_events
+        GROUP BY type, game_theory_result, group_id
+      ),
+      -- 选择时间重叠片段中距离最小的一个
+      best_segment_per_overlap AS (
+        SELECT
+          obj_ids,
+          start_ts,
+          end_ts,
+          type,
+          min_lateral_distance,
+          game_theory_result,
+          ROW_NUMBER() OVER (PARTITION BY start_ts, end_ts ORDER BY min_lateral_distance ASC) AS rn
+        FROM final_merged_events
+      )
+      SELECT 
+        bspo.obj_ids AS obstacle_ids,
+        --GROUP_CONCAT(yev.all_y_values, ';') AS obstacle_all_y_values,
+        bspo.start_ts,
+        bspo.end_ts,
+        bspo.end_ts - bspo.start_ts AS duration,
+        bspo.type AS obstacle_type,
+        bspo.min_lateral_distance AS closest_lateral_distance,
+        bspo.game_theory_result
+      FROM best_segment_per_overlap bspo
+      LEFT JOIN y_values_by_event yev ON (bspo.obj_ids LIKE '%' || yev.obj_id || '%'
+        AND yev.start_ts >= bspo.start_ts AND yev.end_ts <= bspo.end_ts)
+      WHERE bspo.rn = 1
+      GROUP BY bspo.obj_ids, bspo.start_ts, bspo.end_ts, bspo.type, bspo.min_lateral_distance, bspo.game_theory_result
+      ORDER BY bspo.start_ts;

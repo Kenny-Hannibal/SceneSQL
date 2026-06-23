@@ -1,0 +1,306 @@
+# Recipe: ego_overtake_catin_truck
+# Purpose: 超车后卡车切入：自车超车后卡车切入前方
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: ego_overtake_catin_truck
+version: "1.0"
+description: |
+  超车后卡车切入：自车超车后卡车切入前方
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: ego_overtake_catin_truck
+    raw_sql: |
+      WITH 
+      -- 配置参数
+      config AS (
+          SELECT 
+              4.5  AS ego_length,
+              1.8  AS ego_width,
+              3.0  AS nearby_lat_gap_max,
+              0.8  AS safe_lat_gap,
+              20.0 AS min_speed,
+              3    AS min_duration,
+              5.0  AS start_dist
+      ),
+      
+      -- 1Hz基础数据 + LEAD窗口函数用于5Hz插值
+      base_1hz AS (
+          SELECT 
+              d.ts, d.obj_id, d.x, d.y, d.l, d.w, d.type, d.relative_velocity_x,
+              e.speed AS ego_speed, e.steering_angle,
+              LEAD(d.ts) OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_ts,
+              LEAD(d.x)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_x,
+              LEAD(d.y)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_y,
+              LEAD(d.l)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_l,
+              LEAD(d.w)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_w,
+              LEAD(e.speed)          OVER (ORDER BY e.ts) AS next_ego_speed,
+              LEAD(e.steering_angle) OVER (ORDER BY e.ts) AS next_steering
+          FROM dynamic_obj d
+          INNER JOIN ego e ON e.ts = d.ts
+          CROSS JOIN config cfg
+          WHERE d.type = 'truck'
+      ),
+      
+      -- 通过UNION ALL实现5Hz线性插值
+      interp AS (
+          SELECT ts + 0.0 AS t, obj_id, x, y, l, w, type, relative_velocity_x, ego_speed, steering_angle FROM base_1hz
+          UNION ALL
+          SELECT ts + 0.2, obj_id,
+              x + (next_x - x) * 0.2 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.2 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.2 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.2 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.2 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.2 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.4, obj_id,
+              x + (next_x - x) * 0.4 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.4 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.4 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.4 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.4 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.4 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.6, obj_id,
+              x + (next_x - x) * 0.6 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.6 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.6 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.6 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.6 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.6 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.8, obj_id,
+              x + (next_x - x) * 0.8 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.8 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.8 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.8 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.8 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.8 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+      ),
+      
+      -- 5Hz指标计算
+      vehicle_frames AS (
+          SELECT 
+              t, obj_id, x, y, l, w, type, relative_velocity_x, ego_speed, steering_angle,
+              ROUND(ABS(y) - (cfg.ego_width + COALESCE(w,0))/2, 2) AS lateral_gap,
+              ROUND(x - COALESCE(l,0)/2 - cfg.ego_length/2, 2) AS front_to_rear_dist,
+              CASE 
+                  WHEN ABS(y) - (cfg.ego_width + COALESCE(w,0))/2 < cfg.safe_lat_gap 
+                       AND x <= (COALESCE(l,0) + cfg.ego_length) / 2.0 
+                       AND x >= -(COALESCE(l,0) + cfg.ego_length) / 2.0 - 1.2
+                  THEN 1 ELSE 0 
+              END AS is_close
+          FROM interp
+          CROSS JOIN config cfg
+          WHERE ABS(y) - (cfg.ego_width + COALESCE(w,0))/2 < cfg.nearby_lat_gap_max
+            AND x IS NOT NULL AND y IS NOT NULL AND type = 'truck'
+      ),
+      
+      -- 5Hz gaps & islands分组
+      framed_with_grp AS (
+          SELECT *,
+              CAST(t * 5 AS INTEGER) - ROW_NUMBER() OVER (PARTITION BY obj_id ORDER BY t) AS grp
+          FROM vehicle_frames
+      ),
+      
+      -- 片段汇总统计
+      obj_segments AS (
+          SELECT 
+              obj_id, type, grp,
+              MIN(t) AS seg_start_t, MAX(t) AS seg_end_t,
+              MAX(t) - MIN(t) AS seg_duration,
+              COUNT(*) AS frame_count,
+              MIN(x) AS min_x, MAX(x) AS max_x,
+              MIN(y) AS min_y, MAX(y) AS max_y,
+              ROUND(AVG(relative_velocity_x), 2) AS avg_rel_vel_x,
+              ROUND(AVG(ego_speed), 2) AS avg_ego_speed,
+              ROUND(MIN(ego_speed), 2) AS min_ego_speed,
+              ROUND(MAX(ego_speed), 2) AS max_ego_speed,
+              MAX(ABS(steering_angle)) AS max_abs_steering
+          FROM framed_with_grp
+          GROUP BY obj_id, type, grp
+      ),
+      
+      -- 筛选基础超车候选
+      safe_candidates AS (
+          SELECT 
+              obj_id, type, grp, seg_start_t, seg_end_t, seg_duration,
+              frame_count, min_x, max_x, min_y, max_y,
+              avg_rel_vel_x, avg_ego_speed, min_ego_speed, max_ego_speed, max_abs_steering
+          FROM obj_segments
+          CROSS JOIN config cfg
+          WHERE seg_duration >= cfg.min_duration
+            AND min_x < 0 AND max_x > 0
+            AND avg_rel_vel_x < -1.0
+            AND max_ego_speed >= cfg.min_speed
+            AND max_abs_steering < 3.0
+            AND EXISTS (
+                SELECT 1 FROM range_tag rt
+                WHERE rt.tag_name IN ('LaneChange', 'LANECHANGE_MERGELANECHANGEDROP', 
+                    'LANECHANGE_NAVIGATION', 'LANECHANGE_FREEWAY', 'LANECHANGE_AVOIDANCE',
+                    'LANECHANGE_OVERTAKELEFTCARORTRUCK', 'LANECHANGE_OVERTAKERIGHTCARORTRUCK',
+                    'LANECHANGE_MERGELANECHANGEZIPPER', 'LANECHANGE_MERGELANECHANGEMAINROAD',
+                    'LANECHANGE_NAVLANECHANGERAMP')
+                  AND rt.start_ts <= seg_end_t + 5
+                  AND rt.end_ts >= seg_start_t - 5
+            )
+      ),
+      
+      -- 重叠事件：自车车头到达大车尾（front_to_rear_dist <= 0）
+      overlap_events AS (
+          SELECT obj_id, grp,
+              MIN(CASE WHEN front_to_rear_dist <= 0.0 THEN t END) AS overlap_ts
+          FROM framed_with_grp
+          GROUP BY obj_id, grp
+      ),
+      
+      -- 起始事件：重叠前1.5秒
+      start_events AS (
+          SELECT obj_id, grp,
+              overlap_ts - 1.5 AS start_ts
+          FROM overlap_events
+          WHERE overlap_ts IS NOT NULL
+      ),
+      
+      -- 超越完成：自车车尾超过大车头（front_to_rear_dist <= -(l+ego_length)）
+      overtake_done AS (
+          SELECT obj_id, grp,
+              MIN(CASE WHEN front_to_rear_dist <= -(COALESCE(l,0) + cfg.ego_length) THEN t END) AS overtake_done_t
+          FROM framed_with_grp
+          CROSS JOIN config cfg
+          GROUP BY obj_id, grp
+      ),
+      
+      -- 变道结束：覆盖overtake_done_t的range_tag
+      lane_change_end AS (
+          SELECT sc.obj_id, sc.grp,
+              MAX(rt.end_ts) AS lc_end_ts
+          FROM safe_candidates sc
+          INNER JOIN overtake_done od ON sc.obj_id = od.obj_id AND sc.grp = od.grp
+          INNER JOIN range_tag rt 
+              ON rt.tag_name IN ('LaneChange', 'LANECHANGE_MERGELANECHANGEDROP', 
+                    'LANECHANGE_NAVIGATION', 'LANECHANGE_FREEWAY', 'LANECHANGE_AVOIDANCE',
+                    'LANECHANGE_OVERTAKELEFTCARORTRUCK', 'LANECHANGE_OVERTAKERIGHTCARORTRUCK',
+                    'LANECHANGE_MERGELANECHANGEZIPPER', 'LANECHANGE_MERGELANECHANGEMAINROAD',
+                    'LANECHANGE_NAVLANECHANGERAMP')
+              AND rt.start_ts <= od.overtake_done_t
+              AND rt.end_ts >= od.overtake_done_t
+          WHERE od.overtake_done_t IS NOT NULL
+          GROUP BY sc.obj_id, sc.grp
+      ),
+      
+      -- 结束事件：变道完成 或 overtake_done + 10秒回退
+      end_events AS (
+          SELECT od.obj_id, od.grp,
+              CASE 
+                  WHEN lc.lc_end_ts IS NOT NULL 
+                       AND lc.lc_end_ts <= od.overtake_done_t + 10 
+                  THEN lc.lc_end_ts
+                  ELSE od.overtake_done_t + 10
+              END AS end_ts
+          FROM overtake_done od
+          LEFT JOIN lane_change_end lc ON od.obj_id = lc.obj_id AND od.grp = lc.grp
+          WHERE od.overtake_done_t IS NOT NULL
+      ),
+      
+      -- 超越前安全：自车完全超越前横向间隙 > 0.8米
+      pre_overtake_safe AS (
+          SELECT 
+              sc.obj_id, sc.grp,
+              MIN(f.lateral_gap) AS pre_overtake_min_lat_gap,
+              SUM(f.is_close) AS pre_overtake_close_frames
+          FROM safe_candidates sc
+          INNER JOIN start_events se ON sc.obj_id = se.obj_id AND sc.grp = se.grp
+          INNER JOIN overtake_done od ON sc.obj_id = od.obj_id AND sc.grp = od.grp
+          INNER JOIN framed_with_grp f ON sc.obj_id = f.obj_id AND sc.grp = f.grp
+              AND f.t >= se.start_ts
+              AND f.t <= od.overtake_done_t
+          WHERE se.start_ts IS NOT NULL AND od.overtake_done_t IS NOT NULL
+          GROUP BY sc.obj_id, sc.grp
+      ),
+      
+      -- 超越后5秒：超越后5秒内必须出现lateral_gap < 0（自车切回大车道）
+      post_overtake_5s AS (
+          SELECT 
+              sc.obj_id, sc.grp,
+              MIN(f.lateral_gap) AS post_5s_min_lat_gap
+          FROM safe_candidates sc
+          INNER JOIN overtake_done od ON sc.obj_id = od.obj_id AND sc.grp = od.grp
+          INNER JOIN framed_with_grp f ON sc.obj_id = f.obj_id AND sc.grp = f.grp
+              AND f.t >= od.overtake_done_t
+              AND f.t <= od.overtake_done_t + 5
+          WHERE od.overtake_done_t IS NOT NULL
+          GROUP BY sc.obj_id, sc.grp
+      ),
+      
+      -- 超越后清障：超越后5秒内自车与大车之间无其他障碍物
+      -- 纵向：大车头（f.x + f.l/2）到自车尾（-ego_length/2）之间
+      -- lateral: between 0 and f.y (same side as truck)
+      post_overtake_clear AS (
+          SELECT 
+              sc.obj_id, sc.grp,
+              COUNT(DISTINCT CAST(f.t AS INTEGER) || '_' || d2.obj_id) AS blocking_count
+          FROM safe_candidates sc
+          INNER JOIN overtake_done od ON sc.obj_id = od.obj_id AND sc.grp = od.grp
+          INNER JOIN framed_with_grp f ON sc.obj_id = f.obj_id AND sc.grp = f.grp
+              AND f.t >= od.overtake_done_t
+              AND f.t <= od.overtake_done_t + 5
+          INNER JOIN dynamic_obj d2 
+              ON d2.ts = CAST(f.t AS INTEGER)
+              AND d2.obj_id != sc.obj_id
+              -- longitudinal: between truck head and ego rear
+              AND d2.x + COALESCE(d2.l,0)/2 > f.x + COALESCE(f.l,0)/2
+              AND d2.x - COALESCE(d2.l,0)/2 < -cfg.ego_length/2
+              -- 横向：0到大车y之间（同侧，含0.5米缓冲）
+              AND (
+                  (f.y >= 0 AND d2.y >= -0.5 AND d2.y <= f.y + 0.5) 
+                  OR 
+                  (f.y < 0 AND d2.y <= 0.5 AND d2.y >= f.y - 0.5)
+              )
+          CROSS JOIN config cfg
+          WHERE od.overtake_done_t IS NOT NULL
+          GROUP BY sc.obj_id, sc.grp
+      )
+      
+      -- 输出
+      SELECT 
+          'ego_overtake_catin_truck' AS tag_name,
+          CAST(se.start_ts AS INTEGER) AS start_ts,
+          CAST(ee.end_ts AS INTEGER) AS end_ts,
+          CAST(ee.end_ts AS INTEGER) - CAST(se.start_ts AS INTEGER) AS duration,
+          CASE WHEN sc.min_y < 0 THEN 'right' ELSE 'left' END AS overtake_side,
+          sc.obj_id,
+          pre.pre_overtake_min_lat_gap,
+          sc.avg_rel_vel_x,
+          sc.avg_ego_speed,
+          sc.min_ego_speed,
+          sc.max_ego_speed,
+          CASE 
+              WHEN (sc.max_ego_speed - sc.min_ego_speed) > 15 AND sc.min_ego_speed < 5 THEN 'mutual_stop'
+              WHEN (sc.max_ego_speed - sc.min_ego_speed) > 10 THEN 'ego_yielded'
+              WHEN (sc.max_ego_speed - sc.min_ego_speed) > 5 AND sc.min_ego_speed < sc.max_ego_speed * 0.5 THEN 'ego_proceeded_forced'
+              ELSE 'ego_proceeded_clear'
+          END AS game_theory_result
+      FROM safe_candidates sc
+      INNER JOIN start_events se ON sc.obj_id = se.obj_id AND sc.grp = se.grp
+      INNER JOIN end_events ee ON sc.obj_id = ee.obj_id AND sc.grp = ee.grp
+      INNER JOIN pre_overtake_safe pre ON sc.obj_id = pre.obj_id AND sc.grp = pre.grp
+      INNER JOIN post_overtake_5s po ON sc.obj_id = po.obj_id AND sc.grp = po.grp
+      LEFT JOIN post_overtake_clear pc ON sc.obj_id = pc.obj_id AND sc.grp = pc.grp
+      WHERE pre.pre_overtake_min_lat_gap > 0.8
+        AND pre.pre_overtake_close_frames = 0
+        AND po.post_5s_min_lat_gap < 0
+        AND (pc.blocking_count IS NULL OR pc.blocking_count = 0)
+      ORDER BY start_ts

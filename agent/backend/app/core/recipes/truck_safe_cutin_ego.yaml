@@ -1,0 +1,330 @@
+# Recipe: truck_safe_cutin_ego
+# Purpose: 卡车切入自车：卡车从相邻车道切入自车前方
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: truck_safe_cutin_ego
+version: "1.0"
+description: |
+  卡车切入自车：卡车从相邻车道切入自车前方
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: truck_safe_cutin_ego
+    raw_sql: |
+      WITH 
+      -- 配置参数
+      config AS (
+          SELECT 
+              4.5  AS ego_length,
+              1.8  AS ego_width,
+              3.0  AS nearby_lat_gap_max,
+              20.0 AS min_speed,
+              3    AS min_duration
+      ),
+      
+      -- Ego 1Hz LEAD (独立计算，避免同一 ts 多 truck 导致 LEAD 跳行)
+      ego_lead AS (
+          SELECT ts, speed AS ego_speed, steering_angle, acc_magnitude,
+              LEAD(ts) OVER (ORDER BY ts) AS next_ts,
+              LEAD(speed) OVER (ORDER BY ts) AS next_ego_speed,
+              LEAD(steering_angle) OVER (ORDER BY ts) AS next_steering,
+              LEAD(acc_magnitude) OVER (ORDER BY ts) AS next_acc_magnitude
+          FROM ego
+      ),
+      
+      -- 1Hz base + LEAD for 5Hz interp
+      base_1hz AS (
+          SELECT 
+              d.ts, d.obj_id, d.x, d.y, d.l, d.w, d.type, d.relative_velocity_x,
+              el.ego_speed, el.steering_angle, el.acc_magnitude,
+              LEAD(d.ts) OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_ts,
+              LEAD(d.x)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_x,
+              LEAD(d.y)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_y,
+              LEAD(d.l)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_l,
+              LEAD(d.w)  OVER (PARTITION BY d.obj_id ORDER BY d.ts) AS next_w,
+              el.next_ego_speed,
+              el.next_steering,
+              el.next_acc_magnitude
+          FROM dynamic_obj d
+          INNER JOIN ego_lead el ON el.ts = d.ts
+          CROSS JOIN config cfg
+          WHERE d.type = 'truck'
+      ),
+      
+      -- 5Hz linear interp via UNION ALL
+      interp AS (
+          SELECT ts + 0.0 AS t, obj_id, x, y, l, w, type, relative_velocity_x, ego_speed, steering_angle, acc_magnitude FROM base_1hz
+          UNION ALL
+          SELECT ts + 0.2, obj_id,
+              x + (next_x - x) * 0.2 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.2 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.2 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.2 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.2 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.2 / NULLIF(next_ts - ts, 0),
+              acc_magnitude + (next_acc_magnitude - acc_magnitude) * 0.2 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.4, obj_id,
+              x + (next_x - x) * 0.4 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.4 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.4 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.4 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.4 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.4 / NULLIF(next_ts - ts, 0),
+              acc_magnitude + (next_acc_magnitude - acc_magnitude) * 0.4 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.6, obj_id,
+              x + (next_x - x) * 0.6 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.6 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.6 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.6 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.6 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.6 / NULLIF(next_ts - ts, 0),
+              acc_magnitude + (next_acc_magnitude - acc_magnitude) * 0.6 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+          UNION ALL
+          SELECT ts + 0.8, obj_id,
+              x + (next_x - x) * 0.8 / NULLIF(next_ts - ts, 0),
+              y + (next_y - y) * 0.8 / NULLIF(next_ts - ts, 0),
+              l + (next_l - l) * 0.8 / NULLIF(next_ts - ts, 0),
+              w + (next_w - w) * 0.8 / NULLIF(next_ts - ts, 0),
+              type, relative_velocity_x,
+              ego_speed + (next_ego_speed - ego_speed) * 0.8 / NULLIF(next_ts - ts, 0),
+              steering_angle + (next_steering - steering_angle) * 0.8 / NULLIF(next_ts - ts, 0),
+              acc_magnitude + (next_acc_magnitude - acc_magnitude) * 0.8 / NULLIF(next_ts - ts, 0)
+          FROM base_1hz WHERE next_ts IS NOT NULL
+      ),
+      
+      -- 5Hz metrics + lane position + side-by-side flag + truck_speed
+      vehicle_frames AS (
+          SELECT 
+              t, obj_id, x, y, l, w, type, relative_velocity_x, ego_speed, steering_angle, acc_magnitude,
+              ROUND(ABS(y) - (cfg.ego_width + COALESCE(w,0))/2, 2) AS lateral_gap,
+              ROUND(x - COALESCE(l,0)/2 - cfg.ego_length/2, 2) AS front_to_rear_dist,
+              ROUND(ego_speed + relative_velocity_x, 2) AS truck_speed,
+              CASE 
+                  WHEN ABS(y) < 1.0 THEN 'ego_lane'
+                  WHEN ABS(y) >= 1.0 AND ABS(y) < 5.0 THEN 'adjacent_lane'
+                  ELSE 'far'
+              END AS lane_pos,
+              CASE WHEN x >= 0 THEN 1 ELSE 0 END AS is_side_by_side,
+              CASE 
+                  WHEN relative_velocity_x < 0 AND x > (cfg.ego_length + COALESCE(l,0))/2 
+                  THEN ROUND((x - (cfg.ego_length + COALESCE(l,0))/2) / (-relative_velocity_x), 2)
+                  ELSE NULL 
+              END AS ttc
+          FROM interp
+          CROSS JOIN config cfg
+          WHERE ABS(y) - (cfg.ego_width + COALESCE(w,0))/2 < cfg.nearby_lat_gap_max
+            AND x IS NOT NULL AND y IS NOT NULL AND type = 'truck'
+      ),
+      
+      -- Gaps & Islands by obj_id + lane_pos (保留 transition 段避免断裂，但 transition 通常不满足 COUNT>=2)
+      framed_with_grp AS (
+          SELECT *,
+              CAST(t * 5 AS INTEGER) - ROW_NUMBER() OVER (PARTITION BY obj_id, lane_pos ORDER BY t) AS grp
+          FROM vehicle_frames
+          WHERE lane_pos IN ('ego_lane', 'adjacent_lane')
+      ),
+      
+      -- Segment summary per lane
+      segments AS (
+          SELECT 
+              obj_id, type, lane_pos, grp,
+              MIN(t) AS seg_start_t, MAX(t) AS seg_end_t,
+              MAX(t) - MIN(t) AS seg_duration,
+              COUNT(*) AS frame_count,
+              MIN(x) AS min_x, MAX(x) AS max_x,
+              MIN(ABS(y)) AS min_abs_y, MAX(ABS(y)) AS max_abs_y,
+              MIN(lateral_gap) AS min_lateral_gap,
+              MAX(lateral_gap) AS max_lateral_gap,
+              ROUND(AVG(relative_velocity_x), 2) AS avg_rel_vel_x,
+              ROUND(MAX(ego_speed), 2) AS max_ego_speed,
+              ROUND(MIN(ego_speed), 2) AS min_ego_speed,
+              ROUND(MAX(ABS(steering_angle)), 4) AS max_steering
+          FROM framed_with_grp
+          GROUP BY obj_id, type, lane_pos, grp
+          HAVING COUNT(*) >= 2
+      ),
+      
+      -- Cutin sequence: adjacent_lane -> ego_lane, 时间衔接在2秒内
+      cutin_seq AS (
+          SELECT s1.obj_id, s1.type,
+              s1.seg_start_t AS adj_start, s1.seg_end_t AS adj_end,
+              s1.min_x AS adj_min_x, s1.max_x AS adj_max_x,
+              s1.min_abs_y AS adj_min_abs_y, s1.max_abs_y AS adj_max_abs_y,
+              s1.min_lateral_gap AS adj_min_lat_gap,
+              s1.avg_rel_vel_x AS adj_rel_vel_x,
+              s2.seg_start_t AS ego_start, s2.seg_end_t AS ego_end,
+              s2.min_x AS ego_min_x, s2.max_x AS ego_max_x,
+              s2.min_abs_y AS ego_min_abs_y, s2.avg_rel_vel_x AS ego_rel_vel_x
+          FROM segments s1
+          JOIN segments s2 ON s1.obj_id = s2.obj_id
+              AND s1.lane_pos = 'adjacent_lane'
+              AND s2.lane_pos = 'ego_lane'
+              AND s2.seg_start_t BETWEEN s1.seg_end_t AND s1.seg_end_t + 2
+          WHERE s1.max_abs_y > 1.5
+            AND s1.avg_rel_vel_x > -3.0
+            AND s1.min_x < 0        -- 大车在adjacent_lane时曾在ego后方(x<0)
+            AND s1.max_x > 0        -- 大车在adjacent_lane时曾超越到ego前方(x>0)
+            AND s2.min_x > -1.0     -- 切入ego_lane后位于ego前方或并排
+            AND s1.min_ego_speed >= 5  -- 自车在adjacent_lane期间速度不低于5km/h
+            AND s2.min_ego_speed >= 5  -- 自车在ego_lane期间速度不低于5km/h
+            AND s1.seg_duration <= 25  -- 相邻车道段持续时间不超过25秒（允许从近处超越后切入）
+            AND s1.max_steering < 10.0 -- 自车在adjacent_lane期间未大幅转向（steering单位为度，排除ego变道）
+            AND s2.max_steering < 10.0 -- 自车在ego_lane期间未大幅转向
+            AND s1.min_x > -15         -- 大车从ego后方近处接近（排除从远处慢悠悠接近的场景）
+      ),
+      
+      -- 超越时刻: first frame with x >= 0 (大车超越ego车头) in [adj_start, ego_start]
+      cutin_overtake AS (
+          SELECT 
+              cs.obj_id, cs.adj_start, cs.ego_end,
+              MIN(CASE WHEN vf.is_side_by_side = 1 THEN vf.t END) AS ot_ts
+          FROM cutin_seq cs
+          INNER JOIN vehicle_frames vf ON cs.obj_id = vf.obj_id 
+              AND vf.t >= cs.adj_start AND vf.t <= cs.ego_start
+          GROUP BY cs.obj_id, cs.adj_start, cs.ego_end
+      ),
+      
+      -- Stable in ego_lane: last moment with |y| < 1.0 (在ego_lane段内保持)
+      ego_stable AS (
+          SELECT 
+              cs.obj_id, cs.adj_start, cs.ego_end,
+              MAX(CASE WHEN vf.t BETWEEN cs.ego_start AND cs.ego_end AND ABS(vf.y) < 1.0 THEN vf.t END) AS stable_ts
+          FROM cutin_seq cs
+          INNER JOIN vehicle_frames vf ON cs.obj_id = vf.obj_id
+              AND vf.t >= cs.ego_start AND vf.t <= cs.ego_end
+          GROUP BY cs.obj_id, cs.adj_start, cs.ego_end
+      ),
+      
+      -- Timeline per cutin: start = ot_ts - 1.0s, end = stable_ts + 1.5s
+      cutin_timeline AS (
+          SELECT 
+              cot.obj_id, cot.adj_start, cot.ego_end,
+              cot.ot_ts - 1.0 AS start_ts,
+              es.stable_ts + 1.5 AS end_ts
+          FROM cutin_overtake cot
+          INNER JOIN ego_stable es ON cot.obj_id = es.obj_id 
+              AND cot.adj_start = es.adj_start AND cot.ego_end = es.ego_end
+          WHERE cot.ot_ts IS NOT NULL
+            AND es.stable_ts IS NOT NULL
+      ),
+      
+      -- Safety check: lateral_gap at overtake moment > 0.5 (超越时 lateral gap 足够)
+      pre_ot_safe AS (
+          SELECT 
+              cot.obj_id, cot.adj_start, cot.ego_end,
+              vf.lateral_gap AS ot_lat_gap
+          FROM cutin_overtake cot
+          INNER JOIN vehicle_frames vf ON cot.obj_id = vf.obj_id AND vf.t = cot.ot_ts
+          WHERE cot.ot_ts IS NOT NULL
+      ),
+      
+      -- Pass moment: 大车车尾超过自车车头的时刻 (front_to_rear_dist > 0)
+      pass_moment AS (
+          SELECT 
+              cs.obj_id, cs.adj_start, cs.ego_end,
+              MIN(CASE WHEN vf.front_to_rear_dist > 0 THEN vf.t END) AS pass_ts
+          FROM cutin_seq cs
+          INNER JOIN vehicle_frames vf ON cs.obj_id = vf.obj_id 
+              AND vf.t >= cs.adj_start AND vf.t <= cs.ego_end
+          GROUP BY cs.obj_id, cs.adj_start, cs.ego_end
+      ),
+      
+      -- Cutin timing check: 大车车尾超过自车车头后 15s 内 lateral_gap < 0 (开始切入)
+      cutin_timing_check AS (
+          SELECT 
+              pm.obj_id, pm.adj_start, pm.ego_end,
+              MAX(CASE WHEN vf.lateral_gap < 0 AND vf.t BETWEEN pm.pass_ts AND pm.pass_ts + 15 THEN 1 ELSE 0 END) AS has_cutin_within_15s
+          FROM pass_moment pm
+          INNER JOIN vehicle_frames vf ON pm.obj_id = vf.obj_id 
+              AND vf.t >= pm.adj_start AND vf.t <= pm.ego_end
+          WHERE pm.pass_ts IS NOT NULL
+          GROUP BY pm.obj_id, pm.adj_start, pm.ego_end
+      ),
+      
+      -- Acceleration check: truck切入ego_lane后(lateral_gap<0,x>0)，若ttc<1.5s，ego不应加速(acc_magnitude<=0.5)
+      cutin_accel_check AS (
+          SELECT 
+              cs.obj_id, cs.adj_start, cs.ego_end,
+              MAX(CASE 
+                  WHEN f.lateral_gap < 0 AND f.x > 0 AND f.ttc < 1.5 AND f.acc_magnitude > 0.5 
+                  THEN 1 ELSE 0 
+              END) AS has_hard_accel
+          FROM cutin_seq cs
+          INNER JOIN vehicle_frames f ON cs.obj_id = f.obj_id
+              AND f.t >= cs.ego_start AND f.t <= cs.ego_end
+          GROUP BY cs.obj_id, cs.adj_start, cs.ego_end
+      ),
+      
+      -- Ego speed analysis
+      ego_speed_analysis AS (
+          SELECT 
+              cs.obj_id, cs.adj_start, cs.ego_end,
+              (SELECT MAX(e.speed) FROM ego e WHERE e.ts BETWEEN cs.adj_start - 3 AND cs.adj_start) AS pre_max_speed,
+              (SELECT MIN(e.speed) FROM ego e WHERE e.ts BETWEEN cs.ego_start AND cs.ego_end + 5) AS post_min_speed,
+              (SELECT MAX(e.speed) FROM ego e WHERE e.ts BETWEEN cs.ego_start AND cs.ego_end + 5) AS post_max_speed,
+              (SELECT COUNT(*) FROM ego e WHERE e.ts BETWEEN cs.ego_start AND cs.ego_end + 5) AS post_ego_frames
+          FROM cutin_seq cs
+      )
+      
+      -- Output
+      SELECT 
+          'truck_safe_cutin_ego' AS tag_name,
+          CAST(ct.start_ts AS INTEGER) AS start_ts,
+          CAST(ct.end_ts AS INTEGER) AS end_ts,
+          CAST(ct.end_ts AS INTEGER) - CAST(ct.start_ts AS INTEGER) AS duration,
+          cs.obj_id,
+          cs.type,
+          pre.ot_lat_gap,
+          ROUND(sa.pre_max_speed, 1) AS pre_max_speed,
+          ROUND(sa.post_min_speed, 1) AS post_min_speed,
+          ROUND(sa.pre_max_speed - sa.post_min_speed, 1) AS speed_drop,
+          cs.adj_start, cs.adj_end, cs.ego_start, cs.ego_end,
+          CASE 
+              WHEN sa.post_min_speed < 3 THEN 'cutin_then_stop'
+              WHEN sa.pre_max_speed - sa.post_min_speed >= 8 THEN 'cutin_hard_yield'
+              WHEN sa.pre_max_speed - sa.post_min_speed >= 4 THEN 'cutin_soft_yield'
+              ELSE 'cutin_no_yield'
+          END AS sub_scenario,
+          json_object(
+              'obj_id', cs.obj_id,
+              'obj_type', cs.type,
+              'adj_min_x', ROUND(cs.adj_min_x, 1),
+              'ego_min_x', ROUND(cs.ego_min_x, 1),
+              'pre_max_speed', ROUND(sa.pre_max_speed, 1),
+              'post_min_speed', ROUND(sa.post_min_speed, 1),
+              'speed_drop', ROUND(sa.pre_max_speed - sa.post_min_speed, 1),
+              'sub_scenario', CASE 
+                  WHEN sa.post_min_speed < 3 THEN 'cutin_then_stop'
+                  WHEN sa.pre_max_speed - sa.post_min_speed >= 8 THEN 'cutin_hard_yield'
+                  WHEN sa.pre_max_speed - sa.post_min_speed >= 4 THEN 'cutin_soft_yield'
+                  ELSE 'cutin_no_yield'
+              END
+          ) AS param
+      FROM cutin_seq cs
+      INNER JOIN cutin_timeline ct ON cs.obj_id = ct.obj_id 
+          AND cs.adj_start = ct.adj_start AND cs.ego_end = ct.ego_end
+      INNER JOIN pre_ot_safe pre ON cs.obj_id = pre.obj_id 
+          AND cs.adj_start = pre.adj_start AND cs.ego_end = pre.ego_end
+      INNER JOIN cutin_accel_check ca ON cs.obj_id = ca.obj_id 
+          AND cs.adj_start = ca.adj_start AND cs.ego_end = ca.ego_end
+      INNER JOIN cutin_timing_check ctc ON cs.obj_id = ctc.obj_id 
+          AND cs.adj_start = ctc.adj_start AND cs.ego_end = ctc.ego_end
+      INNER JOIN ego_speed_analysis sa ON cs.obj_id = sa.obj_id 
+          AND cs.adj_start = sa.adj_start AND cs.ego_end = sa.ego_end
+      WHERE ct.end_ts > ct.start_ts
+        AND pre.ot_lat_gap > 0.5
+        AND ca.has_hard_accel = 0
+        AND ctc.has_cutin_within_15s = 1
+        AND sa.post_ego_frames >= 4
+      ORDER BY start_ts

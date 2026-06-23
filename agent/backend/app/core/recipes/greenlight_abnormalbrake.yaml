@@ -1,0 +1,360 @@
+# Recipe: greenlight_abnormalbrake
+# Purpose: 绿灯异常刹车：绿灯亮起后自车异常刹车
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: greenlight_abnormalbrake
+version: "1.0"
+description: |
+  绿灯异常刹车：绿灯亮起后自车异常刹车
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: greenlight_abnormalbrake
+    raw_sql: |
+      WITH
+      intersection_ids AS (
+          SELECT
+              ts,
+              latest_stop_line_direction,
+              SUM(
+                  CASE WHEN prev_dir >= 0 AND latest_stop_line_direction < 0 THEN 1 ELSE 0 END
+              ) OVER (ORDER BY ts) AS intersection_id
+          FROM (
+              SELECT
+                  ts,
+                  latest_stop_line_direction,
+                  COALESCE(LAG(latest_stop_line_direction) OVER (ORDER BY ts), 0) AS prev_dir
+              FROM ego
+          )
+      ),
+      stop_frames AS (
+          SELECT
+              e.ts,
+          e.speed,
+              e.latest_stop_line_direction,
+              ii.intersection_id
+          FROM ego e
+          JOIN intersection_ids ii ON ii.ts = e.ts
+          WHERE e.latest_traffic_light_status = '绿'
+            AND e.latest_stop_line_direction BETWEEN -30 AND 30
+            AND e.latest_stop_line_direction != 0
+            AND ABS(e.speed) < 0.5
+      ),
+      green_light_frames AS (
+          SELECT
+              e.ts,
+              e.speed,
+              e.latest_stop_line_direction,
+              LAG(e.speed) OVER (ORDER BY e.ts) AS prev_speed,
+              LAG(e.ts) OVER (ORDER BY e.ts) AS prev_ts
+          FROM ego e
+          WHERE e.latest_traffic_light_status = '绿'
+            AND e.latest_stop_line_direction BETWEEN -30 AND 30
+            AND e.latest_stop_line_direction != 0
+      ),
+      decel_sequences AS (
+          SELECT
+              ts,
+              speed,
+              prev_speed,
+              prev_ts,
+              latest_stop_line_direction,
+              ts - ROW_NUMBER() OVER (ORDER BY ts) AS decel_grp
+          FROM green_light_frames
+          WHERE speed >= 0.5
+            AND prev_speed IS NOT NULL
+            AND speed <= prev_speed + 0.2
+      ),
+      decel_segments AS (
+          SELECT
+              segment_start_ts,
+              segment_end_ts,
+              frame_count,
+              max_speed_before,
+              min_speed_after,
+              max_speed_before_ts,
+              min_speed_after_ts,
+              avg_speed,
+              max_stop_line_dist,
+              min_stop_line_dist,
+              (max_speed_before - min_speed_after) / 3.6
+                  / NULLIF(min_speed_after_ts - max_speed_before_ts, 0) AS decel_accel
+          FROM (
+              SELECT
+                  MIN(ts) AS segment_start_ts,
+                  MAX(ts) AS segment_end_ts,
+                  COUNT(*) AS frame_count,
+                  MAX(prev_speed) AS max_speed_before,
+                  MIN(speed) AS min_speed_after,
+                  (
+                      SELECT ds2.prev_ts
+                      FROM decel_sequences ds2
+                      WHERE ds2.decel_grp = decel_sequences.decel_grp
+                      ORDER BY ds2.prev_speed DESC, ds2.ts ASC
+                      LIMIT 1
+                  ) AS max_speed_before_ts,
+                  (
+                      SELECT ds2.ts
+                      FROM decel_sequences ds2
+                      WHERE ds2.decel_grp = decel_sequences.decel_grp
+                        AND ds2.speed >= 0.5
+                      ORDER BY ds2.speed ASC, ds2.ts ASC
+                      LIMIT 1
+                  ) AS min_speed_after_ts,
+                  AVG(speed) AS avg_speed,
+                  MAX(latest_stop_line_direction) AS max_stop_line_dist,
+                  MIN(latest_stop_line_direction) AS min_stop_line_dist
+              FROM decel_sequences
+              GROUP BY decel_grp
+              HAVING COUNT(*) >= 2
+          ) raw
+          WHERE NOT EXISTS (
+              SELECT 1 FROM ego e
+              WHERE e.ts > raw.segment_start_ts
+                AND e.ts < raw.segment_end_ts
+                AND e.latest_traffic_light_status != '绿'
+          )
+            AND (max_speed_before - min_speed_after) / 3.6
+                  / NULLIF(min_speed_after_ts - max_speed_before_ts, 0) >= 0.5
+      ),
+      bag_range AS (
+          SELECT MIN(ts) AS bag_start_ts, MAX(ts) AS bag_end_ts FROM ego
+      ),
+      brake_candidates_base AS (
+          SELECT
+              ds.*,
+              CASE
+                  WHEN ds.segment_start_ts - 2 < br.bag_start_ts THEN br.bag_start_ts
+                  ELSE ds.segment_start_ts - 2
+              END AS start_ts,
+              CASE
+                  WHEN ds.segment_end_ts + 3 >= br.bag_end_ts THEN br.bag_end_ts - 1
+                  ELSE ds.segment_end_ts + 3
+              END AS end_ts,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM stop_frames sf
+                  WHERE sf.ts <= ds.segment_start_ts
+                    AND sf.intersection_id = (
+                        SELECT ii.intersection_id
+                        FROM intersection_ids ii
+                        WHERE ii.ts = ds.segment_start_ts
+                    )
+              ) THEN 1 ELSE 0 END AS has_stop_before,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM range_tag rt
+                  WHERE rt.tag_name = 'Cutin'
+                    AND rt.start_ts <= ds.segment_end_ts + 3
+                    AND rt.end_ts >= ds.segment_start_ts - 3
+              ) THEN 1 ELSE 0 END AS has_cutin,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM range_tag rt
+                  WHERE rt.tag_name = 'CrossVehicle'
+                    AND rt.start_ts <= ds.segment_end_ts + 3
+                    AND rt.end_ts >= ds.segment_start_ts - 3
+              ) THEN 1 ELSE 0 END AS has_cross_vehicle
+          FROM decel_segments ds
+          CROSS JOIN bag_range br
+      ),
+      brake_candidates AS (
+          SELECT
+              ds.*,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM (
+                      SELECT
+                          d_inner.*,
+                          LAG(d_inner.absolute_velocity_x) OVER (PARTITION BY d_inner.obj_id ORDER BY d_inner.ts) AS prev_abs_vx,
+                          ROW_NUMBER() OVER (PARTITION BY d_inner.ts ORDER BY d_inner.x ASC) AS rn
+                      FROM dynamic_obj d_inner
+                      JOIN ego e_inner ON e_inner.ts = d_inner.ts
+                      WHERE d_inner.ts >= ds.start_ts AND d_inner.ts <= ds.end_ts
+                        AND e_inner.latest_traffic_light_status = '绿'
+                        AND d_inner.x > 0 AND ABS(d_inner.y) < 2
+                        AND d_inner.type IN ('car', 'truck', 'bus', 'suv')
+                        AND NOT (
+                            d_inner.obs_dr_trajectory IS NOT NULL
+                            AND e_inner.ego_dr_trajectory IS NOT NULL
+                            AND COS(json_extract(d_inner.obs_dr_trajectory, '$.theta[0]') - json_extract(e_inner.ego_dr_trajectory, '$.theta[0]')) <= 0
+                        )
+                  ) d
+                  JOIN ego e ON e.ts = d.ts
+                  WHERE d.rn = 1
+                    AND (
+                        (e.speed - d.absolute_velocity_x) > 0
+                        AND (
+                            (e.speed <= 5 AND d.x < 10)
+                            OR (e.speed > 5 AND (d.x / NULLIF((e.speed - d.absolute_velocity_x) / 3.6, 0)) <= 5)
+                        )
+                        OR (
+                            d.x <= 15
+                            AND d.prev_abs_vx IS NOT NULL
+                            AND d.absolute_velocity_x < d.prev_abs_vx
+                        )
+                    )
+              ) THEN 1 ELSE 0 END AS has_dangerous_front_obj,
+              COALESCE((
+                  SELECT GROUP_CONCAT(type, '/')
+                  FROM (
+                      SELECT DISTINCT d.type
+                      FROM (
+                          SELECT
+                              d_inner.*,
+                              LAG(d_inner.absolute_velocity_x) OVER (PARTITION BY d_inner.obj_id ORDER BY d_inner.ts) AS prev_abs_vx,
+                              ROW_NUMBER() OVER (PARTITION BY d_inner.ts ORDER BY d_inner.x ASC) AS rn
+                          FROM dynamic_obj d_inner
+                          JOIN ego e_inner ON e_inner.ts = d_inner.ts
+                          WHERE d_inner.ts >= ds.start_ts AND d_inner.ts <= ds.end_ts
+                            AND e_inner.latest_traffic_light_status = '绿'
+                            AND d_inner.x > 0 AND ABS(d_inner.y) < 2
+                            AND d_inner.type IN ('car', 'truck', 'bus', 'suv')
+                            AND NOT (
+                                d_inner.obs_dr_trajectory IS NOT NULL
+                                AND e_inner.ego_dr_trajectory IS NOT NULL
+                                AND COS(json_extract(d_inner.obs_dr_trajectory, '$.theta[0]') - json_extract(e_inner.ego_dr_trajectory, '$.theta[0]')) <= 0
+                            )
+                      ) d
+                      JOIN ego e ON e.ts = d.ts
+                      WHERE d.rn = 1
+                        AND (
+                            (e.speed - d.absolute_velocity_x) > 0
+                            AND (
+                                (e.speed <= 5 AND d.x < 10)
+                                OR (e.speed > 5 AND (d.x / NULLIF((e.speed - d.absolute_velocity_x) / 3.6, 0)) <= 5)
+                            )
+                            OR (
+                                d.x <= 15
+                                AND d.prev_abs_vx IS NOT NULL
+                                AND d.absolute_velocity_x < d.prev_abs_vx
+                            )
+                        )
+                  )
+              ), '') AS dangerous_front_obj_types,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM dynamic_obj d
+                  JOIN ego e ON e.ts = d.ts
+                  WHERE d.ts >= ds.start_ts AND d.ts <= ds.end_ts
+                    AND e.latest_traffic_light_status = '绿'
+                    AND d.type = 'pedestrian'
+                    AND d.x > 0 AND d.x < 20 AND ABS(d.y) < 2
+              ) THEN 1 ELSE 0 END AS has_pedestrian,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM dynamic_obj d
+                  JOIN ego e ON e.ts = d.ts
+                  WHERE d.ts >= ds.start_ts AND d.ts <= ds.end_ts
+                    AND e.latest_traffic_light_status = '绿'
+                    AND d.type IN ('bicycle', 'motorcycle')
+                    AND d.x > 0 AND d.x < 15 AND ABS(d.y) < 2
+              ) THEN 1 ELSE 0 END AS has_vru,
+              CASE WHEN EXISTS (
+                  SELECT 1 FROM ego e2
+                  WHERE e2.ts >= ds.segment_end_ts AND e2.ts <= ds.end_ts
+                    AND e2.latest_traffic_light_status = '红'
+                    AND e2.latest_stop_line_direction < 0
+              ) THEN 1 ELSE 0 END AS has_next_intersection_red_light,
+              COALESCE((
+                  SELECT GROUP_CONCAT(tag_name, '/')
+                  FROM (
+                      SELECT DISTINCT
+                          CASE rt.tag_name
+                              WHEN 'LeftIntersection' THEN '左转路口'
+                              WHEN 'LuturnIntersection' THEN '掉头路口'
+                              WHEN 'RightIntersection' THEN '右转路口'
+                          END AS tag_name
+                      FROM range_tag rt
+                      WHERE rt.tag_name IN ('LeftIntersection', 'LuturnIntersection', 'RightIntersection')
+                        AND rt.start_ts <= ds.end_ts
+                        AND rt.end_ts >= ds.start_ts
+                      UNION
+                      SELECT DISTINCT
+                          CASE json_extract(rt.param, '$.sub_tag')
+                              WHEN 'LeftIntersection' THEN '左转路口'
+                              WHEN 'LuturnIntersection' THEN '掉头路口'
+                              WHEN 'RightIntersection' THEN '右转路口'
+                          END AS tag_name
+                      FROM range_tag rt
+                      WHERE rt.tag_name = 'Intersection'
+                        AND json_extract(rt.param, '$.sub_tag') IN ('LeftIntersection', 'LuturnIntersection', 'RightIntersection')
+                        AND rt.start_ts <= ds.end_ts
+                        AND rt.end_ts >= ds.start_ts
+                  )
+                  WHERE tag_name IS NOT NULL
+              ), '') AS intersection_type,
+              COALESCE((
+                  SELECT GROUP_CONCAT(tag_name, '/')
+                  FROM (
+                      SELECT DISTINCT
+                          CASE rt.tag_name
+                              WHEN 'NTERSECTION_UTURN' THEN '掉头'
+                              WHEN 'NTERSECTION_UTURNDASHEDLINE' THEN '掉头'
+                              WHEN 'INTERSECTION_UTURN' THEN '掉头'
+                              WHEN 'INTERSECTION_UTURNDASHEDLINE' THEN '掉头'
+                          END AS tag_name
+                      FROM range_tag rt
+                      WHERE rt.tag_name IN ('NTERSECTION_UTURN', 'NTERSECTION_UTURNDASHEDLINE', 'INTERSECTION_UTURN', 'INTERSECTION_UTURNDASHEDLINE')
+                        AND rt.start_ts <= ds.end_ts
+                        AND rt.end_ts >= ds.start_ts
+                      UNION
+                      SELECT DISTINCT
+                          CASE json_extract(rt.param, '$.sub_tag')
+                              WHEN 'turn_back' THEN '掉头'
+                              WHEN 'turn_left' THEN '左转'
+                              WHEN 'turn_right' THEN '右转'
+                          END AS tag_name
+                      FROM range_tag rt
+                      WHERE rt.tag_name = 'Turning'
+                        AND json_extract(rt.param, '$.sub_tag') IN ('turn_back', 'turn_left', 'turn_right')
+                        AND rt.start_ts <= ds.end_ts
+                        AND rt.end_ts >= ds.start_ts
+                  )
+                  WHERE tag_name IS NOT NULL
+              ), '直行') AS turning_type
+          FROM brake_candidates_base ds
+      )
+      SELECT
+          bc.start_ts,
+          bc.end_ts,
+          bc.segment_start_ts,
+          bc.segment_end_ts,
+          bc.end_ts - bc.start_ts + 1 AS total_duration,
+          bc.frame_count AS decel_duration,
+          ROUND(bc.max_speed_before, 2) AS max_speed_before_brake,
+          ROUND(bc.min_speed_after, 2) AS min_speed_after_brake,
+          ROUND(bc.avg_speed, 2) AS avg_speed,
+          ROUND(bc.max_stop_line_dist, 2) AS max_stop_line_dist,
+          ROUND(bc.min_stop_line_dist, 2) AS min_stop_line_dist,
+          CASE WHEN bc.max_stop_line_dist < 0 THEN '未过停止线' ELSE '已过停止线' END AS position_type,
+          CASE WHEN bc.has_stop_before = 1 THEN '绿灯起步刹车' ELSE '绿灯非起步刹车' END AS brake_type,
+          CASE
+              WHEN bc.max_speed_before >= 15 THEN '高速'
+              WHEN bc.max_speed_before >= 5 THEN '中速'
+              ELSE '低速'
+          END AS speed_level,
+          bc.turning_type,
+          CASE
+              WHEN bc.has_dangerous_front_obj = 1
+                   OR bc.has_pedestrian = 1
+                   OR bc.has_vru = 1
+                   OR bc.has_cutin = 1
+                   OR bc.has_cross_vehicle = 1
+                   OR bc.has_next_intersection_red_light = 1
+                   OR bc.intersection_type != ''
+                   OR bc.turning_type != '直行'
+              THEN TRIM(
+                  CASE WHEN bc.has_dangerous_front_obj = 1 THEN '危险前车/' ELSE '' END ||
+                  CASE WHEN bc.has_pedestrian = 1 THEN '行人/' ELSE '' END ||
+                  CASE WHEN bc.has_vru = 1 THEN 'VRU/' ELSE '' END ||
+                  CASE WHEN bc.has_cutin = 1 THEN 'Cut-in/' ELSE '' END ||
+                  CASE WHEN bc.has_cross_vehicle = 1 THEN '横穿车辆/' ELSE '' END ||
+                  CASE WHEN bc.has_next_intersection_red_light = 1 THEN '下个路口红灯/' ELSE '' END ||
+                  CASE WHEN bc.intersection_type != '' THEN bc.intersection_type || '/' ELSE '' END ||
+                  CASE WHEN bc.turning_type != '直行' THEN bc.turning_type || '/' ELSE '' END,
+                  '/'
+              )
+              ELSE '无明显合理理由'
+          END AS brake_reason,
+          bc.dangerous_front_obj_types,
+          ROUND(bc.decel_accel, 2) AS decel_acceleration
+      FROM brake_candidates bc
+      ORDER BY bc.start_ts;

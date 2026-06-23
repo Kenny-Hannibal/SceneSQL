@@ -228,6 +228,21 @@ class ConceptRouter:
         "VRU横穿冲突": ("conflict_pipeline", "vru"),
         "左转冲突": ("turn_conflict_pipeline", "left_turn"),
         "右转冲突": ("turn_conflict_pipeline", "right_turn"),
+        # ── 产线SQL直通Recipe (raw_sql) ──
+        "绕行超车": ("turn_bypass_overtake", "default"),
+        "变道减速": ("ego_decel_during_lanechange", "default"),
+        "绿灯刹车": ("greenlight_abnormalbrake", "default"),
+        "绿灯异常刹车": ("greenlight_abnormalbrake", "default"),
+        "卡车切入": ("truck_safe_cutin_ego", "default"),
+        "会车": ("meeting_oncoming", "default"),
+        "对向来车": ("meeting_oncoming", "default"),
+        "借道": ("nudge_borrowlane", "default"),
+        "借道避让": ("nudge_borrowlane", "default"),
+        "超车切入卡车": ("ego_overtake_catin_truck", "default"),
+        "红灯缓行": ("redlight_slowmoving", "default"),
+        "前车急刹": ("front_hard_brake", "default"),
+        "避障": ("reversing", "default"),
+        "倒车": ("reversing", "default"),
     }
 
     def __init__(self):

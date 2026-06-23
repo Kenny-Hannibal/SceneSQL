@@ -1,0 +1,336 @@
+# Recipe: turn_bypass_overtake
+# Purpose: 路口绕行超车：自车在路口范围内绕行超越前方慢车
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: turn_bypass_overtake
+version: "1.0"
+description: |
+  路口绕行超车：自车在路口范围内绕行超越前方慢车
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: turn_bypass_overtake
+    raw_sql: |
+      -- ==============================================================================
+      -- 场景: 转弯绕行/超车检测 (V4 - 召回率优化版)
+      -- 描述: 检测在路口左转、右转或掉头时自车绕行静止障碍物或超越动态目标的情况。
+      --              不依赖于交互标签（可能不可靠）。
+      --              使用utm_yaw变化作为主要转弯验证（steering_angle
+      --              在路口不可靠）。合并间隔<5秒的片段。
+      --              最短总持续时间：3秒。
+      --              高召回率优化：宽松阈值、动态距离、
+      --              对象级合并和博弈论分析。
+      -- ==============================================================================
+      
+      WITH
+      -- =============================================================================
+      -- 1. 合并碎片化的交叉口标签 (间隔 < 5秒)
+      -- =============================================================================
+      TurnBoundaries AS (
+          SELECT
+              start_ts,
+              end_ts,
+              json_extract(param, '$.sub_tag') AS turn_type,
+              CASE
+                  WHEN start_ts - LAG(end_ts) OVER (ORDER BY start_ts) > 5 THEN 1
+                  ELSE 0
+              END AS is_new_group
+          FROM range_tag
+          WHERE tag_name = 'Intersection'
+            AND json_extract(param, '$.sub_tag') IN ('LeftIntersection', 'RightIntersection', 'LuturnIntersection', 'IsIntersection')
+      ),
+      TurnGroups AS (
+          SELECT
+              start_ts, end_ts, turn_type,
+              SUM(is_new_group) OVER (ORDER BY start_ts) AS grp
+          FROM TurnBoundaries
+      ),
+      TurnPeriods AS (
+          SELECT
+              MIN(start_ts) AS turn_start,
+              MAX(end_ts) AS turn_end,
+              turn_type
+          FROM TurnGroups
+          GROUP BY grp, turn_type
+          HAVING MAX(end_ts) - MIN(start_ts) >= 2
+      ),
+      
+      -- =============================================================================
+      -- 2. 在转弯期间查找附近对象
+      -- =============================================================================
+      NearbyFrames AS (
+          SELECT
+              tp.turn_start, tp.turn_end, tp.turn_type,
+              d.ts, d.obj_id, d.type, d.x, d.y,
+              d.heading, d.absolute_velocity_x, d.relative_velocity_x,
+              d.is_static,
+              e.speed AS ego_speed, e.steering_angle,
+              e.ego_to_centerline_dist, e.utm_yaw,
+              d.x * d.x + d.y * d.y AS dist_sq,
+              POWER((e.speed / 3.6) * 2.5, 2) AS dynamic_dist_threshold
+          FROM TurnPeriods tp
+          CROSS JOIN dynamic_obj d
+          JOIN ego e ON e.ts = d.ts
+          WHERE d.ts BETWEEN tp.turn_start AND tp.turn_end
+            AND e.speed > 0.1
+            AND d.x > -30 AND d.x < 50
+            AND ABS(d.y) < 20
+            AND (d.x * d.x + d.y * d.y) <= 900
+      ),
+      
+      -- =============================================================================
+      -- 3. 分段连续观察每个对象
+      -- =============================================================================
+      ObjectSegments AS (
+          SELECT
+              turn_start, turn_end, turn_type, obj_id, type,
+              MIN(ts) AS seg_start, MAX(ts) AS seg_end,
+              COUNT(DISTINCT ts) AS frame_count,
+              MAX(ts) - MIN(ts) AS seg_duration,
+              MIN(dist_sq) AS min_dist_sq,
+              MIN(x) AS min_x, MAX(x) AS max_x,
+              MIN(y) AS min_y, MAX(y) AS max_y,
+              MIN(ABS(y)) AS min_abs_y,
+              MAX(CASE WHEN x > 2 THEN 1 ELSE 0 END) AS had_in_front,
+              MAX(CASE WHEN x < -2 THEN 1 ELSE 0 END) AS had_in_rear,
+              MAX(CASE WHEN is_static = 1 THEN 1 ELSE 0 END) AS is_static_flag,
+              -- Turn validation: use utm_yaw change (more reliable than steering_angle)
+              MAX(utm_yaw) - MIN(utm_yaw) AS utm_yaw_range,
+              -- Steering metrics (secondary validation)
+              AVG(ABS(steering_angle)) AS avg_abs_steering,
+              MAX(ABS(steering_angle)) AS max_abs_steering,
+              COUNT(CASE WHEN ABS(steering_angle) > 0.1 THEN 1 END) * 1.0 / COUNT(*) AS steering_ratio,
+              -- Speed metrics
+              AVG(ego_speed) AS avg_ego_speed,
+              MIN(ego_speed) AS min_ego_speed,
+              MAX(ego_speed) AS max_ego_speed,
+              -- Lateral deviation metrics for bypass validation
+              MAX(y) - MIN(y) AS target_y_range,
+              MAX(ABS(y)) - MIN(ABS(y)) AS target_y_span,
+              MAX(ABS(ego_to_centerline_dist)) - MIN(ABS(ego_to_centerline_dist)) AS ego_centerline_change,
+              AVG(ABS(ego_to_centerline_dist)) AS avg_centerline_offset,
+              MAX(ABS(ego_to_centerline_dist)) AS max_centerline_offset,
+              -- Target speed
+              AVG(ABS(absolute_velocity_x)) AS target_speed
+          FROM NearbyFrames
+          GROUP BY turn_start, turn_end, turn_type, obj_id, type
+          HAVING MAX(ts) - MIN(ts) >= 0.3
+             AND COUNT(DISTINCT ts) >= 2
+      ),
+      
+      -- =============================================================================
+      -- 4. 分类场景类型: bypass_static / bypass_dynamic / overtake
+      -- =============================================================================
+      Classified AS (
+          SELECT *,
+              CASE
+                  -- Overtake: target moves from front to rear during turn, ego faster
+                  WHEN had_in_front = 1 AND had_in_rear = 1
+                       AND avg_ego_speed > target_speed + 0.5
+                       AND max_x > 2
+                       AND is_static_flag = 0
+                       AND avg_ego_speed > 2
+                       AND min_ego_speed > 0.5
+                       AND utm_yaw_range > 1.0
+                       AND avg_abs_steering > 0.05
+                       AND max_abs_steering > 0.1
+                       AND steering_ratio > 0.05
+                       AND target_y_range > 0.2
+                       AND target_speed < 20
+                       AND min_dist_sq <= 576
+                  THEN 'overtake'
+                  -- Bypass static obstacle: static target close to ego, target not passed, ego turns
+                  WHEN target_speed < 5
+                       AND had_in_rear = 0
+                       AND min_x > -10
+                       AND min_dist_sq <= 400
+                       AND avg_ego_speed > 2
+                       AND min_ego_speed > 0.5
+                       AND utm_yaw_range > 1.0
+                       AND avg_abs_steering > 0.05
+                       AND max_abs_steering > 0.1
+                       AND steering_ratio > 0.05
+                       AND target_y_range > 0.2
+                  THEN 'bypass_static'
+                  -- Bypass dynamic target: target in front/side, ego turns and deviates, not overtaken
+                  WHEN had_in_front = 1
+                       AND had_in_rear = 0
+                       AND is_static_flag = 0
+                       AND min_x > -5
+                       AND avg_ego_speed > 2
+                       AND min_ego_speed > 0.5
+                       AND utm_yaw_range > 1.0
+                       AND avg_abs_steering > 0.05
+                       AND max_abs_steering > 0.1
+                       AND steering_ratio > 0.05
+                       AND target_y_range > 0.3
+                       AND (target_speed < avg_ego_speed - 2 OR target_speed < 15)
+                  THEN 'bypass_dynamic'
+                  ELSE NULL
+              END AS scene_type
+          FROM ObjectSegments
+          WHERE avg_ego_speed > 2
+            AND min_ego_speed > 0.5
+      ),
+      
+      -- =============================================================================
+      -- 5. 合并同一转弯中同一对象的场景片段 (间隔 < 5秒)
+      -- =============================================================================
+      SceneBoundaries AS (
+          SELECT
+              turn_start, turn_end, turn_type, obj_id, type,
+              scene_type, seg_start, seg_end, seg_duration,
+              min_dist_sq, max_abs_steering, avg_ego_speed, target_speed,
+              is_static_flag, steering_ratio, ego_centerline_change, target_y_range,
+              CASE
+                  WHEN seg_start - LAG(seg_end) OVER (
+                      PARTITION BY obj_id, scene_type
+                      ORDER BY seg_start
+                  ) > 5 THEN 1
+                  ELSE 0
+              END AS is_new_group
+          FROM Classified
+          WHERE scene_type IS NOT NULL
+      ),
+      SceneGroups AS (
+          SELECT
+              turn_start, turn_end, turn_type, obj_id, type,
+              scene_type, seg_start, seg_end, seg_duration,
+              min_dist_sq, max_abs_steering, avg_ego_speed, target_speed,
+              is_static_flag, steering_ratio, ego_centerline_change, target_y_range,
+              SUM(is_new_group) OVER (
+                  PARTITION BY obj_id, scene_type
+                  ORDER BY seg_start
+              ) AS grp
+          FROM SceneBoundaries
+      ),
+      MergedScenes AS (
+          SELECT
+              turn_start, turn_end, turn_type, obj_id, type,
+              scene_type,
+              MIN(seg_start) AS start_ts,
+              MAX(seg_end) AS end_ts,
+              SUM(seg_duration) AS total_duration,
+              MAX(seg_end) - MIN(seg_start) AS merged_duration,
+              MIN(min_dist_sq) AS min_dist_sq,
+              MAX(max_abs_steering) AS max_abs_steering,
+              AVG(avg_ego_speed) AS avg_ego_speed,
+              AVG(target_speed) AS target_speed,
+              MAX(is_static_flag) AS is_static_flag,
+              MIN(steering_ratio) AS min_steering_ratio,
+              MIN(ego_centerline_change) AS min_ego_centerline_change,
+              MIN(target_y_range) AS min_target_y_range
+          FROM SceneGroups
+          GROUP BY turn_start, turn_end, turn_type, obj_id, type, scene_type, grp
+      ),
+      
+      -- =============================================================================
+      -- 6. 添加自车速度分析和博弈论结果 (参考: 冲突检测)
+      -- =============================================================================
+      EgoSpeedAnalysis AS (
+          SELECT 
+              ms.*,
+              AVG(CASE WHEN e.ts < ms.start_ts THEN e.speed END) AS pre_speed,
+              AVG(CASE WHEN e.ts BETWEEN ms.start_ts AND ms.end_ts THEN e.speed END) AS during_speed,
+              AVG(CASE WHEN e.ts > ms.end_ts THEN e.speed END) AS post_speed,
+              MIN(CASE WHEN e.ts BETWEEN ms.start_ts AND ms.end_ts THEN e.speed END) AS min_during_speed,
+              MAX(CASE WHEN e.ts BETWEEN ms.start_ts AND ms.end_ts THEN e.speed END) AS max_during_speed
+          FROM MergedScenes ms
+          LEFT JOIN ego e 
+            ON e.ts BETWEEN ms.start_ts - 2 AND ms.end_ts + 2
+          GROUP BY 
+              ms.turn_start, ms.turn_end, ms.turn_type, ms.obj_id, ms.type,
+              ms.scene_type, ms.start_ts, ms.end_ts, ms.total_duration,
+              ms.merged_duration, ms.min_dist_sq, ms.max_abs_steering,
+              ms.avg_ego_speed, ms.target_speed, ms.is_static_flag,
+              ms.min_steering_ratio, ms.min_ego_centerline_change, ms.min_target_y_range
+      ),
+          
+      FinalResults AS (
+          SELECT 
+              esa.turn_start, esa.turn_end, esa.turn_type, esa.obj_id, esa.type,
+              esa.scene_type, esa.start_ts, esa.end_ts, esa.total_duration,
+              esa.merged_duration AS duration, esa.min_dist_sq, esa.max_abs_steering,
+              esa.avg_ego_speed, esa.target_speed, esa.is_static_flag,
+              esa.min_steering_ratio, esa.min_ego_centerline_change, esa.min_target_y_range,
+              esa.pre_speed, esa.during_speed, esa.post_speed,
+              esa.min_during_speed, esa.max_during_speed,
+              -- Game theory result: 博弈结果
+              CASE 
+                  WHEN esa.pre_speed IS NULL OR esa.during_speed IS NULL THEN 'unclear'
+                  WHEN esa.min_during_speed < 3 AND esa.max_during_speed < 10 THEN 'mutual_stop'
+                  WHEN esa.pre_speed - esa.during_speed > 15 AND esa.during_speed < 15 THEN 'ego_yielded_forced'
+                  WHEN esa.pre_speed - esa.during_speed > 8 AND esa.during_speed > 5 THEN 'ego_yielded_smooth'
+                  WHEN esa.during_speed > esa.pre_speed THEN 'ego_proceeded_clear'
+                  ELSE 'ego_proceeded_cautious'
+              END AS game_theory_result
+          FROM EgoSpeedAnalysis esa
+      ),
+      
+      -- =============================================================================
+      -- 7. 对象级合并: 按场景类型和转弯类型合并重叠事件
+      -- =============================================================================
+      merge_marked AS (
+          SELECT 
+              obj_id,
+              scene_type,
+              turn_type,
+              start_ts,
+              end_ts,
+              duration,
+              min_dist_sq,
+              game_theory_result,
+              CASE 
+                  WHEN start_ts <= LAG(end_ts, 1, -999999) OVER (PARTITION BY scene_type, turn_type ORDER BY start_ts) 
+                  THEN 0 ELSE 1 
+              END AS is_new_group
+          FROM FinalResults
+      ),
+      merge_grouped AS (
+          SELECT 
+              obj_id,
+              scene_type,
+              turn_type,
+              start_ts,
+              end_ts,
+              duration,
+              min_dist_sq,
+              game_theory_result,
+              SUM(is_new_group) OVER (PARTITION BY scene_type, turn_type ORDER BY start_ts ROWS UNBOUNDED PRECEDING) AS grp_id
+          FROM merge_marked
+      ),
+      merged_events AS (
+          SELECT 
+              GROUP_CONCAT(DISTINCT obj_id) AS obj_ids,
+              scene_type,
+              turn_type,
+              game_theory_result,
+              MIN(start_ts) AS start_ts,
+              MAX(end_ts) AS end_ts,
+              MAX(end_ts) - MIN(start_ts) AS duration,
+              MIN(min_dist_sq) AS min_dist_sq
+          FROM merge_grouped
+          GROUP BY scene_type, turn_type, game_theory_result, grp_id
+      )
+      
+      -- =============================================================================
+      -- 8. 最终输出: 合并后持续时间 >= 3秒
+      -- =============================================================================
+      SELECT
+          'turn_bypass_overtake' AS tag_name,
+          obj_ids AS obj_id,
+          start_ts,
+          end_ts,
+          duration,
+          json_object(
+              'turn_type', turn_type,
+              'scene_type', scene_type,
+              'game_theory_result', game_theory_result,
+              'min_dist_sq', ROUND(min_dist_sq, 2)
+          ) AS param
+      FROM merged_events
+      WHERE duration >= 3
+      ORDER BY start_ts;

@@ -100,6 +100,17 @@ class BlockAssembler:
         if not variant:
             raise ValueError(f"Variant not found: {variant_name} in recipe {recipe_name}")
         
+        # ── Fast path: raw_sql (production SQL pass-through) ──
+        # If recipe has raw_sql in variant, return it directly — no Block assembly.
+        # This is for 300+ line production SQLs where Block decomposition adds no value.
+        raw_sql = variant.get('raw_sql')
+        if raw_sql:
+            params = dict(variant)
+            if extra_params:
+                params.update(extra_params)
+            params = self._resolve_dict_vars(params)
+            return self._resolve_str(raw_sql, params)
+        
         # Build base params from variant
         params = dict(variant)
         if extra_params:

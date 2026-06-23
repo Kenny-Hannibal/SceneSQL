@@ -1,0 +1,218 @@
+# Recipe: reversing
+# Purpose: 倒车/避障：倒车或避障场景
+# Mode: raw_sql pass-through (no Block assembly)
+
+name: reversing
+version: "1.0"
+description: |
+  倒车/避障：倒车或避障场景
+  产线SQL直通模式(raw_sql)，不经Block组装。
+
+blocks: []
+
+variants:
+  default:
+    tag_name: reversing
+    raw_sql: |
+      WITH 
+      -- 角度转换常量
+      DEG_15_RAD AS (SELECT 0.69 AS val),   -- 15度 = 0.2618弧度
+      DEG_90_RAD AS (SELECT 1.5708 AS val),   -- 90度 = 1.5708弧度
+      
+      -- 第一步：找出纵向10m内检测到障碍物的时刻（横向阈值1米，速度>10km/h）
+      obstacle_detected AS (
+          SELECT 
+              o.ts, 
+              o.x, 
+              o.y, 
+              o.obj_id,
+              e.speed AS ego_speed
+          FROM static_obj o
+          INNER JOIN ego e ON o.ts = e.ts
+          WHERE 
+              o.type = 'traffic_warning_object'
+              AND o.x > 0          -- 前方
+              AND o.x < 15         -- 纵向15米内
+              AND ABS(o.y) < 1.4     -- 横向1米内（同车道）
+              AND e.speed > 0     -- 自车速度>0km/h（前向行驶）
+      ),
+      
+      -- 第二步：找出检测时刻自车转向角<15度的记录（初始接近状态）
+      initial_approach AS (
+          SELECT DISTINCT
+              o.ts AS detect_ts, 
+              o.x, 
+              o.y, 
+              o.obj_id, 
+              o.ego_speed,
+              e.steering_angle AS initial_steering
+          FROM obstacle_detected o
+          INNER JOIN ego e ON o.ts = e.ts
+          CROSS JOIN DEG_15_RAD d15
+          WHERE ABS(e.steering_angle) < d15.val  -- 转向角<15度
+      ), 
+      
+      -- 第三步：对每个检测时刻，检查后续10秒内是否有反打方向盘行为
+      -- 反打定义：先>90度（左或右），然后反方向>90度
+      avoidance_events AS (
+          SELECT 
+              ia.detect_ts, 
+              ia.x, 
+              ia.y, 
+              ia.obj_id, 
+              ia.ego_speed,
+              ia.initial_steering,
+              -- 找后续15秒内第一次急转>90度的时刻和方向
+              (
+                  SELECT MIN(e1.ts) 
+                  FROM ego e1 
+                  CROSS JOIN DEG_90_RAD d90 
+                  WHERE e1.ts > ia.detect_ts 
+                    AND e1.ts <= ia.detect_ts + 10 
+                    AND ABS(e1.steering_angle) > d90.val 
+              ) AS first_turn_ts,
+              -- 记录第一次急转的方向
+              (
+                  SELECT e1.steering_angle 
+                  FROM ego e1 
+                  CROSS JOIN DEG_90_RAD d90 
+                  WHERE e1.ts = (
+                      SELECT MIN(e2.ts) 
+                      FROM ego e2 
+                      CROSS JOIN DEG_90_RAD d90_2 
+                      WHERE e2.ts > ia.detect_ts 
+                        AND e2.ts <= ia.detect_ts + 10 
+                        AND ABS(e2.steering_angle) > d90_2.val 
+                  )
+                  AND ABS(e1.steering_angle) > d90.val
+                  LIMIT 1
+              ) AS first_turn_angle,
+              -- 找反方向急转>90度的时刻（反打）
+              (
+                  SELECT MIN(e3.ts) 
+                  FROM ego e3 
+                  CROSS JOIN DEG_90_RAD d90 
+                  WHERE e3.ts > ia.detect_ts 
+                    AND e3.ts <= ia.detect_ts + 10 
+                    AND ABS(e3.steering_angle) > d90.val 
+                    AND e3.steering_angle * (
+                        SELECT e4.steering_angle 
+                        FROM ego e4 
+                        CROSS JOIN DEG_90_RAD d90_2 
+                        WHERE e4.ts = (
+                            SELECT MIN(e5.ts) 
+                            FROM ego e5 
+                            CROSS JOIN DEG_90_RAD d90_3 
+                            WHERE e5.ts > ia.detect_ts 
+                              AND e5.ts <= ia.detect_ts + 10 
+                              AND ABS(e5.steering_angle) > d90_3.val 
+                        )
+                        AND ABS(e4.steering_angle) > d90_2.val
+                        LIMIT 1
+                    ) < 0  -- 方向相反（乘积为负）
+              ) AS counter_turn_ts
+          FROM initial_approach ia
+      ), 
+      
+      -- 第四步：筛选出真正有避障行为的记录（必须同时满足第一次急转和反打）
+      valid_avoidance AS (
+          SELECT 
+              detect_ts, 
+              x, 
+              y, 
+              obj_id, 
+              ego_speed,
+              initial_steering, 
+              first_turn_ts,
+              first_turn_angle,
+              CASE 
+                  WHEN first_turn_angle > 0 THEN 'LEFT'
+                  ELSE 'RIGHT'
+              END AS first_turn_direction,
+              counter_turn_ts,
+              CASE 
+                  WHEN first_turn_angle > 0 THEN 'RIGHT'
+                  ELSE 'LEFT'
+              END AS counter_turn_direction
+          FROM avoidance_events 
+          WHERE first_turn_ts IS NOT NULL 
+            AND counter_turn_ts IS NOT NULL 
+      ), 
+      
+      -- 第五步：生成可视化时间区间
+      -- start_ts: 检测时刻往前2秒
+      -- end_ts: 反打时刻往后3秒
+      time_intervals AS (
+          SELECT 
+              detect_ts - 2 AS start_ts,        -- 检测前2秒
+              counter_turn_ts + 3 AS end_ts,     -- 反打后3秒
+              detect_ts, 
+              first_turn_ts,
+              counter_turn_ts,
+              obj_id, 
+              x AS obstacle_distance,
+              ego_speed,
+              first_turn_direction,
+              counter_turn_direction
+          FROM valid_avoidance 
+      ), 
+      
+      -- 第六步：合并重叠区间并输出
+      merged_groups AS (
+          SELECT 
+              start_ts, 
+              end_ts, 
+              detect_ts, 
+              obj_id, 
+              obstacle_distance,
+              ego_speed,
+              first_turn_direction,
+              counter_turn_direction,
+              SUM(is_new_group) OVER (ORDER BY start_ts) AS group_id
+          FROM (
+              SELECT 
+                  start_ts, 
+                  end_ts, 
+                  detect_ts, 
+                  obj_id, 
+                  obstacle_distance,
+                  ego_speed,
+                  first_turn_direction,
+                  counter_turn_direction,
+                  CASE 
+                      WHEN start_ts > LAG(end_ts) OVER (ORDER BY start_ts) 
+                      THEN 1 
+                      ELSE 0 
+                  END AS is_new_group 
+              FROM time_intervals 
+          ) t
+      ),
+      
+      -- 第七步：排除存在倒挡的时间段
+      -- 筛选出与倒挡时间段没有重叠的区间
+      no_reversing_groups AS (
+          SELECT 
+              mg.*
+          FROM merged_groups mg
+          WHERE NOT EXISTS (
+              SELECT 1 
+              FROM range_tag rt 
+              WHERE rt.tag_name = 'reversing'
+                AND rt.start_ts < mg.end_ts   -- 倒挡开始时间 < 当前区间结束时间
+                AND rt.end_ts > mg.start_ts   -- 倒挡结束时间 > 当前区间开始时间
+          )
+      )
+      
+      SELECT 
+          'obstacle_avoidance' AS tag_name,
+          MIN(start_ts) AS start_ts, 
+          MAX(end_ts) AS end_ts, 
+          (MAX(end_ts) - MIN(start_ts)) AS duration, 
+          COUNT(DISTINCT detect_ts) AS avoidance_count, 
+          GROUP_CONCAT(DISTINCT obj_id) AS obstacle_ids, 
+          ROUND(AVG(obstacle_distance), 2) AS avg_obstacle_distance,
+          ROUND(AVG(ego_speed), 2) AS avg_ego_speed,
+          GROUP_CONCAT(DISTINCT first_turn_direction || '-' || counter_turn_direction) AS turn_patterns
+      FROM no_reversing_groups 
+      GROUP BY group_id 
+      ORDER BY start_ts;
