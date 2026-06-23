@@ -214,6 +214,22 @@ def build_round2_messages(nl: str, context: str) -> list[dict]:
 class ConceptRouter:
     """概念路由器 — 两轮NL2SQL方案的Round 1 + 上下文组装"""
 
+    # 概念名 → (recipe, variant) 自动匹配表
+    # 当Round 1 LLM未返回recipe但concept匹配时，代码层自动补上
+    CONCEPT_RECIPE_MAP = {
+        "变道": ("lane_change_analysis", "default"),
+        "左变道": ("lane_change_analysis", "left"),
+        "右变道": ("lane_change_analysis", "right"),
+        "切入": ("cutin_analysis", "default"),
+        "拥堵跟车": ("cutin_analysis", "congested"),
+        "跟车太近": ("close_follow_analysis", "default"),
+        "拥堵跟车风险": ("close_follow_analysis", "congested"),
+        "他车横穿冲突": ("conflict_pipeline", "vehicle"),
+        "VRU横穿冲突": ("conflict_pipeline", "vru"),
+        "左转冲突": ("turn_conflict_pipeline", "left_turn"),
+        "右转冲突": ("turn_conflict_pipeline", "right_turn"),
+    }
+
     def __init__(self):
         self.concept_groups, self.composition_rules = load_concept_groups()
         self.schema_dict_tags = load_schema_dict_tags()
@@ -222,15 +238,27 @@ class ConceptRouter:
         return build_round1_messages(nl, self.concept_groups)
 
     def parse_round1_output(self, raw: str) -> dict:
-        """解析Round 1的JSON输出"""
+        """解析Round 1的JSON输出，自动补全recipe字段"""
         try:
-            return json.loads(raw)
+            result = json.loads(raw)
         except json.JSONDecodeError:
             import re
             m = re.search(r'\{[\s\S]*\}', raw)
             if m:
-                return json.loads(m.group())
-            raise ValueError(f"Round 1 输出无法解析为JSON: {raw[:200]}")
+                result = json.loads(m.group())
+            else:
+                raise ValueError(f"Round 1 输出无法解析为JSON: {raw[:200]}")
+
+        # ── 代码层 recipe 自动匹配：如果LLM未返回recipe但concept匹配 ──
+        if not result.get("recipe"):
+            for concept in result.get("concepts", []):
+                if concept in self.CONCEPT_RECIPE_MAP:
+                    recipe, variant = self.CONCEPT_RECIPE_MAP[concept]
+                    result["recipe"] = recipe
+                    result["recipe_variant"] = result.get("recipe_variant") or variant
+                    break  # 取第一个匹配
+
+        return result
 
     def build_round2_context(self, r1_result: dict, schema_text: str) -> str:
         return assemble_round2_context(
