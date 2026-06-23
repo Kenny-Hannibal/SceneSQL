@@ -80,8 +80,8 @@ blocks:
               esa.end_ts - esa.start_ts AS duration,
               esa.obj_id,
               CASE 
-                  WHEN esa.object_type IN ('pedestrian',) THEN 'pedestrian'
-                  WHEN esa.object_type IN ('cyclist',) THEN 'cyclist'
+                  WHEN esa.object_type IN ('pedestrian') THEN 'pedestrian'
+                  WHEN esa.object_type IN ('cyclist') THEN 'cyclist'
                   WHEN esa.object_type IN ('car', 'sedan', 'suv') THEN 'car'
                   WHEN esa.object_type IN ('truck', 'bus') THEN 'truck'
                   WHEN esa.object_type IS NOT NULL THEN 'other_vehicle'
