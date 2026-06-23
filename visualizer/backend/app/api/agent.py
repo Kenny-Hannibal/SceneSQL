@@ -340,57 +340,34 @@ async def agent_query_stream(req: AgentQueryRequest):
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
 
-        # 使用路由 + 分层注入构建 prompt
-        route = engine.router.route(req.question)
-        from agent.backend.app.core.schema_reader import format_schema_for_prompt
-        from agent.backend.app.core.tag_router import build_prompt
-
-        schema_text = format_schema_for_prompt(
-            engine.schema,
-            only_tables=route.involved_tables if route.involved_tables else None,
-        )
-        system_prompt, user_prompt = build_prompt(
-            question=req.question,
-            schema_text=schema_text,
-            route=route,
-        )
-
-        yield f"data: {json.dumps({'stage': 'generating', 'message': '正在生成 SQL...', 'route_method': route.method, 'matched_tags': [t.tag_name for t in route.matched_tags], 'involved_tables': sorted(route.involved_tables)})}\n\n"
-
-        # ── 流式逐 token 输出 SQL 生成过程 ──
-        raw_sql_parts = []
+        # ── 使用 engine.query() 走两轮路径（Round1 Recipe + Round2 LLM + Round3 纠错） ──
         try:
-            async for token in engine.llm.chat_stream(system_prompt, user_prompt, temperature=0.1):
-                raw_sql_parts.append(token)
-                yield f"data: {json.dumps({'stage': 'generating_token', 'token': token})}\n\n"
+            result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
         except Exception as e:
-            yield f"data: {json.dumps({'stage': 'error', 'message': f'LLM 调用失败: {e}'})}\n\n"
+            yield f"data: {json.dumps({'stage': 'error', 'message': f'查询失败: {e}'})}\n\n"
             return
 
-        raw_sql = "".join(raw_sql_parts)
-        sql = engine._clean_sql(raw_sql)
-        yield f"data: {json.dumps({'stage': 'sql_generated', 'sql': sql})}\n\n"
+        sql_source = getattr(result, 'sql_source', 'llm')
+        correction_rounds = getattr(result, 'correction_rounds', 0)
+        max_corrections_exceeded = getattr(result, 'max_corrections_exceeded', False)
 
-        validation_error = engine._validate_sql(sql)
-        if validation_error:
-            yield f"data: {json.dumps({'stage': 'validation_failed', 'message': validation_error, 'sql': sql})}\n\n"
+        if sql_source == 'recipe':
+            yield f"data: {json.dumps({'stage': 'recipe_hit', 'message': '匹配到场景模板，正在组装 SQL...', 'sql_source': 'recipe'})}\n\n"
+        else:
+            yield f"data: {json.dumps({'stage': 'generating', 'message': '使用 LLM 生成 SQL...', 'sql_source': 'llm'})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'sql_generated', 'sql': result.sql, 'sql_source': sql_source, 'correction_rounds': correction_rounds, 'max_corrections_exceeded': max_corrections_exceeded})}\n\n"
+
+        if result.error and max_corrections_exceeded:
+            yield f"data: {json.dumps({'stage': 'error', 'message': result.error, 'sql': result.sql, 'correction_rounds': correction_rounds, 'max_corrections_exceeded': True})}\n\n"
             return
 
-        yield f"data: {json.dumps({'stage': 'executing', 'message': 'SQL 校验通过，正在执行查询...'})}\n\n"
-
-        try:
-            if engine.query_mode == "parquet":
-                result = await engine._query_parquet(sql, result_limit=req.result_limit)
-            elif engine.is_dir:
-                result = await engine._query_batch(sql, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
-            else:
-                result = await engine._query_single(sql, result_limit=req.result_limit)
-        except Exception as e:
-            yield f"data: {json.dumps({'stage': 'error', 'message': f'执行失败: {e}'})}\n\n"
+        if result.error:
+            yield f"data: {json.dumps({'stage': 'error', 'message': result.error})}\n\n"
             return
 
         page_rows, total_rows = _paginate_rows(result.rows, page, page_size)
-        yield f"data: {json.dumps({'stage': 'completed', 'sql': result.sql, 'explanation': result.explanation, 'columns': result.columns, 'rows': page_rows, 'error': result.error, 'scanned_dbs': result.scanned_dbs, 'matched_dbs': result.matched_dbs, 'total_rows': total_rows, 'page': page, 'page_size': page_size})}\n\n"
+        yield f"data: {json.dumps({'stage': 'completed', 'sql': result.sql, 'explanation': result.explanation, 'columns': result.columns, 'rows': page_rows, 'error': result.error, 'scanned_dbs': result.scanned_dbs, 'matched_dbs': result.matched_dbs, 'total_rows': total_rows, 'page': page, 'page_size': page_size, 'correction_rounds': correction_rounds, 'max_corrections_exceeded': max_corrections_exceeded, 'sql_source': sql_source})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -51,6 +51,7 @@ class AgentResult:
     # Round 3 self-correction tracking
     correction_rounds: int = 0
     max_corrections_exceeded: bool = False
+    sql_source: str = "llm"  # "recipe" or "llm"
 
 
 class AgentEngine:
@@ -772,6 +773,7 @@ class AgentEngine:
                     error=err_msg,
                     correction_rounds=0,
                     max_corrections_exceeded=False,
+                    sql_source="recipe",
                 )
             logger.info("Dry-run passed (source=recipe)")
         else:
@@ -810,11 +812,14 @@ class AgentEngine:
                 logger.info("Round 3 correction #%d SQL: %s", correction_rounds, sql[:200])
 
         if self.query_mode == "parquet":
-            return await self._query_parquet(sql, result_limit=result_limit)
+            result = await self._query_parquet(sql, result_limit=result_limit)
         elif self.is_dir:
-            return await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit, max_workers=max_workers)
+            result = await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit, max_workers=max_workers)
         else:
-            return await self._query_single(sql, result_limit=result_limit)
+            result = await self._query_single(sql, result_limit=result_limit)
+        result.sql_source = sql_source
+        result.correction_rounds = correction_rounds
+        return result
 
 
 class _DummyResolver:
