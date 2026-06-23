@@ -166,12 +166,13 @@ def assemble_round2_context(
 
     # ── 关键规则 ──
     parts.append("""## 关键规则提醒
-1. range_tag.start_ts/end_ts 单位是秒(×1e9转纳秒)，ego/dynamic_obj.ts单位是纳秒
-2. 时间对齐JOIN: `e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9`
-3. range_tag自连接(两个概念): `r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts`
+1. range_tag.start_ts/end_ts 与 ego.ts/dynamic_obj.ts/dynamic_lane.ts 单位相同（秒级Unix时间戳），直接比较，不要乘1e9
+2. 时间对齐JOIN: `e.ts BETWEEN r.start_ts AND r.end_ts`（不加任何转换）
+3. range_tag自连接(两个概念): `r1.start_ts < r2.end_ts AND r1.end_ts > r2.start_ts`
 4. tag_name LIKE 'INTERSECTION_%' 可匹配所有INTERSECTION_开头的标签
 5. param列是JSON字符串，用 json_extract(param, '$.key') 提取子字段
-6. 只输出纯SQL，不要解释，不要markdown代码块标记
+6. ego_dr_trajectory/obs_dr_trajectory是JSON字符串，漂移值用json_extract提取：dx_08=json_extract(ego_dr_trajectory,'$.x[4]')-json_extract(ego_dr_trajectory,'$.x[0]')
+7. 只输出纯SQL，不要解释，不要markdown代码块标记
 """)
 
     return "\n".join(parts)
