@@ -1,0 +1,53 @@
+# Block: ego_speed_simple
+# Purpose: Simplified ego speed analysis (no conflict-specific fields in upstream)
+# Input: upstream CTE with start_ts, end_ts, duration, param
+# Output: all upstream cols + speed metrics
+
+name: ego_speed_simple
+version: "1.0"
+description: |
+  简化版自车速度分析：关联ego表计算冲突前/中/后速度指标。
+  不依赖上游冲突专用字段(agent_id, grid_count等)，适用于Cutin/LaneChange等非冲突场景。
+
+input_tables:
+  - ego
+
+input_ctes:
+  - upstream
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - object_id
+  - tag_name
+  - pre_speed_kmh
+  - during_speed_avg_kmh
+  - during_min_speed_kmh
+  - speed_drop_total_kmh
+  - speed_drop_peak_1s
+  - max_decel_mps2
+  - distance_traveled_m
+
+parameters: {}
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name,
+          ROUND(AVG(CASE WHEN e.ts < u.start_ts THEN e.speed END), 2) AS pre_speed_kmh,
+          ROUND(AVG(CASE WHEN e.ts BETWEEN u.start_ts AND u.end_ts THEN e.speed END), 2) AS during_speed_avg_kmh,
+          ROUND(MIN(CASE WHEN e.ts BETWEEN u.start_ts AND u.end_ts THEN e.speed END), 2) AS during_min_speed_kmh,
+          ROUND(AVG(CASE WHEN e.ts < u.start_ts THEN e.speed END) - 
+                MIN(CASE WHEN e.ts BETWEEN u.start_ts AND u.end_ts THEN e.speed END), 2) AS speed_drop_total_kmh,
+          ROUND(MAX(CASE WHEN e.ts BETWEEN u.start_ts AND u.end_ts 
+              THEN ABS(e.speed - COALESCE(e2.speed, e.speed)) END), 2) AS speed_drop_peak_1s,
+          ROUND(MAX(CASE WHEN e.ts BETWEEN u.start_ts AND u.end_ts 
+              THEN ABS(e.speed - COALESCE(e2.speed, e.speed)) / 1.0 * (1000.0/3600.0) END), 2) AS max_decel_mps2,
+          MAX(e.cumulative_distance) - MIN(e.cumulative_distance) AS distance_traveled_m
+      FROM {upstream} u
+      LEFT JOIN ego e ON e.ts >= u.start_ts - 2.0 AND e.ts <= u.end_ts + 2.0
+      LEFT JOIN ego e2 ON e2.ts = e.ts - 1
+      GROUP BY u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name
+  )

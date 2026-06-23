@@ -63,6 +63,8 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
 | VRU横穿冲突 | conflict_pipeline | vru | 行人横穿/VRU冲突/VRUCrossConflict |
 | 左转冲突 | turn_conflict_pipeline | left_turn | 左转冲突/对向冲突/left turn |
 | 右转冲突 | turn_conflict_pipeline | right_turn | 右转冲突/right turn |
+| 切入分析 | cutin_analysis | default | 切入/cutin/Cutin |
+| 拥堵跟车分析 | cutin_analysis | congested | 拥堵跟车/CongestedFollow |
 
 ## 输出格式（严格JSON，不要输出其他内容）
 {{

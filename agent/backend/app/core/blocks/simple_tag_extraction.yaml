@@ -1,0 +1,49 @@
+# Block: simple_tag_extraction
+# Purpose: Generic tag extraction from range_tag with time padding
+# Unlike event_extraction (conflict-specific), this block doesn't output conflict fields
+# Used by: cutin_analysis, lanechange_analysis, closefollow_analysis recipes
+
+name: simple_tag_extraction
+version: "1.0"
+description: |
+  通用标签提取：从range_tag表提取指定tag_name的记录，扩展时间窗口(±pad)，解析通用JSON参数(object_id, name)。
+  不输出冲突专用字段(heading_diff, grid_count等)，适用于Cutin/LaneChange/CloseFollow等场景。
+
+input_tables:
+  - range_tag
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - object_id
+  - tag_name
+
+parameters:
+  tag_name:
+    type: string
+    required: true
+    description: "range_tag中的tag_name"
+    examples: ["Cutin", "LaneChange", "CloseFollow", "CongestedFollow"]
+  pre_pad:
+    type: float
+    default: 2.0
+    description: "start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 2.0
+    description: "end_ts后扩秒数"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          rt.start_ts - {pre_pad} AS start_ts,
+          rt.end_ts + {post_pad} AS end_ts,
+          (rt.end_ts + {post_pad}) - (rt.start_ts - {pre_pad}) AS duration,
+          rt.param,
+          CAST(json_extract(rt.param, '$.object_id') AS INTEGER) AS object_id,
+          rt.tag_name
+      FROM range_tag rt
+      WHERE rt.tag_name = '{tag_name}'
+  )

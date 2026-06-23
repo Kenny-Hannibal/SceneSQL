@@ -1,0 +1,55 @@
+# Block: target_proximity
+# Purpose: Analyze dynamic_obj proximity during tagged events (non-conflict scenarios)
+# Input: upstream CTE with start_ts, end_ts, object_id
+# Output: min distance, target type, speed, lateral position
+
+name: target_proximity
+version: "1.0"
+description: |
+  目标接近度分析：关联dynamic_obj表，计算事件期间最近目标距离、类型、速度、横向位置。
+  适用于Cutin/LaneChange/CloseFollow等需要分析目标车辆行为的场景。
+
+input_tables:
+  - dynamic_obj
+  - ego
+
+input_ctes:
+  - upstream
+
+output_columns:
+  - start_ts
+  - end_ts
+  - object_id
+  - min_dist_m
+  - target_type
+  - target_speed_x
+  - target_speed_y
+  - target_x
+  - target_y
+  - has_target
+
+parameters:
+  time_trim:
+    type: float
+    default: 1.0
+    description: "JOIN时时间窗口两端裁剪秒数"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          u.start_ts, u.end_ts, u.object_id,
+          CASE WHEN COUNT(d.obj_id) = 0 THEN 999.0
+               ELSE ROUND(MIN(SQRT(COALESCE(d.x,0)*COALESCE(d.x,0) + COALESCE(d.y,0)*COALESCE(d.y,0))), 2)
+          END AS min_dist_m,
+          GROUP_CONCAT(DISTINCT d.type) AS target_type,
+          ROUND(MAX(ABS(COALESCE(d.absolute_velocity_x,0))), 2) AS target_speed_x,
+          ROUND(MAX(ABS(COALESCE(d.absolute_velocity_y,0))), 2) AS target_speed_y,
+          ROUND(AVG(COALESCE(d.x,0)), 2) AS target_x,
+          ROUND(AVG(COALESCE(d.y,0)), 2) AS target_y,
+          CASE WHEN COUNT(d.obj_id) = 0 THEN 0 ELSE 1 END AS has_target
+      FROM {upstream} u
+      LEFT JOIN dynamic_obj d 
+          ON CAST(d.obj_id AS INTEGER) = u.object_id
+          AND d.ts BETWEEN u.start_ts + {time_trim} AND u.end_ts - {time_trim}
+      GROUP BY u.start_ts, u.end_ts, u.object_id
+  )
