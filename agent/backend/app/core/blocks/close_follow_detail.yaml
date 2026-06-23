@@ -1,0 +1,50 @@
+# Block: close_follow_detail
+# Purpose: Extract CloseFollow-specific risk metrics from param JSON
+# Input: upstream CTE with start_ts, end_ts, param (from simple_tag_extraction)
+# Output: upstream cols + min_ttc, min_thw, min_dtc, max_acc, severity
+
+name: close_follow_detail
+version: "1.0"
+description: |
+  跟车过近细节提取：从range_tag的param JSON中提取CloseFollow风险指标。
+  解析minTTC(碰撞时间)、minTHW(车头时距)、minDTC(最小距离)、max_acc(最大加速度)。
+  基于minTTC和minTHW计算严重度等级。
+
+input_tables: []
+
+input_ctes:
+  - upstream
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - object_id
+  - tag_name
+  - min_ttc
+  - min_thw
+  - min_dtc
+  - max_acc
+  - follow_duration
+  - severity
+
+parameters: {}
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name,
+          ROUND(CAST(json_extract(u.param, '$.minTTC') AS REAL), 4) AS min_ttc,
+          ROUND(CAST(json_extract(u.param, '$.minTHW') AS REAL), 4) AS min_thw,
+          ROUND(CAST(json_extract(u.param, '$.minDTC') AS REAL), 4) AS min_dtc,
+          ROUND(CAST(json_extract(u.param, '$.max_acc') AS REAL), 4) AS max_acc,
+          ROUND(CAST(json_extract(u.param, '$.duration') AS REAL), 2) AS follow_duration,
+          CASE
+              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 1.0 THEN 'critical'
+              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 2.0 THEN 'high'
+              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 4.0 THEN 'medium'
+              ELSE 'low'
+          END AS severity
+      FROM {upstream} u
+  )

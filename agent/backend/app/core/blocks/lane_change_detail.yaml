@@ -1,0 +1,45 @@
+# Block: lane_change_detail
+# Purpose: Extract LaneChange-specific details from param JSON
+# Input: upstream CTE with start_ts, end_ts, param (from simple_tag_extraction)
+# Output: upstream cols + sub_tag, total_duration, dist_to_dest, direction
+
+name: lane_change_detail
+version: "1.0"
+description: |
+  变道细节提取：从range_tag的param JSON中提取变道专用字段。
+  解析sub_tag(LeftLaneChange/RightLaneChange)、total_duration、distToDesttn等。
+  区分变道方向和严重程度。
+
+input_tables: []
+
+input_ctes:
+  - upstream
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - object_id
+  - tag_name
+  - sub_tag
+  - total_duration
+  - dist_to_dest
+  - direction
+
+parameters: {}
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name,
+          json_extract_string(u.param, '$.sub_tag') AS sub_tag,
+          CAST(json_extract(u.param, '$.total_duration') AS REAL) AS total_duration,
+          CAST(json_extract(u.param, '$.distToDesttn') AS REAL) AS dist_to_dest,
+          CASE json_extract_string(u.param, '$.sub_tag')
+              WHEN 'LeftLaneChange' THEN 'left'
+              WHEN 'RightLaneChange' THEN 'right'
+              ELSE 'unknown'
+          END AS direction
+      FROM {upstream} u
+  )

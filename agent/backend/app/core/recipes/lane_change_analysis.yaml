@@ -1,0 +1,67 @@
+# Recipe: lane_change_analysis
+# Purpose: Lane change scenario analysis pipeline
+# Flow: simple_tag_extraction → lane_change_detail → ego_speed_simple → final_select
+
+name: lane_change_analysis
+version: "1.0"
+description: |
+  变道场景分析流水线：提取LaneChange标签 → 解析变道方向/时长 → 自车速度分析。
+  输出每个变道事件的方向、速度变化、制动严重度等关键指标。
+  支持左变道/右变道/全部变道三种variant。
+
+blocks:
+  - name: simple_tag_extraction
+    cte_name: "lc_events"
+    params:
+      tag_name: "{tag_name}"
+      pre_pad: 2.0
+      post_pad: 2.0
+
+  - name: lane_change_detail
+    cte_name: "LCDetail"
+    upstream: "lc_events"
+
+  - name: ego_speed_simple
+    cte_name: "EgoSpeedAnalysis"
+    upstream: "LCDetail"
+
+final_select_template: |
+  SELECT
+      'lane_change_analysis' AS tag_name,
+      esa.start_ts,
+      esa.end_ts,
+      ROUND(esa.end_ts - esa.start_ts, 2) AS duration,
+      lcd.sub_tag,
+      lcd.direction,
+      lcd.total_duration,
+      lcd.dist_to_dest,
+      esa.pre_speed_kmh,
+      esa.during_speed_avg_kmh,
+      esa.during_min_speed_kmh,
+      esa.speed_drop_total_kmh,
+      esa.max_decel_mps2,
+      esa.distance_traveled_m,
+      CASE 
+          WHEN esa.speed_drop_total_kmh > 15 AND esa.during_min_speed_kmh < 20 THEN 'hard_brake'
+          WHEN esa.speed_drop_total_kmh > 8 THEN 'moderate_brake'
+          WHEN esa.speed_drop_total_kmh > 3 THEN 'light_brake'
+          ELSE 'no_brake'
+      END AS brake_severity,
+      CASE lcd.direction
+          WHEN 'left' THEN '向左变道'
+          WHEN 'right' THEN '向右变道'
+          ELSE '变道方向未知'
+      END AS direction_label
+  FROM EgoSpeedAnalysis esa
+  JOIN LCDetail lcd ON esa.start_ts = lcd.start_ts AND esa.end_ts = lcd.end_ts
+  ORDER BY esa.start_ts
+
+variants:
+  default:
+    tag_name: "LaneChange"
+  left:
+    tag_name: "LaneChange"
+    sub_tag_filter: "LeftLaneChange"
+  right:
+    tag_name: "LaneChange"
+    sub_tag_filter: "RightLaneChange"

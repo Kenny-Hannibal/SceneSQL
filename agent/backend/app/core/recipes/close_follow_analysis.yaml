@@ -1,0 +1,70 @@
+# Recipe: close_follow_analysis
+# Purpose: Close follow (tailgating) scenario analysis pipeline
+# Flow: simple_tag_extraction → close_follow_detail → ego_speed_simple → target_proximity → final_select
+
+name: close_follow_analysis
+version: "1.0"
+description: |
+  跟车过近场景分析流水线：提取CloseFollow标签 → 解析风险指标(TTC/THW/DTC) → 自车速度分析 → 目标接近度分析。
+  输出每个跟车过近事件的minTTC、minTHW、制动严重度、目标距离等指标。
+
+blocks:
+  - name: simple_tag_extraction
+    cte_name: "cf_events"
+    params:
+      tag_name: "{tag_name}"
+      pre_pad: 2.0
+      post_pad: 2.0
+
+  - name: close_follow_detail
+    cte_name: "CFDetail"
+    upstream: "cf_events"
+
+  - name: ego_speed_simple
+    cte_name: "EgoSpeedAnalysis"
+    upstream: "cf_events"
+
+  - name: target_proximity
+    cte_name: "TargetProximity"
+    upstream: "EgoSpeedAnalysis"
+    params:
+      time_trim: 1.0
+
+final_select_template: |
+  SELECT
+      'close_follow_analysis' AS tag_name,
+      cfd.start_ts,
+      cfd.end_ts,
+      ROUND(cfd.end_ts - cfd.start_ts, 2) AS duration,
+      cfd.min_ttc,
+      cfd.min_thw,
+      cfd.min_dtc,
+      cfd.max_acc,
+      cfd.follow_duration,
+      cfd.severity,
+      esa.pre_speed_kmh,
+      esa.during_speed_avg_kmh,
+      esa.during_min_speed_kmh,
+      esa.speed_drop_total_kmh,
+      esa.max_decel_mps2,
+      esa.distance_traveled_m,
+      tp.min_dist_m,
+      tp.target_type,
+      tp.target_speed_x,
+      tp.target_speed_y,
+      CASE 
+          WHEN esa.speed_drop_total_kmh > 15 AND esa.during_min_speed_kmh < 20 THEN 'hard_brake'
+          WHEN esa.speed_drop_total_kmh > 8 THEN 'moderate_brake'
+          WHEN esa.speed_drop_total_kmh > 3 THEN 'light_brake'
+          ELSE 'no_brake'
+      END AS brake_severity
+  FROM CFDetail cfd
+  JOIN EgoSpeedAnalysis esa ON cfd.start_ts = esa.start_ts AND cfd.end_ts = esa.end_ts
+  LEFT JOIN TargetProximity tp ON esa.start_ts = tp.start_ts AND esa.end_ts = tp.end_ts AND esa.object_id = tp.object_id
+  ORDER BY cfd.min_ttc ASC
+
+variants:
+  default:
+    tag_name: "CloseFollow"
+  congested:
+    tag_name: "CongestedFollow"

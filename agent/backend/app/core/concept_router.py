@@ -65,6 +65,11 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
 | 右转冲突 | turn_conflict_pipeline | right_turn | 右转冲突/right turn |
 | 切入分析 | cutin_analysis | default | 切入/cutin/Cutin |
 | 拥堵跟车分析 | cutin_analysis | congested | 拥堵跟车/CongestedFollow |
+| 变道分析 | lane_change_analysis | default | 变道/LaneChange/换道/并道 |
+| 左变道分析 | lane_change_analysis | left | 左变道/向左变道/LeftLaneChange |
+| 右变道分析 | lane_change_analysis | right | 右变道/向右变道/RightLaneChange |
+| 跟车过近分析 | close_follow_analysis | default | 跟车过近/CloseFollow/尾随/紧跟 |
+| 拥堵跟车(风险)分析 | close_follow_analysis | congested | 拥堵跟车风险/CongestedFollow |
 
 ## 输出格式（严格JSON，不要输出其他内容）
 {{
