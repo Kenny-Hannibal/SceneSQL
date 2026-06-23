@@ -1218,7 +1218,7 @@ fields:
     related_tables:
     - dynamic_obj
     notes:
-    - 常见值：CAR, TRUCK, BUS, PEDESTRIAN, BICYCLE, TRICYCLE, CONE 等
+    - 常见值（全部小写）：car, truck, bus, pedestrian, motorcycle, bicycle, tricycle, cone 等
   dynamic_obj.is_static:
     description: 障碍物是否为静态
     type: BOOLEAN

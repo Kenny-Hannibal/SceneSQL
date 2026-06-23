@@ -161,8 +161,8 @@ class AgentEngine:
         if raw.lower().startswith("sql"):
             raw = raw[3:].strip()
 
-        # ── 硬修正：LLM偶尔仍输出 * 1e9，而range_tag与ego/dynamic_obj时间戳单位相同，无需转换 ──
-        raw = re.sub(r'\*\s*1e9', '', raw)
+        # ── 硬修正：LLM偶尔仍输出时间戳转换（* 1e9 / * 1000 / * 1000000），实际无需转换 ──
+        raw = re.sub(r'\*\s*(?:1e9|1e6|1000000|1000)\b', '', raw)
 
         # ── 提取完整SQL ──
         # 策略：去markdown标记后，如果文本以SELECT/WITH开头，直接返回全文（多行SQL含子查询）
