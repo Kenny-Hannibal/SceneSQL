@@ -614,39 +614,56 @@ class AgentEngine:
 
         concepts = r1_result.get("concepts", [])
         composition = r1_result.get("composition", "single_tag")
-        logger.info("Round 1: concepts=%s composition=%s", concepts, composition)
+        recipe_name = r1_result.get("recipe", "")
+        recipe_variant = r1_result.get("recipe_variant", "")
+        logger.info("Round 1: concepts=%s composition=%s recipe=%s variant=%s",
+                     concepts, composition, recipe_name, recipe_variant)
 
-        # ── 代码层: 确定需要哪些表的schema ──
-        involved_tables = {"range_tag"}
-        ego_fields = r1_result.get("ego_fields", [])
-        need_dynamic_obj = r1_result.get("need_dynamic_obj", False)
-        need_dynamic_lane = r1_result.get("need_dynamic_lane", False)
-        need_intersection_info = r1_result.get("need_intersection_info", False)
+        # ── Pipeline Recipe 分支：如果Round 1识别出匹配的recipe，直接组装SQL ──
+        sql = None
+        if recipe_name and recipe_variant:
+            try:
+                from agent.backend.app.core.block_assembler import BlockAssembler
+                assembler = BlockAssembler()
+                sql = assembler.assemble(recipe_name, recipe_variant)
+                logger.info("Recipe assembled: recipe=%s variant=%s sql_len=%d",
+                            recipe_name, recipe_variant, len(sql))
+            except Exception as e:
+                logger.warning("Recipe assembly failed, fallback to Round 2: %s", e)
+                sql = None
 
-        if ego_fields or composition in ("tag_join_ego", "cross_table", "ego_only"):
-            involved_tables.add("ego")
-        if need_dynamic_obj or composition in ("tag_join_dynamic_obj", "cross_table"):
-            involved_tables.add("dynamic_obj")
-        if need_dynamic_lane or composition == "tag_join_dynamic_lane":
-            involved_tables.add("dynamic_lane")
-        if need_intersection_info or composition == "tag_join_intersection_info":
-            involved_tables.add("intersection_info")
+        # ── Fallback: Round 2 LLM 生成 ──
+        if sql is None:
+            # 代码层: 确定需要哪些表的schema
+            involved_tables = {"range_tag"}
+            ego_fields = r1_result.get("ego_fields", [])
+            need_dynamic_obj = r1_result.get("need_dynamic_obj", False)
+            need_dynamic_lane = r1_result.get("need_dynamic_lane", False)
+            need_intersection_info = r1_result.get("need_intersection_info", False)
 
-        schema_text = format_schema_for_prompt(
-            self.schema,
-            only_tables=involved_tables,
-        )
+            if ego_fields or composition in ("tag_join_ego", "cross_table", "ego_only"):
+                involved_tables.add("ego")
+            if need_dynamic_obj or composition in ("tag_join_dynamic_obj", "cross_table"):
+                involved_tables.add("dynamic_obj")
+            if need_dynamic_lane or composition == "tag_join_dynamic_lane":
+                involved_tables.add("dynamic_lane")
+            if need_intersection_info or composition == "tag_join_intersection_info":
+                involved_tables.add("intersection_info")
 
-        # ── Round 2: SQL生成 ──
-        r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
-        raw_sql = await self.llm.chat(
-            r2_messages[0]["content"],
-            r2_messages[1]["content"],
-            temperature=0.0,
-        )
-        sql = self._clean_sql(raw_sql)
+            schema_text = format_schema_for_prompt(
+                self.schema,
+                only_tables=involved_tables,
+            )
 
-        logger.info("Round 2 SQL: %s", sql[:200])
+            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
+            raw_sql = await self.llm.chat(
+                r2_messages[0]["content"],
+                r2_messages[1]["content"],
+                temperature=0.0,
+            )
+            sql = self._clean_sql(raw_sql)
+
+            logger.info("Round 2 SQL: %s", sql[:200])
 
         validation_error = self._validate_sql(sql)
         if validation_error:

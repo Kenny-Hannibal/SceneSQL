@@ -1,0 +1,141 @@
+# Block: conflict_classification
+# Purpose: Merge speed + proximity, compute conflict_result/conflict_label/severity_level
+# Input: ego_speed_analysis CTE + proximity_analysis CTE
+# Output: all cols from both + conflict_result, conflict_label, severity_level, delta_yaw_max
+
+name: conflict_classification
+version: "1.0"
+description: |
+  合并速度分析和近距分析结果，计算博弈分类(conflict_result)、简化标签(conflict_label)、严重度(severity_level)。
+  支持vehicle和vru两种分类阈值。
+
+input_ctes:
+  - speed_cte  # ego_speed_analysis的CTE名
+  - prox_cte   # proximity_analysis的CTE名
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - conflict_object_operator
+  - agent_id
+  - grid_count
+  - heading_diff_mean_deg
+  - time_diff_mean_s
+  - pre_speed_kmh
+  - during_speed_avg_kmh
+  - during_min_speed_kmh
+  - speed_drop_total_kmh
+  - speed_drop_peak_1s
+  - max_decel_mps2
+  - yaw_range_raw
+  - distance_traveled_m
+  - min_dist_m
+  - type_actual
+  - has_dynamic_object
+  - y_range_m
+  - max_cross_speed_kmh
+  - is_static_flag
+  - has_x_positive
+  - has_positive_y
+  - has_negative_y
+  - delta_yaw_max
+  - conflict_result
+  - conflict_label
+  - severity_level
+
+parameters:
+  conflict_mode:
+    type: string
+    required: true
+    description: "分类模式：vehicle或vru，决定阈值"
+    enum: ["vehicle", "vru"]
+
+# 冲突分类的CASE WHEN逻辑非常复杂，模板化不现实。
+# 因此这个Block的sql_template包含完整的CASE WHEN逻辑，仅替换CTE名和阈值。
+# 阈值定义在variants子键中。
+
+variants:
+  vehicle:
+    forced_drop_total: 12
+    forced_drop_peak: 10
+    forced_decel: 2.8
+    forced_max_min_speed: 25
+    smooth_drop_avg: 5
+    smooth_drop_peak: 5
+    smooth_decel: 1.4
+    smooth_min_during_speed: 5
+    risky_speed_ratio: 0.85
+    risky_max_dist: 3
+    risky_min_pre_speed: 15
+    mutual_stop_min_speed: 3
+    mutual_stop_pre_low: 5
+    mutual_stop_pre_high: 20
+    critical_dist: 10
+  vru:
+    forced_drop_total: 12
+    forced_drop_peak: 10
+    forced_decel: 2.8
+    forced_max_min_speed: 25
+    smooth_drop_avg: 5
+    smooth_drop_peak: 5
+    smooth_decel: 1.4
+    smooth_min_during_speed: 5
+    risky_speed_ratio: 0.85
+    risky_max_dist: 3
+    risky_min_pre_speed: 15
+    mutual_stop_min_speed: 3
+    mutual_stop_pre_low: 5
+    mutual_stop_pre_high: 20
+    # VRU特有：severity_level中critical距离阈值更低(10m vs 20m)
+    critical_dist: 10
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          esa.*,
+          vp.min_dist_m, vp.type_actual, vp.has_dynamic_object,
+          vp.y_range_m, vp.max_cross_speed_kmh,
+          vp.is_static_flag, vp.has_x_positive, vp.has_positive_y, vp.has_negative_y,
+          CASE WHEN esa.yaw_range_raw > 3.14 THEN ROUND(6.28 - esa.yaw_range_raw, 2) ELSE esa.yaw_range_raw END AS delta_yaw_max,
+          CASE
+              WHEN esa.during_speed_avg_kmh IS NULL AND esa.pre_speed_kmh IS NULL THEN 'unclear'
+              WHEN esa.during_min_speed_kmh < {mutual_stop_min_speed} AND esa.pre_speed_kmh BETWEEN {mutual_stop_pre_low} AND {mutual_stop_pre_high} AND vp.max_cross_speed_kmh > 0 THEN 'mutual_stop'
+              WHEN (esa.speed_drop_total_kmh > {forced_drop_total}
+                    OR esa.speed_drop_peak_1s > {forced_drop_peak}
+                    OR esa.max_decel_mps2 > {forced_decel})
+                   AND esa.during_min_speed_kmh < {forced_max_min_speed} THEN 'ego_yielded_forced'
+              WHEN (esa.pre_speed_kmh - esa.during_speed_avg_kmh > {smooth_drop_avg}
+                    OR esa.speed_drop_peak_1s > {smooth_drop_peak}
+                    OR esa.max_decel_mps2 > {smooth_decel})
+                   AND esa.during_speed_avg_kmh > {smooth_min_during_speed} THEN 'ego_yielded_smooth'
+              WHEN esa.during_speed_avg_kmh >= esa.pre_speed_kmh * {risky_speed_ratio}
+                   AND COALESCE(vp.min_dist_m, 999) < {risky_max_dist}
+                   AND esa.pre_speed_kmh > {risky_min_pre_speed} THEN 'ego_proceed_risky'
+              WHEN esa.during_speed_avg_kmh >= esa.pre_speed_kmh * {risky_speed_ratio} THEN 'ego_proceed_clear'
+              ELSE 'ego_proceeded_cautious'
+          END AS conflict_result,
+          CASE
+              WHEN esa.pre_speed_kmh IS NULL OR esa.during_speed_avg_kmh IS NULL THEN 'unknown'
+              WHEN esa.during_min_speed_kmh < {mutual_stop_min_speed} AND esa.pre_speed_kmh < 15 AND vp.max_cross_speed_kmh > 0 THEN 'boundary'
+              WHEN (esa.speed_drop_total_kmh > {forced_drop_total} OR esa.speed_drop_peak_1s > {forced_drop_peak} OR esa.max_decel_mps2 > {forced_decel})
+                   AND esa.during_min_speed_kmh < {forced_max_min_speed} THEN 'yielded'
+              WHEN (esa.pre_speed_kmh - esa.during_speed_avg_kmh > {smooth_drop_avg} OR esa.speed_drop_peak_1s > {smooth_drop_peak} OR esa.max_decel_mps2 > {smooth_decel})
+                   AND esa.during_speed_avg_kmh > {smooth_min_during_speed} THEN 'yielded'
+              ELSE 'proceed'
+          END AS conflict_label,
+          CASE
+              WHEN esa.pre_speed_kmh IS NULL THEN 'unclear'
+              WHEN COALESCE(vp.min_dist_m, 999) < {critical_dist} THEN 'critical'
+              WHEN (esa.speed_drop_total_kmh > 15 OR esa.max_decel_mps2 > 4.2)
+                   AND COALESCE(vp.min_dist_m, 999) < 20 THEN 'critical'
+              WHEN COALESCE(vp.min_dist_m, 999) < 20 THEN 'moderate'
+              WHEN (esa.speed_drop_total_kmh > 8 OR esa.max_decel_mps2 > 2.2)
+                   AND COALESCE(vp.min_dist_m, 999) < 30 THEN 'moderate'
+              WHEN esa.speed_drop_total_kmh > 3 OR esa.during_speed_avg_kmh < esa.pre_speed_kmh * 0.9 THEN 'minor'
+              ELSE 'no_conflict'
+          END AS severity_level
+      FROM {speed_cte} esa
+      LEFT JOIN {prox_cte} vp ON esa.start_ts = vp.start_ts AND esa.end_ts = vp.end_ts AND esa.agent_id = vp.agent_id
+  )

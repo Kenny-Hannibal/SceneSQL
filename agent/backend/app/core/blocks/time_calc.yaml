@@ -1,0 +1,58 @@
+# Block: time_calc
+# Purpose: Time range calculation via range_tag self-join (intersection + turn type matching)
+# Used by: turn_conflict recipe (left_turn_conflict, right_turn_conflict)
+
+name: time_calc
+version: "1.0"
+description: |
+  通过range_tag自连接计算路口+转向的交叉时间段。
+  用于左转冲突/右转冲突场景：找Intersection标签与转向标签的时间交叉窗口。
+
+input_tables:
+  - range_tag
+
+output_columns:
+  - tag_name
+  - start_ts
+  - end_ts
+  - param
+  - inter_start_ts
+  - inter_end_ts
+
+parameters:
+  intersection_tag:
+    type: string
+    default: "Intersection"
+    description: "路口标签名"
+  sub_tag_values:
+    type: list
+    required: true
+    description: "intersection param中的sub_tag值，如LeftIntersection, RightIntersection"
+    examples: [["LeftIntersection", "LuturnIntersection"], ["RightIntersection"]]
+  turn_tag_patterns:
+    type: list
+    required: true
+    description: "转向标签名模式"
+    examples: [["INTERSECTION_LEFTTURN"], ["INTERSECTION_RIGHTTURN"]]
+  min_duration:
+    type: float
+    default: 3.0
+    description: "转向标签最短持续时间"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT 
+          iv.tag_name,
+          CASE WHEN inter.start_ts < iv.start_ts THEN inter.start_ts ELSE iv.start_ts END AS start_ts,
+          CASE WHEN inter.end_ts < iv.end_ts THEN iv.end_ts ELSE iv.end_ts END AS end_ts,
+          iv.param,
+          iv.start_ts AS inter_start_ts,
+          iv.end_ts AS inter_end_ts
+      FROM range_tag inter
+      INNER JOIN range_tag iv 
+        ON ABS(iv.start_ts - inter.start_ts) < (inter.end_ts - inter.start_ts) / 2.0
+       AND ABS(iv.end_ts - inter.end_ts) < (inter.end_ts - inter.start_ts) / 2.0
+       AND (iv.end_ts - iv.start_ts) > {min_duration}
+      WHERE inter.tag_name = '{intersection_tag}'
+        AND json_extract(inter.param, '$.sub_tag') IN ({sub_tag_values})
+  )

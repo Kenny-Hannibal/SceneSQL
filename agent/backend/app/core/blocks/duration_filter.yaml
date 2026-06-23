@@ -1,0 +1,108 @@
+# Block: duration_filter
+# Purpose: Apply validity filters to events (timestamp validity, speed range, distance, crossing direction, etc.)
+# Input: upstream CTE (WithConflictResult)
+# Output: filtered events
+
+name: duration_filter
+version: "1.0"
+description: |
+  对冲突分类结果应用有效性过滤：时间戳有效性、delta_yaw限制、速度范围、障碍物存在性、
+  距离/y_range/横穿速度阈值、穿越方向验证、非横穿排除、conflict_result过滤。
+  这是冲突流水线中event_merge前的必要过滤步骤。
+
+input_ctes:
+  - upstream  # 含conflict_result, conflict_label, severity_level, delta_yaw_max等
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - conflict_object_operator
+  - conflict_result
+  - conflict_label
+  - severity_level
+  - agent_id
+  - grid_count
+  - heading_diff_mean_deg
+  - time_diff_mean_s
+  - pre_speed_kmh
+  - during_speed_avg_kmh
+  - during_min_speed_kmh
+  - speed_drop_total_kmh
+  - speed_drop_peak_1s
+  - max_decel_mps2
+  - min_dist_m
+  - type_actual
+  - has_dynamic_object
+  - y_range_m
+  - max_cross_speed_kmh
+  - has_x_positive
+  - has_positive_y
+  - has_negative_y
+  - delta_yaw_max
+  - distance_traveled_m
+  - param
+
+parameters:
+  max_delta_yaw:
+    type: float
+    default: 0.35
+  min_duration_s:
+    type: float
+    default: 5.0
+  exclusion_y_range:
+    type: float
+    default: 12.0
+  min_cross_speed:
+    type: float
+    default: 1.0
+  proceed_clear_min_pre_speed:
+    type: float
+    default: 10.0
+
+variants:
+  vehicle:
+    max_dist_m: 25.0
+    min_y_range_m: 4.0
+    proceed_clear_max_dist: 10.0
+    proceed_clear_min_cross_speed: 10.0
+    proceed_clear_min_y_range: 4.0
+  vru:
+    max_dist_m: 50.0
+    min_y_range_m: 1.0
+    proceed_clear_max_dist: 15.0
+    proceed_clear_min_cross_speed: 3.0
+    proceed_clear_min_y_range: 2.0
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          start_ts, end_ts, duration,
+          conflict_object_operator, conflict_result, conflict_label, severity_level,
+          agent_id, grid_count, heading_diff_mean_deg, time_diff_mean_s,
+          pre_speed_kmh, during_speed_avg_kmh, during_min_speed_kmh,
+          speed_drop_total_kmh, speed_drop_peak_1s, max_decel_mps2,
+          min_dist_m, type_actual, has_dynamic_object,
+          y_range_m, max_cross_speed_kmh,
+          has_x_positive, has_positive_y, has_negative_y,
+          delta_yaw_max, distance_traveled_m, param
+      FROM {upstream}
+      WHERE start_ts IS NOT NULL AND end_ts IS NOT NULL
+        AND end_ts > start_ts
+        AND distance_traveled_m > 0
+        AND delta_yaw_max < {max_delta_yaw}
+        AND has_dynamic_object >= 1
+        AND min_dist_m < {max_dist_m}
+        AND y_range_m > {min_y_range_m}
+        AND max_cross_speed_kmh > {min_cross_speed}
+        AND NOT (y_range_m > {exclusion_y_range} AND COALESCE(has_x_positive, 0) = 0)
+        AND COALESCE(has_positive_y, 0) = 1
+        AND COALESCE(has_negative_y, 0) = 1
+        AND duration >= {min_duration_s}
+        AND (conflict_result IN ('ego_yielded_forced', 'ego_yielded_smooth', 'ego_proceed_risky', 'mutual_stop', 'ego_proceeded_cautious')
+             OR (conflict_result = 'ego_proceed_clear'
+                 AND min_dist_m < {proceed_clear_max_dist}
+                 AND COALESCE(pre_speed_kmh, 0) > {proceed_clear_min_pre_speed}
+                 AND max_cross_speed_kmh > {proceed_clear_min_cross_speed}
+                 AND y_range_m > {proceed_clear_min_y_range}))
+  )

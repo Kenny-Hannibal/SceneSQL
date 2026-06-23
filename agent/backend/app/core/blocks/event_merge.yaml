@@ -1,0 +1,104 @@
+# Block: event_merge
+# Purpose: Merge overlapping/adjacent events using island-and-gap technique
+# Input: upstream CTE with final_events
+# Output: grp_id, merged_start, merged_end, event_count, priority-based conflict_result/label/severity
+
+name: event_merge
+version: "1.0"
+description: |
+  合并时间上重叠或相邻的事件片段。使用经典island-and-gap窗口函数技术：
+  sorted_events(ROW_NUMBER) → event_boundaries(prev_max_end) → event_groups(grp_id累加) → merged_groups(聚合)
+  合并后保留最严重的conflict_result和severity_level。
+
+input_ctes:
+  - upstream  # 含start_ts, end_ts, conflict_result, conflict_label, severity_level等
+
+output_columns:
+  - grp_id
+  - merged_start
+  - merged_end
+  - event_count
+  - severity_conflict_result
+  - merged_conflict_label
+  - merged_severity_level
+  - conflict_objects_operator
+  - types_actual
+  - obj_ids
+  - total_grid_count
+  - max_speed_drop_total
+  - max_speed_drop_peak
+  - max_decel_peak_mps2
+  - avg_pre_speed_kmh
+  - avg_min_speed_kmh
+  - avg_during_speed_kmh
+  - closest_dist_m
+  - max_y_range_m
+  - max_cross_speed_kmh
+
+parameters:
+  max_merged_duration_s:
+    type: float
+    default: 30.0
+    description: "合并后最大持续时长(秒)，超过则丢弃"
+  merge_mode:
+    type: string
+    default: "conflict"
+    description: "合并模式：conflict(保留conflict_result/label/severity)或simple(仅合并时间)"
+
+sql_template: |
+  {cte_name}_sorted AS (
+      SELECT *, ROW_NUMBER() OVER (ORDER BY start_ts) AS rn FROM {upstream}
+  ),
+  {cte_name}_boundaries AS (
+      SELECT *, MAX(end_ts) OVER (ORDER BY start_ts ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max_end
+      FROM {cte_name}_sorted
+  ),
+  {cte_name}_groups AS (
+      SELECT *, SUM(CASE WHEN prev_max_end IS NULL OR start_ts > prev_max_end THEN 1 ELSE 0 END) OVER (ORDER BY start_ts ROWS UNBOUNDED PRECEDING) AS grp_id
+      FROM {cte_name}_boundaries
+  ),
+  {cte_name}_merged AS (
+      SELECT
+          grp_id,
+          MIN(start_ts) AS merged_start,
+          MAX(end_ts) AS merged_end,
+          COUNT(*) AS event_count,
+          CASE 
+              WHEN SUM(CASE WHEN conflict_result = 'ego_yielded_forced' THEN 1 ELSE 0 END) > 0 THEN 'ego_yielded_forced'
+              WHEN SUM(CASE WHEN conflict_result = 'ego_yielded_smooth' THEN 1 ELSE 0 END) > 0 THEN 'ego_yielded_smooth'
+              WHEN SUM(CASE WHEN conflict_result = 'ego_proceed_risky' THEN 1 ELSE 0 END) > 0 THEN 'ego_proceed_risky'
+              WHEN SUM(CASE WHEN conflict_result = 'mutual_stop' THEN 1 ELSE 0 END) > 0 THEN 'mutual_stop'
+              WHEN SUM(CASE WHEN conflict_result = 'ego_proceeded_cautious' THEN 1 ELSE 0 END) > 0 THEN 'ego_proceeded_cautious'
+              WHEN SUM(CASE WHEN conflict_result = 'ego_proceed_clear' THEN 1 ELSE 0 END) > 0 THEN 'ego_proceed_clear'
+              ELSE 'unclear'
+          END AS severity_conflict_result,
+          CASE 
+              WHEN SUM(CASE WHEN conflict_label = 'yielded' THEN 1 ELSE 0 END) > 0 THEN 'yielded'
+              WHEN SUM(CASE WHEN conflict_label = 'boundary' THEN 1 ELSE 0 END) > 0 THEN 'boundary'
+              ELSE 'proceed'
+          END AS merged_conflict_label,
+          CASE 
+              WHEN SUM(CASE WHEN severity_level = 'critical' THEN 1 ELSE 0 END) > 0 THEN 'critical'
+              WHEN SUM(CASE WHEN severity_level = 'moderate' THEN 1 ELSE 0 END) > 0 THEN 'moderate'
+              WHEN SUM(CASE WHEN severity_level = 'minor' THEN 1 ELSE 0 END) > 0 THEN 'minor'
+              ELSE 'no_conflict'
+          END AS merged_severity_level,
+          GROUP_CONCAT(DISTINCT conflict_object_operator) AS conflict_objects_operator,
+          GROUP_CONCAT(DISTINCT type_actual) AS types_actual,
+          GROUP_CONCAT(DISTINCT CAST(agent_id AS TEXT)) AS obj_ids,
+          SUM(grid_count) AS total_grid_count,
+          ROUND(MAX(speed_drop_total_kmh), 2) AS max_speed_drop_total,
+          ROUND(MAX(speed_drop_peak_1s), 2) AS max_speed_drop_peak,
+          ROUND(MAX(max_decel_mps2), 2) AS max_decel_peak_mps2,
+          ROUND(AVG(pre_speed_kmh), 2) AS avg_pre_speed_kmh,
+          ROUND(AVG(during_min_speed_kmh), 2) AS avg_min_speed_kmh,
+          ROUND(AVG(during_speed_avg_kmh), 2) AS avg_during_speed_kmh,
+          ROUND(MIN(min_dist_m), 2) AS closest_dist_m,
+          ROUND(MAX(y_range_m), 2) AS max_y_range_m,
+          ROUND(MAX(max_cross_speed_kmh), 2) AS max_cross_speed_kmh
+      FROM {cte_name}_groups
+      GROUP BY grp_id
+  ),
+  {cte_name} AS (
+      SELECT * FROM {cte_name}_merged WHERE merged_end - merged_start <= {max_merged_duration_s}
+  )

@@ -56,6 +56,14 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
 - 不涉及任何概念，只查ego → ego_only
 - 涉及CTE/轨迹/聚合分析 → cte_analysis
 
+## 可用Pipeline Recipe（如果问题匹配以下场景，填写recipe字段）
+| 场景 | recipe | variant | 识别关键词 |
+|------|--------|---------|-----------|
+| 他车横穿冲突 | conflict_pipeline | vehicle | 横穿冲突/他车交叉/CrossConflict |
+| VRU横穿冲突 | conflict_pipeline | vru | 行人横穿/VRU冲突/VRUCrossConflict |
+| 左转冲突 | turn_conflict_pipeline | left_turn | 左转冲突/对向冲突/left turn |
+| 右转冲突 | turn_conflict_pipeline | right_turn | 右转冲突/right turn |
+
 ## 输出格式（严格JSON，不要输出其他内容）
 {{
   "concepts": ["概念1", "概念2"],
@@ -65,7 +73,9 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
   "dynamic_obj_filters": "对dynamic_obj的过滤描述，无则为空",
   "need_dynamic_lane": false,
   "need_intersection_info": false,
-  "analysis_description": "如果组合方式是cte_analysis，描述分析逻辑，否则为空"
+  "analysis_description": "如果组合方式是cte_analysis，描述分析逻辑，否则为空",
+  "recipe": "recipe名称或空字符串(无匹配recipe)",
+  "recipe_variant": "variant名称或空字符串"
 }}"""
 
 

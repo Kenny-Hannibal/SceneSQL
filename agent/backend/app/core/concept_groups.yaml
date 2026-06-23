@@ -284,7 +284,7 @@ composition_rules:
              e.{ego_fields}
       FROM range_tag r
       JOIN ego e
-        ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9
+        ON e.ts BETWEEN r.start_ts AND r.end_ts
       WHERE r.tag_name IN ({tag_names})
       ORDER BY r.start_ts, e.ts
 
@@ -296,7 +296,7 @@ composition_rules:
              d.absolute_velocity_x, d.absolute_velocity_y
       FROM range_tag r
       JOIN dynamic_obj d
-        ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9
+        ON d.ts BETWEEN r.start_ts AND r.end_ts
       WHERE r.tag_name IN ({tag_names})
         AND d.is_static = 0
       ORDER BY r.start_ts, d.ts
@@ -309,9 +309,9 @@ composition_rules:
              d.obj_id, d.x, d.y, d.type
       FROM range_tag r
       JOIN ego e
-        ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9
+        ON e.ts BETWEEN r.start_ts AND r.end_ts
       JOIN dynamic_obj d
-        ON d.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9
+        ON d.ts BETWEEN r.start_ts AND r.end_ts
       WHERE r.tag_name IN ({tag_names})
         AND d.is_static = 0
       ORDER BY r.start_ts, e.ts
@@ -335,7 +335,7 @@ composition_rules:
              dl.ref_link_id, dl.predecessors, dl.successors
       FROM range_tag r
       JOIN dynamic_lane dl
-        ON dl.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9
+        ON dl.ts BETWEEN r.start_ts AND r.end_ts
       WHERE r.tag_name IN ({tag_names})
       ORDER BY r.start_ts, dl.ts
 

@@ -1,0 +1,70 @@
+# Block: ego_speed_analysis
+# Purpose: Join events with ego table to compute speed metrics (pre/during/post + decel + yaw)
+# Input: upstream CTE (events), ego table
+# Output: all upstream cols + pre_speed_kmh, during_speed_avg_kmh, during_min_speed_kmh, speed_drop_total_kmh, speed_drop_peak_1s, max_decel_mps2, yaw_range_raw, distance_traveled_m
+
+name: ego_speed_analysis
+version: "1.0"
+description: |
+  关联ego表计算自车速度分析：冲突前/中/后平均速度、总减速量、峰值1s减速、峰值减速度(m/s²)、yaw变化、行驶距离。
+  这是冲突流水线的标准第二步。
+
+input_tables:
+  - ego
+
+input_ctes:
+  - upstream  # 事件CTE，必须包含start_ts, end_ts, duration, param等字段
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - conflict_object_operator
+  - agent_id
+  - grid_count
+  - heading_diff_mean_deg
+  - time_diff_mean_s
+  - pre_speed_kmh
+  - during_speed_avg_kmh
+  - during_min_speed_kmh
+  - speed_drop_total_kmh
+  - speed_drop_peak_1s
+  - max_decel_mps2
+  - yaw_range_raw
+  - distance_traveled_m
+
+parameters:
+  speed_window_pre:
+    type: float
+    default: 2.0
+    description: "速度分析前向窗口(秒)"
+  speed_window_post:
+    type: float
+    default: 2.0
+    description: "速度分析后向窗口(秒)"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          {upstream}.start_ts, {upstream}.end_ts, {upstream}.duration, {upstream}.param,
+          {upstream}.conflict_object_operator, {upstream}.agent_id, {upstream}.grid_count,
+          {upstream}.heading_diff_mean_deg, {upstream}.time_diff_mean_s,
+          ROUND(AVG(CASE WHEN e.ts < {upstream}.start_ts THEN e.speed END), 2) AS pre_speed_kmh,
+          ROUND(AVG(CASE WHEN e.ts BETWEEN {upstream}.start_ts AND {upstream}.end_ts THEN e.speed END), 2) AS during_speed_avg_kmh,
+          ROUND(MIN(CASE WHEN e.ts BETWEEN {upstream}.start_ts AND {upstream}.end_ts THEN e.speed END), 2) AS during_min_speed_kmh,
+          ROUND(AVG(CASE WHEN e.ts < {upstream}.start_ts THEN e.speed END) - 
+                MIN(CASE WHEN e.ts BETWEEN {upstream}.start_ts AND {upstream}.end_ts THEN e.speed END), 2) AS speed_drop_total_kmh,
+          ROUND(MAX(CASE WHEN e.ts BETWEEN {upstream}.start_ts AND {upstream}.end_ts 
+              THEN ABS(e.speed - COALESCE(e2.speed, e.speed)) END), 2) AS speed_drop_peak_1s,
+          ROUND(MAX(CASE WHEN e.ts BETWEEN {upstream}.start_ts AND {upstream}.end_ts 
+              THEN ABS(e.speed - COALESCE(e2.speed, e.speed)) / 1.0 * (1000.0/3600.0) END), 2) AS max_decel_mps2,
+          ROUND(MAX(e.utm_yaw) - MIN(e.utm_yaw), 2) AS yaw_range_raw,
+          MAX(e.cumulative_distance) - MIN(e.cumulative_distance) AS distance_traveled_m
+      FROM {upstream}
+      LEFT JOIN ego e ON e.ts >= {upstream}.start_ts - {speed_window_pre} AND e.ts <= {upstream}.end_ts + {speed_window_post}
+      LEFT JOIN ego e2 ON e2.ts = e.ts - 1
+      GROUP BY {upstream}.start_ts, {upstream}.end_ts, {upstream}.duration, {upstream}.param,
+          {upstream}.conflict_object_operator, {upstream}.agent_id, {upstream}.grid_count,
+          {upstream}.heading_diff_mean_deg, {upstream}.time_diff_mean_s
+  )

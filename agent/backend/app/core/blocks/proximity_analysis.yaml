@@ -1,0 +1,75 @@
+# Block: proximity_analysis
+# Purpose: Join events with dynamic_obj to compute obstacle proximity, type, and lateral movement
+# Input: upstream CTE (speed analysis), dynamic_obj table
+# Output: all upstream cols + min_dist, type_actual, has_dynamic_object, y_range, cross_speed, direction flags
+
+name: proximity_analysis
+version: "1.0"
+description: |
+  关联dynamic_obj表计算障碍物近距信息：最小距离、真实类型、y坐标范围(横穿幅度)、最大横穿速度、穿越方向标志。
+  支持vehicle和vru两种变体，通过target_type参数控制。
+
+input_tables:
+  - dynamic_obj
+
+input_ctes:
+  - upstream  # 速度分析CTE，必须包含start_ts, end_ts, agent_id
+
+output_columns:
+  - start_ts
+  - end_ts
+  - agent_id
+  - min_dist_m
+  - type_actual
+  - has_dynamic_object
+  - y_range_m
+  - max_cross_speed_kmh
+  - is_static_flag
+  - has_x_positive
+  - has_positive_y
+  - has_negative_y
+
+parameters:
+  target_type:
+    type: string
+    required: true
+    description: "目标类型：vehicle或vru"
+    enum: ["vehicle", "vru"]
+  join_time_trim:
+    type: float
+    default: 2.0
+    description: "JOIN时从start_ts/end_ts裁剪的秒数(去除padding)"
+  max_default_dist:
+    type: float
+    default: 999.0
+    description: "无匹配obj时的默认距离"
+  vru_types:
+    type: list
+    default: ["pedestrian", "cyclist", "motorcycle", "stroller", "wheelchair", "animal"]
+    description: "VRU有效类型列表(仅target_type=vru时使用)"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          {upstream}.start_ts, {upstream}.end_ts, {upstream}.agent_id,
+          CASE WHEN COUNT(d.obj_id) = 0 THEN {max_default_dist}
+               ELSE ROUND(MIN(SQRT(COALESCE(d.x,0)*COALESCE(d.x,0) + COALESCE(d.y,0)*COALESCE(d.y,0))), 2)
+          END AS min_dist_m,
+          {type_expr} AS type_actual,
+          CASE WHEN COUNT(d.obj_id) = 0 THEN 0 ELSE 1 END AS has_dynamic_object,
+          MAX(COALESCE(d.y,0)) - MIN(COALESCE(d.y,0)) AS y_range_m,
+          ROUND(MAX(ABS(COALESCE(d.absolute_velocity_y,0))), 2) AS max_cross_speed_kmh,
+          MAX(CASE WHEN d.is_static = 1 THEN 1 ELSE 0 END) AS is_static_flag,
+          MAX(CASE WHEN d.x > 0 THEN 1 ELSE 0 END) AS has_x_positive,
+          MAX(CASE WHEN d.y > 0 THEN 1 ELSE 0 END) AS has_positive_y,
+          MAX(CASE WHEN d.y < 0 THEN 1 ELSE 0 END) AS has_negative_y
+      FROM {upstream}
+      LEFT JOIN dynamic_obj d 
+          ON CAST(d.obj_id AS INTEGER) = {upstream}.agent_id
+          AND d.ts BETWEEN {upstream}.start_ts + {join_time_trim} AND {upstream}.end_ts - {join_time_trim}
+      GROUP BY {upstream}.start_ts, {upstream}.end_ts, {upstream}.agent_id
+  )
+
+# type_expr模板(根据target_type在运行时替换):
+# vehicle: GROUP_CONCAT(DISTINCT d.type)
+# vru: CASE WHEN d.type IN ('pedestrian','cyclist','motorcycle','stroller','wheelchair','animal') THEN d.type ELSE NULL END

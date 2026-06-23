@@ -1,0 +1,83 @@
+# Block: event_extraction
+# Purpose: Extract events from range_tag with time padding, JSON param parsing, and basic filtering
+# Input: range_tag table
+# Output: start_ts, end_ts, duration, param, agent_id, grid_count, heading_diff_mean_deg, time_diff_mean_s, conflict_object_operator
+# Used by: conflict_pipeline recipe
+
+name: event_extraction
+version: "1.0"
+description: |
+  从range_tag表提取冲突事件，解析JSON参数，扩展时间窗口(±2s)，应用heading/grid/time基础过滤。
+  这是所有冲突流水线的第一步，输出带有扩展时间窗口的事件集。
+
+input_tables:
+  - range_tag
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - param
+  - conflict_object_operator
+  - agent_id
+  - grid_count
+  - heading_diff_mean_deg
+  - time_diff_mean_s
+
+parameters:
+  tag_name:
+    type: string
+    required: true
+    description: "range_tag中的tag_name，如CrossConflict, VRUCrossConflict"
+    examples: ["CrossConflict", "VRUCrossConflict"]
+  pre_pad:
+    type: float
+    default: 2.0
+    description: "start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 2.0
+    description: "end_ts后扩秒数"
+  heading_diff_min:
+    type: float
+    default: 40
+    description: "最小航向差(度)"
+  heading_diff_max:
+    type: float
+    default: 140
+    description: "最大航向差(度)"
+  grid_count_min:
+    type: int
+    default: 2
+    description: "最小grid count"
+  grid_count_max:
+    type: int
+    default: 15
+    description: "最大grid count"
+  time_diff_min:
+    type: float
+    default: 0.5
+    description: "最小time diff(秒)"
+  time_diff_max:
+    type: float
+    default: 8.0
+    description: "最大time diff(秒)"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          rt.start_ts - {pre_pad} AS start_ts,
+          rt.end_ts + {post_pad} AS end_ts,
+          (rt.end_ts + {post_pad}) - (rt.start_ts - {pre_pad}) AS duration,
+          rt.param,
+          json_extract(rt.param, '$.conflict_object') AS conflict_object_operator,
+          CAST(json_extract(rt.param, '$.agent_id') AS INTEGER) AS agent_id,
+          CAST(json_extract(rt.param, '$.conflict_summary.grid_count') AS INTEGER) AS grid_count,
+          ROUND(CAST(json_extract(rt.param, '$.conflict_summary.heading_diff_mean_deg') AS REAL), 2) AS heading_diff_mean_deg,
+          ROUND(CAST(json_extract(rt.param, '$.conflict_summary.time_diff_mean_s') AS REAL), 2) AS time_diff_mean_s
+      FROM range_tag rt
+      WHERE rt.tag_name = '{tag_name}'
+        AND COALESCE(CAST(json_extract(rt.param, '$.conflict_summary.heading_diff_mean_deg') AS REAL), 90) BETWEEN {heading_diff_min} AND {heading_diff_max}
+        AND COALESCE(CAST(json_extract(rt.param, '$.conflict_summary.grid_count') AS INTEGER), 1) BETWEEN {grid_count_min} AND {grid_count_max}
+        AND COALESCE(CAST(json_extract(rt.param, '$.conflict_summary.time_diff_mean_s') AS REAL), 5) BETWEEN {time_diff_min} AND {time_diff_max}
+  )

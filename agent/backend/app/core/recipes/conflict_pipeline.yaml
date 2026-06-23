@@ -1,0 +1,85 @@
+# Recipe: conflict_pipeline
+# Purpose: Full conflict detection pipeline (event extraction → speed analysis → proximity → classification → filter → merge)
+# Used for: CrossConflict, VRUCrossConflict scenarios
+
+name: conflict_pipeline
+version: "1.0"
+description: |
+  完整的冲突检测流水线，适用于他车横穿冲突(CrossConflict)和VRU横穿冲突(VRUCrossConflict)。
+  流程：event_extraction → ego_speed_analysis → proximity_analysis → conflict_classification → duration_filter → event_merge
+
+blocks:
+  - name: event_extraction
+    cte_name: "{tag_prefix}_events"
+    params:
+      tag_name: "{tag_name}"
+      pre_pad: 2.0
+      post_pad: 2.0
+
+  - name: ego_speed_analysis
+    cte_name: "EgoSpeedAnalysis"
+    upstream: "{tag_prefix}_events"
+
+  - name: proximity_analysis
+    cte_name: "{ProximityCTE}"
+    upstream: "EgoSpeedAnalysis"
+    params:
+      target_type: "{target_type}"
+      join_time_trim: 2.0
+
+  - name: conflict_classification
+    cte_name: "WithConflictResult"
+    speed_cte: "EgoSpeedAnalysis"
+    prox_cte: "{ProximityCTE}"
+    params:
+      conflict_mode: "{target_type}"
+
+  - name: duration_filter
+    cte_name: "final_events"
+    upstream: "WithConflictResult"
+    params:
+      filter_mode: "{target_type}"
+
+  - name: event_merge
+    cte_name: "merged"
+    upstream: "final_events"
+
+final_select_template: |
+  SELECT
+      '{output_tag_name}' AS tag_name,
+      merged_start AS start_ts,
+      merged_end AS end_ts,
+      ROUND(merged_end - merged_start, 2) AS duration,
+      severity_conflict_result AS conflict_result,
+      merged_conflict_label AS conflict_label,
+      merged_severity_level AS severity_level,
+      types_actual AS {type_col},
+      obj_ids AS obj_id,
+      total_grid_count AS grid_count,
+      max_speed_drop_total AS speed_drop_total_kmh,
+      max_speed_drop_peak AS speed_drop_peak_kmh,
+      max_decel_peak_mps2 AS decel_peak_mps2,
+      avg_pre_speed_kmh AS pre_speed_kmh,
+      avg_during_speed_kmh AS during_speed_avg_kmh,
+      avg_min_speed_kmh AS during_min_speed_kmh,
+      closest_dist_m AS min_{type_col}_dist_m,
+      max_y_range_m AS {type_col}_y_range_m,
+      max_cross_speed_kmh AS {type_col}_cross_speed_kmh
+  FROM merged
+  ORDER BY merged_start
+
+variants:
+  vehicle:
+    tag_name: "CrossConflict"
+    tag_prefix: "vehicle"
+    target_type: "vehicle"
+    output_tag_name: "agent_cross_conflict"
+    ProximityCTE: "VehicleProximity"
+    type_col: "vehicle"
+  vru:
+    tag_name: "VRUCrossConflict"
+    tag_prefix: "vru"
+    target_type: "vru"
+    output_tag_name: "vru_cross_conflict"
+    ProximityCTE: "VruProximity"
+    type_col: "vru"
