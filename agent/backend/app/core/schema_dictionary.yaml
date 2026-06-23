@@ -1197,7 +1197,7 @@ fields:
     related_tables:
     - ego
   ego.ego_dr_trajectory:
-    description: 自车 DR（Dead Reckoning）轨迹数据（JSON 字符串）
+    description: 自车 DR（Dead Reckoning）轨迹数据（JSON 字符串）。结构: {"x":[5],"y":[5],"theta":[5],"speed":[5],"exists":[5]}，5个时间步(0/0.2/0.4/0.6/0.8s)。漂移值计算: dx_08=json_extract(ego_dr_trajectory,'$.x[4]')-json_extract(ego_dr_trajectory,'$.x[0]'), dy_08同理用$.y[4]-$.y[0]。注意：不存在dr_trajectory_drift列，必须从JSON中提取计算
     type: TEXT
     related_tables:
     - ego
@@ -1286,7 +1286,7 @@ fields:
     related_tables:
     - dynamic_obj
   dynamic_obj.obs_dr_trajectory:
-    description: 障碍物 DR 轨迹数据（JSON 字符串）
+    description: 障碍物 DR 轨迹数据（JSON 字符串）。结构同ego_dr_trajectory: {"x":[5],"y":[5],"theta":[5],"speed":[5],"exists":[5]}。漂移值计算: obs_dx_08=json_extract(obs_dr_trajectory,'$.x[4]')-json_extract(obs_dr_trajectory,'$.x[0]'), obs_dy_08同理。注意：不存在obs_dr_trajectory_drift列
     type: TEXT
     related_tables:
     - dynamic_obj
