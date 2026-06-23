@@ -48,6 +48,9 @@ class AgentResult:
     error: Optional[str] = None
     scanned_dbs: int = 0
     matched_dbs: int = 0
+    # Round 3 self-correction tracking
+    correction_rounds: int = 0
+    max_corrections_exceeded: bool = False
 
 
 class AgentEngine:
@@ -202,6 +205,50 @@ class AgentEngine:
             if re.search(rf'\b{kw}\b', upper):
                 return f"禁止执行 {kw}"
         return None
+
+    def _dry_run(self, sql: str) -> tuple[bool, str]:
+        """在sample DB上用EXPLAIN试编译SQL，检测语法错误。
+        
+        Returns:
+            (ok, error_msg) — ok=True表示语法无误，error_msg为空；
+            ok=False表示有语法错误，error_msg包含SQLite报错信息。
+        """
+        if not hasattr(self, 'sample_db') or not self.sample_db:
+            return True, ""  # parquet模式或无sample_db，跳过
+        try:
+            conn = sqlite3.connect(f"file:{self.sample_db}?mode=ro", uri=True)
+            conn.execute(f"EXPLAIN {sql}")
+            conn.close()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+    def _build_correction_prompt(self, sql: str, error_msg: str, schema_text: str) -> list[dict]:
+        """构建Round 3纠错prompt：把报错信息+原SQL+schema一起喂给LLM"""
+        system = f"""你是自动驾驶场景挖掘的SQL生成专家。你生成的SQL存在语法错误，请根据报错信息修正。
+
+## SQLite语法规则提醒
+1. 所有时间字段单位相同（秒级Unix时间戳），直接比较，不要乘1e9
+2. range_tag.param 是JSON，用 json_extract(param, '$.key') 提取
+3. IN列表单元素不要加尾逗号：用 IN ('car') 而非 IN ('car',)
+4. CASE必须有END
+5. 只输出纯SQL，不要解释
+
+## 相关表结构
+{schema_text}"""
+        user = f"""## 语法错误信息
+{error_msg}
+
+## 原始SQL
+```sql
+{sql}
+```
+
+请修正SQL（只输出修正后的纯SQL）："""
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
 
     def _inject_limit(self, sql: str, limit: int) -> str:
         """Inject LIMIT if not present. Replace if present.
@@ -630,6 +677,8 @@ class AgentEngine:
                 sql = None
 
         # ── Fallback: Round 2 LLM 生成 ──
+        # 保存schema_text供Round 3纠错使用
+        schema_text_for_correction = None
         if sql is None:
             # 代码层: 确定需要哪些表的schema
             involved_tables = {"range_tag"}
@@ -651,6 +700,7 @@ class AgentEngine:
                 self.schema,
                 only_tables=involved_tables,
             )
+            schema_text_for_correction = schema_text
 
             r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
             raw_sql = await self.llm.chat(
@@ -669,6 +719,43 @@ class AgentEngine:
                 explanation="SQL 校验失败",
                 error=validation_error,
             )
+
+        # ── EXPLAIN 试编译 + Round 3 纠错循环 ──
+        max_corrections = 3
+        correction_rounds = 0
+        sql_source = "recipe" if recipe_name and recipe_variant else "llm"
+        for attempt in range(max_corrections + 1):  # 0,1,2,3 → 最多纠3次
+            ok, err_msg = self._dry_run(sql)
+            if ok:
+                logger.info("Dry-run passed (attempt %d, source=%s)", attempt, sql_source)
+                break
+
+            correction_rounds += 1
+            logger.warning("Dry-run FAILED (attempt %d/%d, source=%s): %s | SQL: %s",
+                           attempt + 1, max_corrections, sql_source, err_msg, sql[:200])
+
+            if correction_rounds >= max_corrections:
+                logger.error("Max corrections (%d) exceeded, returning failed SQL", max_corrections)
+                return AgentResult(
+                    sql=sql,
+                    explanation=f"SQL语法错误，经{max_corrections}次LLM纠错仍未修复: {err_msg}",
+                    error=err_msg,
+                    correction_rounds=correction_rounds,
+                    max_corrections_exceeded=True,
+                )
+
+            # Round 3: 把报错信息回传LLM纠错
+            if schema_text_for_correction is None:
+                schema_text_for_correction = format_schema_for_prompt(self.schema)
+
+            correction_messages = self._build_correction_prompt(sql, err_msg, schema_text_for_correction)
+            raw_sql = await self.llm.chat(
+                correction_messages[0]["content"],
+                correction_messages[1]["content"],
+                temperature=0.0,
+            )
+            sql = self._clean_sql(raw_sql)
+            logger.info("Round 3 correction #%d SQL: %s", correction_rounds, sql[:200])
 
         if self.query_mode == "parquet":
             return await self._query_parquet(sql, result_limit=result_limit)
