@@ -54,6 +54,9 @@ class AgentResult:
 
 
 class AgentEngine:
+    # 可通过环境变量 MAX_CORRECTIONS 配置，默认 3
+    MAX_CORRECTIONS = int(os.environ.get("MAX_CORRECTIONS", "3"))
+
     def __init__(self, db_path: str = "", query_mode: str = ""):
         self.query_mode = query_mode or os.environ.get("QUERY_MODE", "sqlite")
         self.db_path = db_path
@@ -628,7 +631,7 @@ class AgentEngine:
             )
 
         # ── EXPLAIN 试编译 + 纠错循环 (fallback流程) ──
-        max_corrections = 3
+        max_corrections = self.MAX_CORRECTIONS
         correction_rounds = 0
         schema_text_for_correction = schema_text
         for attempt in range(max_corrections + 1):
@@ -753,41 +756,58 @@ class AgentEngine:
             )
 
         # ── EXPLAIN 试编译 + Round 3 纠错循环 ──
-        max_corrections = 3
+        max_corrections = self.MAX_CORRECTIONS
         correction_rounds = 0
         sql_source = "recipe" if recipe_name and recipe_variant else "llm"
-        for attempt in range(max_corrections + 1):  # 0,1,2,3 → 最多纠3次
+
+        # Recipe SQL 语法错 = 模板 bug，不走 LLM 纠错，直接报错给开发者
+        if sql_source == "recipe":
             ok, err_msg = self._dry_run(sql)
-            if ok:
-                logger.info("Dry-run passed (attempt %d, source=%s)", attempt, sql_source)
-                break
-
-            correction_rounds += 1
-            logger.warning("Dry-run FAILED (attempt %d/%d, source=%s): %s | SQL: %s",
-                           attempt + 1, max_corrections, sql_source, err_msg, sql[:200])
-
-            if correction_rounds >= max_corrections:
-                logger.error("Max corrections (%d) exceeded, returning failed SQL", max_corrections)
+            if not ok:
+                logger.error("Recipe SQL dry-run FAILED (recipe=%s variant=%s): %s",
+                             recipe_name, recipe_variant, err_msg)
                 return AgentResult(
                     sql=sql,
-                    explanation=f"SQL语法错误，经{max_corrections}次LLM纠错仍未修复: {err_msg}",
+                    explanation=f"Recipe模板语法错误(recipe={recipe_name}, variant={recipe_variant})，需开发者修复: {err_msg}",
                     error=err_msg,
-                    correction_rounds=correction_rounds,
-                    max_corrections_exceeded=True,
+                    correction_rounds=0,
+                    max_corrections_exceeded=False,
                 )
+            logger.info("Dry-run passed (source=recipe)")
+        else:
+            # LLM SQL：允许纠错循环
+            for attempt in range(max_corrections + 1):
+                ok, err_msg = self._dry_run(sql)
+                if ok:
+                    logger.info("Dry-run passed (attempt %d, source=llm)", attempt)
+                    break
 
-            # Round 3: 把报错信息回传LLM纠错
-            if schema_text_for_correction is None:
-                schema_text_for_correction = format_schema_for_prompt(self.schema)
+                correction_rounds += 1
+                logger.warning("Dry-run FAILED (attempt %d/%d, source=llm): %s | SQL: %s",
+                               attempt + 1, max_corrections, err_msg, sql[:200])
 
-            correction_messages = self._build_correction_prompt(sql, err_msg, schema_text_for_correction)
-            raw_sql = await self.llm.chat(
-                correction_messages[0]["content"],
-                correction_messages[1]["content"],
-                temperature=0.0,
-            )
-            sql = self._clean_sql(raw_sql)
-            logger.info("Round 3 correction #%d SQL: %s", correction_rounds, sql[:200])
+                if correction_rounds >= max_corrections:
+                    logger.error("Max corrections (%d) exceeded, returning failed SQL", max_corrections)
+                    return AgentResult(
+                        sql=sql,
+                        explanation=f"SQL语法错误，经{max_corrections}次LLM纠错仍未修复: {err_msg}",
+                        error=err_msg,
+                        correction_rounds=correction_rounds,
+                        max_corrections_exceeded=True,
+                    )
+
+                # Round 3: 把报错信息回传LLM纠错
+                if schema_text_for_correction is None:
+                    schema_text_for_correction = format_schema_for_prompt(self.schema)
+
+                correction_messages = self._build_correction_prompt(sql, err_msg, schema_text_for_correction)
+                raw_sql = await self.llm.chat(
+                    correction_messages[0]["content"],
+                    correction_messages[1]["content"],
+                    temperature=0.0,
+                )
+                sql = self._clean_sql(raw_sql)
+                logger.info("Round 3 correction #%d SQL: %s", correction_rounds, sql[:200])
 
         if self.query_mode == "parquet":
             return await self._query_parquet(sql, result_limit=result_limit)
