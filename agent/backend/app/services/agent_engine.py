@@ -27,9 +27,9 @@ FALLBACK_SYSTEM_PROMPT = """
 
 重要规则：
 1. 只使用 Schema 中存在的表和字段
-2. 时间字段：range_tag 表使用秒（start_ts/end_ts），ego/dynamic_obj 表使用纳秒（ts）
+2. 所有时间字段单位相同（秒级Unix时间戳），range_tag.start_ts/end_ts 和 ego.ts/dynamic_obj.ts/dynamic_lane.ts 直接比较，不做任何转换
 3. range_tag.param 是 JSON 字段，需要用 json_extract(param, '$.key') 提取
-4. 跨表查询时，用 ts（纳秒）或 ts_ms（毫秒）关联时间
+4. 跨表时间对齐：e.ts BETWEEN r.start_ts AND r.end_ts
 5. 输出必须是纯 SQL，不要包含 markdown 代码块标记，不要包含任何解释文字
 6. 如果用户问题无法回答，返回 "SELECT '无法回答' AS reason;"
 7. 优先使用 range_tag 表查找场景标签片段，因为它已经预计算了场景起止时间
@@ -161,8 +161,9 @@ class AgentEngine:
         if raw.lower().startswith("sql"):
             raw = raw[3:].strip()
 
-        # ── 硬修正：LLM偶尔仍输出时间戳转换（* 1e9 / * 1000 / * 1000000），实际无需转换 ──
-        raw = re.sub(r'\*\s*(?:1e9|1e6|1000000|1000)\b', '', raw)
+        # ── 硬修正：LLM偶尔仍输出时间戳转换（字段 * 1e9 / * 1000），实际无需转换 ──
+        # 只匹配 字段名/列引用 * 数值 的模式，避免误伤 WHERE speed > 1000 等合法SQL
+        raw = re.sub(r'(\w+)\s*\*\s*(?:1e9|1e6|1000000|1000)\b', r'\1', raw)
 
         # ── 提取完整SQL ──
         # 策略：去markdown标记后，如果文本以SELECT/WITH开头，直接返回全文（多行SQL含子查询）
@@ -200,12 +201,6 @@ class AgentEngine:
             # e.g. "speed_drop_total_kmh" should NOT match "DROP"
             if re.search(rf'\b{kw}\b', upper):
                 return f"禁止执行 {kw}"
-        # P0 增强：检查 SQL 中引用的表名是否存在于 schema
-        known_tables = {t.name for t in self.schema}
-        for word in re.findall(r'\b\w+\b', sql):
-            if word.lower() in known_tables or word in known_tables:
-                continue
-            # 检查 FROM/JOIN 后面的词是否是已知表
         return None
 
     def _inject_limit(self, sql: str, limit: int) -> str:
