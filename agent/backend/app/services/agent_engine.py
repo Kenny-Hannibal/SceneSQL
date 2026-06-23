@@ -627,6 +627,38 @@ class AgentEngine:
                 error=validation_error,
             )
 
+        # ── EXPLAIN 试编译 + 纠错循环 (fallback流程) ──
+        max_corrections = 3
+        correction_rounds = 0
+        schema_text_for_correction = schema_text
+        for attempt in range(max_corrections + 1):
+            ok, err_msg = self._dry_run(sql)
+            if ok:
+                logger.info("Dry-run passed (attempt %d, source=llm_fallback)", attempt)
+                break
+            correction_rounds += 1
+            logger.warning("Dry-run FAILED (attempt %d/%d, source=llm_fallback): %s | SQL: %s",
+                           attempt + 1, max_corrections, err_msg, sql[:200])
+            if correction_rounds >= max_corrections:
+                logger.error("Max corrections (%d) exceeded (fallback flow)", max_corrections)
+                return AgentResult(
+                    sql=sql,
+                    explanation=f"SQL语法错误，经{max_corrections}次LLM纠错仍未修复: {err_msg}",
+                    error=err_msg,
+                    correction_rounds=correction_rounds,
+                    max_corrections_exceeded=True,
+                )
+            if schema_text_for_correction is None:
+                schema_text_for_correction = format_schema_for_prompt(self.schema)
+            correction_messages = self._build_correction_prompt(sql, err_msg, schema_text_for_correction)
+            raw_sql = await self.llm.chat(
+                correction_messages[0]["content"],
+                correction_messages[1]["content"],
+                temperature=0.0,
+            )
+            sql = self._clean_sql(raw_sql)
+            logger.info("Fallback correction #%d SQL: %s", correction_rounds, sql[:200])
+
         if self.query_mode == "parquet":
             return await self._query_parquet(sql, result_limit=result_limit)
         elif self.is_dir:
