@@ -33,10 +33,10 @@ sql_template: |
   {cte_name} AS (
       SELECT
           u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name,
-          json_extract_string(u.param, '$.sub_tag') AS sub_tag,
+          json_extract(u.param, '$.sub_tag') AS sub_tag,
           CAST(json_extract(u.param, '$.total_duration') AS REAL) AS total_duration,
           CAST(json_extract(u.param, '$.distToDesttn') AS REAL) AS dist_to_dest,
-          CASE json_extract_string(u.param, '$.sub_tag')
+          CASE json_extract(u.param, '$.sub_tag')
               WHEN 'LeftLaneChange' THEN 'left'
               WHEN 'RightLaneChange' THEN 'right'
               ELSE 'unknown'

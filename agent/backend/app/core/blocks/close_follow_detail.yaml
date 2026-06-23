@@ -35,15 +35,15 @@ sql_template: |
   {cte_name} AS (
       SELECT
           u.start_ts, u.end_ts, u.duration, u.param, u.object_id, u.tag_name,
-          ROUND(CAST(json_extract(u.param, '$.minTTC') AS REAL), 4) AS min_ttc,
-          ROUND(CAST(json_extract(u.param, '$.minTHW') AS REAL), 4) AS min_thw,
-          ROUND(CAST(json_extract(u.param, '$.minDTC') AS REAL), 4) AS min_dtc,
-          ROUND(CAST(json_extract(u.param, '$.max_acc') AS REAL), 4) AS max_acc,
-          ROUND(CAST(json_extract(u.param, '$.duration') AS REAL), 2) AS follow_duration,
+          ROUND(json_extract(u.param, '$.minTTC'), 4) AS min_ttc,
+          ROUND(json_extract(u.param, '$.minTHW'), 4) AS min_thw,
+          ROUND(json_extract(u.param, '$.minDTC'), 4) AS min_dtc,
+          ROUND(json_extract(u.param, '$.max_acc'), 4) AS max_acc,
+          ROUND(json_extract(u.param, '$.duration'), 2) AS follow_duration,
           CASE
-              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 1.0 THEN 'critical'
-              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 2.0 THEN 'high'
-              WHEN CAST(json_extract(u.param, '$.minTTC') AS REAL) < 4.0 THEN 'medium'
+              WHEN json_extract(u.param, '$.minTTC') < 1.0 THEN 'critical'
+              WHEN json_extract(u.param, '$.minTTC') < 2.0 THEN 'high'
+              WHEN json_extract(u.param, '$.minTTC') < 4.0 THEN 'medium'
               ELSE 'low'
           END AS severity
       FROM {upstream} u
