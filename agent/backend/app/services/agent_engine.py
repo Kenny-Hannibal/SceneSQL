@@ -541,8 +541,11 @@ class AgentEngine:
             matched_dbs=1 if good_rows else 0,
         )
 
-    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
-        # ── P0: 路由 + 分层注入 ──
+    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32, use_two_round: bool = True) -> AgentResult:
+        if use_two_round:
+            return await self._query_two_round(question, result_limit, db_limit, max_workers)
+
+        # ── 旧流程 fallback ──
         route = self.router.route(question)
 
         # Layer 1: 只输出路由命中表的 Schema
@@ -567,6 +570,79 @@ class AgentEngine:
 
         raw_sql = await self.llm.chat(system_prompt, user_prompt, temperature=0.1)
         sql = self._clean_sql(raw_sql)
+
+        validation_error = self._validate_sql(sql)
+        if validation_error:
+            return AgentResult(
+                sql=sql,
+                explanation="SQL 校验失败",
+                error=validation_error,
+            )
+
+        if self.query_mode == "parquet":
+            return await self._query_parquet(sql, result_limit=result_limit)
+        elif self.is_dir:
+            return await self._query_batch(sql, result_limit=result_limit, db_limit=db_limit, max_workers=max_workers)
+        else:
+            return await self._query_single(sql, result_limit=result_limit)
+
+
+    async def _query_two_round(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
+        """两轮NL2SQL：Round 1 概念识别 → Round 2 SQL生成"""
+        from agent.backend.app.core.concept_router import ConceptRouter
+
+        concept_router = ConceptRouter()
+
+        # ── Round 1: 概念识别 ──
+        r1_messages = concept_router.get_round1_messages(question)
+        # Round 1用JSON mode + 低温度
+        r1_raw = await self.llm.chat(
+            r1_messages[0]["content"],
+            r1_messages[1]["content"],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        try:
+            r1_result = concept_router.parse_round1_output(r1_raw)
+        except Exception as e:
+            logger.warning("Round 1 解析失败，fallback到旧流程: %s", e)
+            return await self.query(question, result_limit, db_limit, max_workers, use_two_round=False)
+
+        concepts = r1_result.get("concepts", [])
+        composition = r1_result.get("composition", "single_tag")
+        logger.info("Round 1: concepts=%s composition=%s", concepts, composition)
+
+        # ── 代码层: 确定需要哪些表的schema ──
+        involved_tables = {"range_tag"}
+        ego_fields = r1_result.get("ego_fields", [])
+        need_dynamic_obj = r1_result.get("need_dynamic_obj", False)
+        need_dynamic_lane = r1_result.get("need_dynamic_lane", False)
+        need_intersection_info = r1_result.get("need_intersection_info", False)
+
+        if ego_fields or composition in ("tag_join_ego", "cross_table", "ego_only"):
+            involved_tables.add("ego")
+        if need_dynamic_obj or composition in ("tag_join_dynamic_obj", "cross_table"):
+            involved_tables.add("dynamic_obj")
+        if need_dynamic_lane or composition == "tag_join_dynamic_lane":
+            involved_tables.add("dynamic_lane")
+        if need_intersection_info or composition == "tag_join_intersection_info":
+            involved_tables.add("intersection_info")
+
+        schema_text = format_schema_for_prompt(
+            self.schema,
+            only_tables=involved_tables,
+        )
+
+        # ── Round 2: SQL生成 ──
+        r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
+        raw_sql = await self.llm.chat(
+            r2_messages[0]["content"],
+            r2_messages[1]["content"],
+            temperature=0.0,
+        )
+        sql = self._clean_sql(raw_sql)
+
+        logger.info("Round 2 SQL: %s", sql[:200])
 
         validation_error = self._validate_sql(sql)
         if validation_error:

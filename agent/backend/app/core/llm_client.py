@@ -25,8 +25,9 @@ class LLMClient:
         user_prompt: str,
         temperature: float = 0.1,
         max_tokens: int = 4096,
+        response_format: dict | None = None,
     ) -> str:
-        resp = await self.client.chat.completions.create(
+        kwargs = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -35,6 +36,9 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if response_format:
+            kwargs["response_format"] = response_format
+        resp = await self.client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
 
     async def chat_stream(
