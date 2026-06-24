@@ -315,6 +315,31 @@ class AgentEngine:
             logger.warning("Parquet SQL execution failed: %s", exc)
             return [{"_error": str(exc)}]
 
+    # 单 DB 查询超时（秒）— 复杂 CTE SQL 在单个 DB 上可能跑几秒
+    DB_QUERY_TIMEOUT = int(os.environ.get("DB_QUERY_TIMEOUT", "5"))
+    # 整体查询超时（秒）— 避免全量扫描 11878 DB 无限运行
+    BATCH_TIMEOUT = int(os.environ.get("BATCH_TIMEOUT", "180"))
+
+    def _check_start_end_ts(self, sql: str) -> Optional[str]:
+        """校验 LLM 生成的 SQL 是否包含 start_ts 和 end_ts 输出列。
+        缺失则返回错误信息，用于触发 Round 3 纠错；完整则返回 None。"""
+        upper = sql.upper()
+        # 简单检查：SELECT 子句中是否包含 start_ts 和 end_ts
+        # 提取最外层 SELECT 的列列表（粗略匹配）
+        has_start = bool(re.search(r'\bstart_ts\b', sql, re.IGNORECASE))
+        has_end = bool(re.search(r'\bend_ts\b', sql, re.IGNORECASE))
+        if has_start and has_end:
+            return None
+        missing = []
+        if not has_start:
+            missing.append("start_ts")
+        if not has_end:
+            missing.append("end_ts")
+        return (f"SQL 缺少 {', '.join(missing)} 列。"
+                f"可视化播放依赖 start_ts 和 end_ts 锚定片段，"
+                f"必须在 SELECT 中包含 range_tag.start_ts 和 range_tag.end_ts。"
+                f"例如: SELECT bag_id, start_ts, end_ts, ... FROM range_tag ...")
+
     async def _query_batch(self, sql: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
         sql = self._inject_limit(sql, result_limit)
         try:
@@ -342,7 +367,8 @@ class AgentEngine:
             db_path = os.path.join(self.db_path, db_file)
             conn = None
             try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                # 单 DB 查询超时保护
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=self.DB_QUERY_TIMEOUT)
                 conn.row_factory = sqlite3.Row
                 # 只读连接不要设置 journal_mode=WAL，FUSE/只读文件系统会报
                 # "attempt to write a readonly database"
@@ -397,7 +423,9 @@ class AgentEngine:
             pending.discard(completed)
             return await completed
 
-        try:
+        async def _run_batch():
+            """内部查询循环 — 可被 asyncio.wait_for 超时取消"""
+            nonlocal all_rows, errors, columns, matched, stopped
             while True:
                 if not unlimited and len(all_rows) >= effective_limit:
                     stopped = True
@@ -417,6 +445,13 @@ class AgentEngine:
                             break
                 if rows and "_error" not in rows[0]:
                     matched += 1
+
+        try:
+            await asyncio.wait_for(_run_batch(), timeout=self.BATCH_TIMEOUT)
+        except asyncio.TimeoutError:
+            stopped = True
+            logger.warning("Batch query timed out after %ds (scanned %d/%d DBs, %d results)",
+                           self.BATCH_TIMEOUT, total - len(remaining), total, len(all_rows))
         finally:
             # 取消还未开始执行的任务
             for fut in pending:
@@ -433,6 +468,10 @@ class AgentEngine:
             explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（ LIMIT {result_limit} 提前终止）"
         else:
             explanation = f"共扫描 {total} 个 DB，{matched} 个有命中，返回 {len(all_rows)} 条记录（无结果数量限制）"
+        if stopped and len(all_rows) < result_limit:
+            # 超时退出且未达到 result_limit — 标注超时
+            scanned = total - len(remaining)
+            explanation += f"（⚠️ 整体查询超时 {self.BATCH_TIMEOUT}s，仅扫描 {scanned}/{total} DB）"
         error_msg = None
         if errors:
             error_msg = f"{len(errors)} 个 DB 执行失败（仅展示前 3 条）: " + "; ".join(errors[:3])
@@ -777,12 +816,20 @@ class AgentEngine:
                 )
             logger.info("Dry-run passed (source=recipe)")
         else:
-            # LLM SQL：允许纠错循环
+            # LLM SQL：允许纠错循环（包括 start_ts/end_ts 缺失校验）
             for attempt in range(max_corrections + 1):
                 ok, err_msg = self._dry_run(sql)
                 if ok:
-                    logger.info("Dry-run passed (attempt %d, source=llm)", attempt)
-                    break
+                    # ── start_ts/end_ts 校验 ──
+                    ts_err = self._check_start_end_ts(sql)
+                    if ts_err:
+                        ok = False
+                        err_msg = ts_err
+                        logger.warning("LLM SQL missing start_ts/end_ts (attempt %d): %s",
+                                       attempt, ts_err)
+                    else:
+                        logger.info("Dry-run passed (attempt %d, source=llm)", attempt)
+                        break
 
                 correction_rounds += 1
                 logger.warning("Dry-run FAILED (attempt %d/%d, source=llm): %s | SQL: %s",

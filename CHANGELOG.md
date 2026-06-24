@@ -2,6 +2,45 @@
 
 > 每次功能修改 commit 后，在此记录变更内容，方便回溯。
 
+## [2026-06-25] P0 超时保护 + start_ts/end_ts校验 + 6 Recipe端到端验证（v0.4-beta）
+
+**Commit**: (pending)
+
+### 新增
+
+1. **查询超时保护**（`agent_engine.py`）
+   - `DB_QUERY_TIMEOUT`（默认5s）— 单 DB SQLite 连接超时
+   - `BATCH_TIMEOUT`（默认180s）— 整体批量查询超时，超时后返回已收集的结果 + 提示信息
+   - 可通过环境变量 `DB_QUERY_TIMEOUT` / `BATCH_TIMEOUT` 配置
+
+2. **LLM SQL start_ts/end_ts 校验**（`agent_engine.py`）
+   - `_check_start_end_ts()` 方法：dry-run 通过后检查 SQL 是否包含 start_ts 和 end_ts
+   - 仅对 sql_source="llm" 的 SQL 校验（Recipe SQL 已全量验证过）
+   - 缺失时视为语法错误，触发 Round 3 LLM 纠错循环
+   - 纠错提示明确告诉 LLM 必须在 SELECT 中包含 start_ts 和 end_ts
+
+3. **6 个 Recipe 端到端验证通过**（含 start_ts/end_ts）
+   - `redlight_slowmoving`（红灯缓行）— 36 rows, start_ts✅ end_ts✅
+   - `reversing`（倒车避障）— 36 rows, start_ts✅ end_ts✅
+   - `ego_decel_during_lanechange`（变道减速）— 100 rows, start_ts✅ end_ts✅
+   - `ego_overtake_catin_truck`（超车后卡车切入）— 100 rows, start_ts✅ end_ts✅
+   - `truck_safe_cutin_ego`（卡车安全切入）— 100 rows, start_ts✅ end_ts✅
+   - `nudge_borrowlane`（借道避让）— 92 rows, start_ts✅ end_ts✅（修复截断后重测通过）
+
+### 修复
+
+1. **nudge_borrowlane Recipe SQL 截断** — 从 14769→15097 字符，重新提取完整 SQL
+
+### 涉及文件
+
+- `agent/backend/app/services/agent_engine.py` — 超时保护 + start_ts/end_ts 校验
+- `agent/backend/app/core/recipes/nudge_borrowlane.yaml` — SQL 截断修复
+- `test_reports/v0.3-beta-test-report.md` — 补充 start_ts/end_ts 验证结果
+
+### 测试验证
+
+- ⚠️ 待 DSW 部署后前端验证
+
 ## [2026-06-24] 3级Recipe匹配 + 产线SQL透传 + CONCEPT_RECIPE_MAP（v0.3-beta）
 
 **Commit**: cf5d707
