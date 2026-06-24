@@ -307,6 +307,25 @@ class ConceptRouter:
     def __init__(self):
         self.concept_groups, self.composition_rules = load_concept_groups()
         self.schema_dict_tags = load_schema_dict_tags()
+        self._recipe_descriptions = self._load_recipe_descriptions()
+
+    @staticmethod
+    def _load_recipe_descriptions() -> dict:
+        """加载所有 Recipe YAML 的 description，供 Phase 4 模糊匹配使用"""
+        descs = {}
+        recipe_dir = Path(__file__).parent / "recipes"
+        if not recipe_dir.exists():
+            return descs
+        for f in recipe_dir.glob("*.yaml"):
+            try:
+                data = yaml.safe_load(f.read_text())
+                name = data.get("name", f.stem)
+                desc = data.get("description", "")
+                if desc:
+                    descs[name] = desc
+            except Exception:
+                pass
+        return descs
 
     def get_round1_messages(self, nl: str) -> list[dict]:
         return build_round1_messages(nl, self.concept_groups)
@@ -353,8 +372,73 @@ class ConceptRouter:
                         result["recipe"] = recipe
                         result["recipe_variant"] = result.get("recipe_variant") or variant
                         break
+            # Phase 4: n-gram 余弦相似度兜底 — 语义模糊匹配
+            if not result.get("recipe") and nl:
+                best_key, best_score = self._fuzzy_match(nl)
+                if best_key and best_score >= 0.4:  # LCS 占比阈值
+                    recipe, variant = self.CONCEPT_RECIPE_MAP[best_key]
+                    result["recipe"] = recipe
+                    result["recipe_variant"] = result.get("recipe_variant") or variant
+                    logger.info(f"Phase4 fuzzy match: '{nl}' → '{best_key}' (score={best_score:.3f})")
 
         return result
+
+    # ── Phase 4: n-gram 余弦相似度模糊匹配 ──
+    @staticmethod
+    def _char_ngrams(text: str, n: int = 2) -> set:
+        """生成字符级 n-gram 集合"""
+        text = text.strip()
+        if len(text) < n:
+            return {text} if text else set()
+        return {text[i:i+n] for i in range(len(text) - n + 1)}
+
+    @classmethod
+    def _cosine_sim(cls, a: set, b: set) -> float:
+        """字符级重叠度：|交集|/min(|a|,|b|)，对短-长文本对更友好"""
+        if not a or not b:
+            return 0.0
+        inter = len(a & b)
+        return inter / min(len(a), len(b)) if min(len(a), len(b)) else 0.0
+
+    def _fuzzy_match(self, nl: str) -> tuple:
+        """Phase 4 兜底：从 NL 中提取关键词片段，与 CONCEPT_RECIPE_MAP key 做权重匹配。
+        策略：对 NL 做滑动窗口提取 2-4 字片段，与每个 key 计算最长公共子串占比。
+        """
+        # 从 NL 提取 2-4 字的关键片段（跳过停用词）
+        stop_chars = {'的', '了', '在', '是', '有', '和', '找', '出', '看', '一', '个', '些', '这', '那'}
+        nl_clean = ''.join(c for c in nl if c not in stop_chars)
+        
+        best_key = None
+        best_score = 0.0
+        for key, (recipe_name, _variant) in self.CONCEPT_RECIPE_MAP.items():
+            # 用 recipe_name (tag_name) 也做匹配源
+            source = key + " " + recipe_name
+            score = self._substring_overlap(nl_clean, source)
+            if score > best_score:
+                best_score = score
+                best_key = key
+        return best_key, best_score
+
+    @staticmethod
+    def _substring_overlap(s1: str, s2: str) -> float:
+        """最长公共子串占比：len(LCS) / min(len(s1), len(s2))
+        对中文短文本效果远好于 n-gram Jaccard。
+        """
+        if not s1 or not s2:
+            return 0.0
+        m, n = len(s1), len(s2)
+        # O(m*n) DP，但 m,n 都很短（<20），所以没问题
+        max_len = 0
+        prev = [0] * (n + 1)
+        for i in range(1, m + 1):
+            curr = [0] * (n + 1)
+            for j in range(1, n + 1):
+                if s1[i-1] == s2[j-1]:
+                    curr[j] = prev[j-1] + 1
+                    if curr[j] > max_len:
+                        max_len = curr[j]
+            prev = curr
+        return max_len / min(m, n)
 
     def build_round2_context(self, r1_result: dict, schema_text: str) -> str:
         return assemble_round2_context(
