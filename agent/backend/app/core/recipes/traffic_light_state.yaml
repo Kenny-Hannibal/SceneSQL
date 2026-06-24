@@ -1,0 +1,9 @@
+name: traffic_light_state
+version: '1.0'
+description: 红绿灯状态：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: Traffic_Light_State_Track
+    raw_sql: "-- 红绿灯状态 Track SQL脚本\n-- 功能：将 ego 表中的 traffic_light_status 按语义分类，并聚合连续的时间段\n\n-- 第一步：为每条记录添加红绿灯标签\nWITH traffic_light_labeled AS (\n    SELECT \n        ts,\n        ts_ms,\n        traffic_light_status,\n        CASE \n            WHEN traffic_light_status IS NULL OR traffic_light_status = -1 THEN 'traffic_light_unknown'\n            WHEN traffic_light_status = 1 THEN 'traffic_light_green'\n            WHEN traffic_light_status = 2 THEN 'traffic_light_yellow'\n            WHEN traffic_light_status = 3 THEN 'traffic_light_red'\n            ELSE 'traffic_light_unknown'\n        END as tag_name\n    FROM ego\n    ORDER BY ts\n),\n\n-- 第二步：使用窗口函数检测标签变化点\ntag_changes AS (\n    SELECT \n        ts,\n        ts_ms,\n        traffic_light_status,\n        tag_name,\n        -- 检查当前标签是否与前一帧不同\n        CASE \n            WHEN LAG(tag_name) OVER (ORDER BY ts) != tag_name \n                 OR LAG(tag_name) OVER (ORDER BY ts) IS NULL \n            THEN 1 \n            ELSE 0 \n      \
+      \  END as is_change\n    FROM traffic_light_labeled\n),\n\n-- 第三步：为每个连续的标签段分配组ID\ngrouped_tags AS (\n    SELECT \n        ts,\n        ts_ms,\n        traffic_light_status,\n        tag_name,\n        SUM(is_change) OVER (ORDER BY ts ROWS UNBOUNDED PRECEDING) as group_id\n    FROM tag_changes\n),\n\n-- 第四步：聚合每个组的起止时间\naggregated_segments AS (\n    SELECT \n        tag_name,\n        MIN(ts) as start_ts,\n        MAX(ts) as end_ts,\n        MIN(ts_ms) as start_ts_ms,\n        MAX(ts_ms) as end_ts_ms,\n        COUNT(*) as frame_count\n    FROM grouped_tags\n    GROUP BY tag_name, group_id\n    ORDER BY start_ts\n)\n\n-- 最终输出结果\nSELECT \n    tag_name,\n    start_ts,\n    end_ts,\n    start_ts_ms,\n    end_ts_ms,\n    frame_count\nFROM aggregated_segments;"

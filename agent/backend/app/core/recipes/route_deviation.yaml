@@ -1,0 +1,8 @@
+name: route_deviation
+version: '1.0'
+description: 偏航：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: route_deviation
+    raw_sql: "select \nstart_ts,\nend_ts,\n'route_deviation' as tag_name\nfrom range_tag\nwhere tag_name like 'route_deviation%';"

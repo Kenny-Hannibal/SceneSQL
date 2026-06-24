@@ -1,0 +1,8 @@
+name: intersection_turn_right
+version: '1.0'
+description: 右转：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: intersection_turn_right
+    raw_sql: "SELECT\n    'intersection_turn_right' AS tag_name,\n    start_ts,\n    end_ts,\n    end_ts - start_ts AS duration,\n    param\nFROM range_tag\nWHERE tag_name = 'Intersection'\n    AND json_extract(param, '$.sub_tag')='RightIntersection'\n    AND end_ts - start_ts > 5 \n    AND (\n          SELECT COUNT(*)\n          FROM ego e\n          WHERE e.ts BETWEEN start_ts AND end_ts\n            AND e.steering_angle < -1\n      ) > 2;"

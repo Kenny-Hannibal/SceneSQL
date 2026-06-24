@@ -1,0 +1,8 @@
+name: lane_change
+version: '1.0'
+description: 变道：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: lane_change
+    raw_sql: "SELECT *,\n  'lane_change' as tag_name\nFROM range_tag \nWHERE tag_name = 'LaneChange';"

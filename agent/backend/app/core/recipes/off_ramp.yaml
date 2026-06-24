@@ -1,0 +1,8 @@
+name: off_ramp
+version: '1.0'
+description: 下匝道：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: off_ramp
+    raw_sql: "select start_ts, end_ts,end_ts-start_ts duration,\n  'off_ramp' as tag_name\nfrom range_tag where tag_name='OffRamp' and duration>4;"

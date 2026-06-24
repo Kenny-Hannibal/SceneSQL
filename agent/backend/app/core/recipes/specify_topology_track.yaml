@@ -1,0 +1,8 @@
+name: specify_topology_track
+version: '1.0'
+description: 拓扑约束：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: specify_topology_track
+    raw_sql: "WITH numbered AS (\n    SELECT\n        ts,\n        specify_topology_tag,\n        ROW_NUMBER() OVER (ORDER BY ts) AS rn,\n        ROW_NUMBER() OVER (PARTITION BY specify_topology_tag ORDER BY ts) AS rn_tag\n    FROM ego\n    WHERE specify_topology_tag != 'none'\n)\nSELECT\n    specify_topology_tag AS tag_name,\n    MIN(ts) AS start_ts,\n    MAX(ts) AS end_ts\nFROM numbered\nGROUP BY (rn - rn_tag), specify_topology_tag\nORDER BY start_ts;"

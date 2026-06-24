@@ -1,0 +1,9 @@
+name: topology_constraint_track
+version: '1.0'
+description: 拓扑约束跟踪：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: Topology_Constraint_Track
+    raw_sql: "SELECT\n    start_ts,\n    end_ts,\n    param,\n    json_extract(param, '$.sub_tag') AS tag_name\nFROM range_tag\nWHERE\n    json_extract(param, '$.name') = 'TopologyConstraint'\n    AND json_extract(param, '$.sub_tag') IN (\n        'topology_unstructured_road',\n        'topology_split',\n        'topology_merge',\n        'topology_right_turn_lane',\n        'topology_left_turn_lane',\n        'topology_intersection',\n        'topology_intersection_cross_road',\n        'topology_intersection_small_cross_road',\n        'topology_intersection_t_junction',\n        'topology_intersection_small_t_junction',\n        'topology_intersection_y_junction',\n        'topology_intersection_multi_fork',\n        'topology_intersection_straight_intersection',\n        'topology_intersection_other',\n        'topology_interchange_roundabout',\n        'topology_tunnel_roundabout',\n        'topology_roundabout',\n        'topology_toll_station',\n        'topology_auxiliary',\n   \
+      \     'topology_ramp',\n        'topology_tunnel',\n        'topology_bridge',\n        'topology_interchange',\n        'topology_service_area',\n        'topology_main',\n        'invalid_topology_ego_static_map_link_id_invalid',\n        'invalid_topology_ego_static_map_link_id_not_match',\n        'invalid_topology_other_no_match',\n        'invalid_topology_no_map_schema'\n    )\nORDER BY start_ts;"

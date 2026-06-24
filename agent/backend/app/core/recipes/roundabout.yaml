@@ -1,0 +1,8 @@
+name: roundabout
+version: '1.0'
+description: 环岛：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: roundabout
+    raw_sql: "select start_ts -9 start_ts, end_ts+7 end_ts,\n  end_ts-start_ts duration,\n  'roundabout' as tag_name\nFROM range_tag \nWHERE tag_name like 'RoundAbout' \nAND end_ts-start_ts > 4;"

@@ -1,0 +1,8 @@
+name: split_merge_track
+version: '1.0'
+description: 合流分流：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: split_merge_track
+    raw_sql: "WITH numbered AS (\n    SELECT\n        ts,\n        split_merge_tag,\n        ROW_NUMBER() OVER (ORDER BY ts) AS rn,\n        ROW_NUMBER() OVER (PARTITION BY split_merge_tag ORDER BY ts) AS rn_tag\n    FROM ego\n    WHERE split_merge_tag != 'none'\n)\nSELECT\n    split_merge_tag AS tag_name,\n    MIN(ts) AS start_ts,\n    MAX(ts) AS end_ts\nFROM numbered\nGROUP BY (rn - rn_tag), split_merge_tag\nORDER BY start_ts;"

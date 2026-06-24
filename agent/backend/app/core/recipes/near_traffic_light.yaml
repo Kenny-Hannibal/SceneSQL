@@ -1,0 +1,9 @@
+name: near_traffic_light
+version: '1.0'
+description: 近红绿灯：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: near_traffic_light
+    raw_sql: "WITH straight_intersection AS (\n    SELECT\n        start_ts,\n        end_ts,\n        end_ts-start_ts duration,\n        (SELECT cumulative_distance FROM ego WHERE ts = start_ts) dis_s,\n        (SELECT cumulative_distance FROM ego WHERE ts = end_ts) dis_e\n    FROM range_tag \n    WHERE tag_name = 'Intersection'\n      AND end_ts - start_ts > 4  \n      and json_extract(param, '$.sub_tag') ='IsIntersection'   --导航\n      and (   -- 有红绿灯信息\n          SELECT sum(latest_traffic_light_status !='未知') \n          FROM ego e\n          WHERE e.ts BETWEEN start_ts-2 AND end_ts+2\n      ) >0\n      AND (\n          SELECT COUNT(*)\n          FROM ego e\n          WHERE e.ts BETWEEN start_ts AND end_ts\n            AND ABS(e.steering_angle) > 1\n      ) <= 1\n)\n\nSELECT\n    s1.start_ts AS start_ts,\n    s2.end_ts AS end_ts,\n    s2.end_ts-s1.start_ts as duration,\n    s2.dis_s - s1.dis_e distance\nFROM straight_intersection s1\nJOIN straight_intersection s2\nON \ns2.dis_s - s1.dis_e\
+      \ BETWEEN 5 AND 100;"

@@ -1,0 +1,8 @@
+name: navi_command_track
+version: '1.0'
+description: 导航指令：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: NaviCommand
+    raw_sql: "SELECT\n    start_ts,\n    end_ts,\n    param,\n    json_extract(param, '$.sub_tag') AS tag_name\nFROM range_tag\nWHERE \n    json_extract(param, '$.name') = 'NaviCommand' \n      AND json_extract(param, '$.sub_tag') IN ('invalid_navi_guide_line_infos_empty', 'invalid_navi_not_in_sd', 'navi_enter', 'navi_exit', 'navi_keep', 'navi_other', 'navi_turn_left', 'navi_turn_right', 'navi_u_turn');"
