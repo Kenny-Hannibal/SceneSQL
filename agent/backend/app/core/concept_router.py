@@ -252,8 +252,11 @@ class ConceptRouter:
     def get_round1_messages(self, nl: str) -> list[dict]:
         return build_round1_messages(nl, self.concept_groups)
 
-    def parse_round1_output(self, raw: str) -> dict:
-        """解析Round 1的JSON输出，自动补全recipe字段"""
+    def parse_round1_output(self, raw: str, nl: str = "") -> dict:
+        """解析Round 1的JSON输出，自动补全recipe字段。
+        
+        nl: 原始自然语言查询，用于当concepts不匹配时做NL原文匹配。
+        """
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
@@ -266,12 +269,31 @@ class ConceptRouter:
 
         # ── 代码层 recipe 自动匹配：如果LLM未返回recipe但concept匹配 ──
         if not result.get("recipe"):
-            for concept in result.get("concepts", []):
+            concepts = result.get("concepts", [])
+            # Phase 1: exact match
+            for concept in concepts:
                 if concept in self.CONCEPT_RECIPE_MAP:
                     recipe, variant = self.CONCEPT_RECIPE_MAP[concept]
                     result["recipe"] = recipe
                     result["recipe_variant"] = result.get("recipe_variant") or variant
-                    break  # 取第一个匹配
+                    break
+            # Phase 2: substring match — if concept contains a map key
+            if not result.get("recipe"):
+                for concept in concepts:
+                    for key, (recipe, variant) in self.CONCEPT_RECIPE_MAP.items():
+                        if key in concept or concept in key:
+                            result["recipe"] = recipe
+                            result["recipe_variant"] = result.get("recipe_variant") or variant
+                            break
+                    if result.get("recipe"):
+                        break
+            # Phase 3: NL原文匹配 — 直接从用户输入中检测关键词
+            if not result.get("recipe") and nl:
+                for key, (recipe, variant) in self.CONCEPT_RECIPE_MAP.items():
+                    if key in nl:
+                        result["recipe"] = recipe
+                        result["recipe_variant"] = result.get("recipe_variant") or variant
+                        break
 
         return result
 

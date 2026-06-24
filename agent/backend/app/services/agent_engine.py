@@ -687,7 +687,7 @@ class AgentEngine:
             response_format={"type": "json_object"},
         )
         try:
-            r1_result = concept_router.parse_round1_output(r1_raw)
+            r1_result = concept_router.parse_round1_output(r1_raw, question)
         except Exception as e:
             logger.warning("Round 1 解析失败，fallback到旧流程: %s", e)
             return await self.query(question, result_limit, db_limit, max_workers, use_two_round=False)
