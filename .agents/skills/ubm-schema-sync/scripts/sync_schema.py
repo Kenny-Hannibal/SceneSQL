@@ -220,18 +220,23 @@ def analyze_impact(commits: list[dict]) -> dict:
         "other": [],
     }
 
+    # 路径前缀：git diff --name-only 返回的路径从仓库 toplevel 开始，
+    # 实际路径格式为 "UBM_mining/ubm_data_mining/L2_Pred/..." 或 "L2_Pred/..."（旧版）
+    # 统一用 basename 或 endswith 判断，兼容两种路径格式
+    KEY_FILES = {
+        "to_sqlite_db.py": "sqlite_writer_changed",
+        "tokenizer_processor_new.py": "tokenizer_processor_changed",
+        "tag_map.py": "tag_map_changed",
+        "em_behavior_tag_parser.py": "behavior_tag_parser_changed",
+    }
+
     for commit in commits:
         for f in commit["files"]:
             basename = os.path.basename(f)
-            if f == "L2_Pred/downstream/ubm/to_sqlite_db.py":
-                impact["sqlite_writer_changed"] = True
-            elif f == "L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py":
-                impact["tokenizer_processor_changed"] = True
-            elif f == "gsbag_parser/tag_map.py":
-                impact["tag_map_changed"] = True
-            elif f == "gsbag_parser/topic_parser/em_behavior_tag_parser.py":
-                impact["behavior_tag_parser_changed"] = True
-            elif f.startswith("user_workspace/"):
+            # 用 basename 匹配关键文件（兼容有无 UBM_mining/ubm_data_mining/ 前缀）
+            if basename in KEY_FILES:
+                impact[KEY_FILES[basename]] = True
+            elif f.endswith("/user_workspace/") or "/user_workspace/" in f:
                 impact["user_workspace_changed"] = True
                 if basename.startswith("op_") and basename.endswith(".py"):
                     impact["modified_operators"].append(basename)
