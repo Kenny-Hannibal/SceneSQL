@@ -9,7 +9,7 @@ source_files:
 git_version:
   data_mining_repo: fe3781f8d19551a9678a96bd2772ee222a63392b
   branch: data_mining/master
-  synced_at: '2026-06-30T13:59:31.774241+08:00'
+  synced_at: '2026-06-30T16:23:24.235398+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
 tables:
   range_tag:
@@ -39,13 +39,17 @@ tables:
         - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
         - AVOIDANCE_LANEYIELDCARORTRUCK
         - AVOIDANCE_LANEYIELDCONE
+        - AVOIDANCE_LANEYIELDCRUB
         - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
         - AVOIDANCE_LANEYIELDVRU
         - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
         - AbnormalLaneChange
         - AbnormalRightLaneChangeToRightestStop
+        - AbnormalRightLaneChangeToRightestStopV1
         - ActiveWiperState
         - AvoidanceBorrowLane
+        - Avoidance_InLane
+        - Avoidance_InLane_VLM
         - BinCounter
         - CRUISE_CARORTRUCKCROSS
         - CRUISE_CARORTRUCKCUTIN
@@ -70,13 +74,16 @@ tables:
         - CRUISE_VRUCUTOUT
         - CloseFollow
         - CongestedFollow
+        - CrawlingFollow
         - CrossConflict
         - CrossStopLineOnYellowLight
         - CrossVRU
+        - CrossVRUV1
         - CrossVehicle
         - Cutin
         - GreenLightNotProceeding
         - HighAccPedal
+        - HighSpeed
         - HighSteeringWheelTorque
         - INTERSECTION_LEFTTURN
         - INTERSECTION_RIGHTTURN
@@ -106,16 +113,30 @@ tables:
         - LANECHANGE_OVERTAKERIGHTCARORTRUCK
         - LaneChange
         - LaneKeep
+        - LongitudinalAcceleration
+        - LongitudinalDeceleration
+        - LowSpeed
+        - LowSpeedOvertake
         - LowTTC
+        - LowerSpeed
+        - MediumLowSpeed
+        - MediumSpeed
+        - NavLaneChangeLate
         - NoSpeedIncrease
         - NotCenter
         - ObstacleAvoidance
         - ObstacleCollision
         - ObstacleNearMiss
+        - OffRamp
         - OnRamp
+        - OnRightestLane
         - OppositeLaneDriving
+        - OppositeLaneDrivingV1
+        - OppositeLaneDrivingV2
         - OtherRamp
         - OverSpeedLimit
+        - RoadConstruction
+        - Roundabout
         - RunFullYellowLight
         - RunRedLight
         - RunYellowLight
@@ -130,8 +151,10 @@ tables:
         - STOPANDGO_STOP
         - STOPANDGO_STOPBEHINDOBSTACLE
         - Slope
+        - SlowFrontLaneChange
         - SolidLaneChange
         - SpeedIncreaseStats
+        - Static
         - SteeringSmallSwing
         - SteeringWheelSlam
         - StraightDriving
@@ -140,6 +163,8 @@ tables:
         - TrafficLightAbnormal
         - Turning
         - VRUCrossConflict
+        - WrongWay_Deviation
+        - WrongwayNavi
         - YieldToPedestrian
         - accelerating
         - creeping
@@ -174,6 +199,7 @@ tables:
         - steering_right_120_185
         - steering_right_15_60
         - steering_right_60_120
+        - steering_right_above_185
         - steering_slightly
         - topology_auxiliary
         - topology_bridge
@@ -367,6 +393,32 @@ tables:
           topology_tunnel: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
           topology_tunnel_roundabout: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
           topology_unstructured_road: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          AVOIDANCE_LANEYIELDCRUB: 车端
+          AbnormalRightLaneChangeToRightestStopV1: 算子(待确认路径)
+          Avoidance_InLane: 算子(待确认路径)
+          Avoidance_InLane_VLM: 算子(待确认路径)
+          CrawlingFollow: 算子(待确认路径)
+          CrossVRUV1: 算子(待确认路径)
+          HighSpeed: 算子(待确认路径)
+          LongitudinalAcceleration: 算子(待确认路径)
+          LongitudinalDeceleration: 算子(待确认路径)
+          LowSpeed: 算子(待确认路径)
+          LowSpeedOvertake: 算子(待确认路径)
+          LowerSpeed: 算子(待确认路径)
+          MediumLowSpeed: 算子(待确认路径)
+          MediumSpeed: 算子(待确认路径)
+          NavLaneChangeLate: 算子(待确认路径)
+          OffRamp: 算子(待确认路径)
+          OnRightestLane: 算子(待确认路径)
+          OppositeLaneDrivingV1: 算子(待确认路径)
+          OppositeLaneDrivingV2: 算子(待确认路径)
+          RoadConstruction: 算子(待确认路径)
+          Roundabout: 算子(待确认路径)
+          SlowFrontLaneChange: 算子(待确认路径)
+          Static: 算子(待确认路径)
+          WrongWay_Deviation: 算子(待确认路径)
+          WrongwayNavi: 算子(待确认路径)
+          steering_right_above_185: 算子(待确认路径)
   dynamic_obj:
     description: 动态障碍物表——每个时间步的动态物体位置/速度/类型信息
     columns:

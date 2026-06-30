@@ -31,13 +31,17 @@ database_schema:
       - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
       - AVOIDANCE_LANEYIELDCARORTRUCK
       - AVOIDANCE_LANEYIELDCONE
+      - AVOIDANCE_LANEYIELDCRUB
       - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
       - AVOIDANCE_LANEYIELDVRU
       - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
       - AbnormalLaneChange
       - AbnormalRightLaneChangeToRightestStop
+      - AbnormalRightLaneChangeToRightestStopV1
       - ActiveWiperState
       - AvoidanceBorrowLane
+      - Avoidance_InLane
+      - Avoidance_InLane_VLM
       - BinCounter
       - CRUISE_CARORTRUCKCROSS
       - CRUISE_CARORTRUCKCUTIN
@@ -62,13 +66,16 @@ database_schema:
       - CRUISE_VRUCUTOUT
       - CloseFollow
       - CongestedFollow
+      - CrawlingFollow
       - CrossConflict
       - CrossStopLineOnYellowLight
       - CrossVRU
+      - CrossVRUV1
       - CrossVehicle
       - Cutin
       - GreenLightNotProceeding
       - HighAccPedal
+      - HighSpeed
       - HighSteeringWheelTorque
       - INTERSECTION_LEFTTURN
       - INTERSECTION_RIGHTTURN
@@ -98,16 +105,30 @@ database_schema:
       - LANECHANGE_OVERTAKERIGHTCARORTRUCK
       - LaneChange
       - LaneKeep
+      - LongitudinalAcceleration
+      - LongitudinalDeceleration
+      - LowSpeed
+      - LowSpeedOvertake
       - LowTTC
+      - LowerSpeed
+      - MediumLowSpeed
+      - MediumSpeed
+      - NavLaneChangeLate
       - NoSpeedIncrease
       - NotCenter
       - ObstacleAvoidance
       - ObstacleCollision
       - ObstacleNearMiss
+      - OffRamp
       - OnRamp
+      - OnRightestLane
       - OppositeLaneDriving
+      - OppositeLaneDrivingV1
+      - OppositeLaneDrivingV2
       - OtherRamp
       - OverSpeedLimit
+      - RoadConstruction
+      - Roundabout
       - RunFullYellowLight
       - RunRedLight
       - RunYellowLight
@@ -122,8 +143,10 @@ database_schema:
       - STOPANDGO_STOP
       - STOPANDGO_STOPBEHINDOBSTACLE
       - Slope
+      - SlowFrontLaneChange
       - SolidLaneChange
       - SpeedIncreaseStats
+      - Static
       - SteeringSmallSwing
       - SteeringWheelSlam
       - StraightDriving
@@ -132,6 +155,8 @@ database_schema:
       - TrafficLightAbnormal
       - Turning
       - VRUCrossConflict
+      - WrongWay_Deviation
+      - WrongwayNavi
       - YieldToPedestrian
       - accelerating
       - creeping
@@ -166,6 +191,7 @@ database_schema:
       - steering_right_120_185
       - steering_right_15_60
       - steering_right_60_120
+      - steering_right_above_185
       - steering_slightly
       - topology_auxiliary
       - topology_bridge

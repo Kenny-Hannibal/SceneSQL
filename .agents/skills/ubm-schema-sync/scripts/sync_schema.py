@@ -486,6 +486,16 @@ def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
         "NTERSECTION_UTURNDASHEDLINE", # typo同上
     }
     exclude.update(_INVALID_VEH_TAGS)
+    # dynamic_obj.type 枚举值（来自 to_sqlite_db.py 的 _OBJ_TYPE_MAP）
+    # 这些是 dynamic_obj 表的 type 列，不是 range_tag.tag_name
+    _OBJ_TYPE_VALUES = {
+        "unknown", "car", "suv", "truck", "bus", "unknown_vehicle",
+        "small_animal", "large_animal", "motorcycle", "pedestrian",
+        "traffic_warning_object", "others",
+        # 以下值与 _OBJ_TYPE_MAP 的值不完全对应但也在同一来源
+        "animal", "cyclist", "motorcyclist", "stroller", "wheelchair",
+    }
+    exclude.update(_OBJ_TYPE_VALUES)
     label_ids -= exclude
     
     return sorted(label_ids)
@@ -624,21 +634,37 @@ def update_master_and_derive(repo_path: Path, new_hash: str, branch: str, new_la
         "note": "数据挖掘项目当前 commit hash，schema 以此版本为基准",
     }
     
-    # 如果有新提取的 label_id，更新 tag_enum
+    # 如果有新提取的 label_id，更新 range_tag.tag_name enum（v2.0结构）
     if new_label_ids is not None:
-        existing_enum = set(data.get("range_tag", {}).get("tag_enum", []))
+        # v2.0: enum在 tables.range_tag.enum_columns.tag_name.values
+        rt_table = data.get("tables", {}).get("range_tag", {})
+        rt_enum = rt_table.get("enum_columns", {}).get("tag_name", {})
+        existing_enum = set(rt_enum.get("values", []))
         new_set = set(new_label_ids)
         added = sorted(new_set - existing_enum)
         if added:
-            print(f"[INFO] 新增 tag_enum 条目: {added}")
-            data["range_tag"]["tag_enum"] = new_label_ids  # 用完整列表替换
-            # 同时为新增tag在tag_semantics中补占位
+            print(f"[INFO] 新增 range_tag.tag_name 枚举值: {added}")
+            # 更新 values 列表
+            rt_enum["values"] = sorted(new_set)
+            # 更新 source_map
+            source_map = rt_enum.setdefault("source_map", {})
+            # 车端标签全大写+下划线且在refDictEn列表中
+            _dm_path = Path(os.environ.get("DATA_MINING_PROJECT_PATH", ""))
+            _tag_map_path = _dm_path / "UBM_mining/ubm_data_mining/gsbag_parser/tag_map.py"
+            _vehicle_tags = _extract_refDictEn(_tag_map_path) if _tag_map_path.exists() else set()
             for tag in added:
-                if tag not in data.get("range_tag", {}).get("tag_semantics", {}):
-                    data.setdefault("range_tag", {}).setdefault("tag_semantics", {})[tag] = {
+                if tag in _vehicle_tags:
+                    source_map[tag] = "车端"
+                else:
+                    source_map[tag] = "算子(待确认路径)"
+            # 同时为新增tag在tag_semantics中补占位（兼容层）
+            tag_semantics = data.get("tag_semantics", {})
+            for tag in added:
+                if tag not in tag_semantics:
+                    tag_semantics[tag] = {
                         "description": f"TODO: 补充 {tag} 的语义描述",
                         "sub_tags": [],
-                        "source": "auto_detected",
+                        "source": "vehicle" if tag in _REFDICT_EN_CACHE else "auto_detected",
                         "operator": "unknown",
                         "limitations": [],
                         "related_tables": ["range_tag"],
@@ -714,7 +740,8 @@ def main():
         if master_path.exists():
             with master_path.open() as f:
                 master_data = yaml.safe_load(f)
-            existing_enum = set(master_data.get("range_tag", {}).get("tag_enum", []))
+            rt_enum = master_data.get("tables", {}).get("range_tag", {}).get("enum_columns", {}).get("tag_name", {})
+            existing_enum = set(rt_enum.get("values", []))
         new_tags = sorted(set(all_label_ids) - existing_enum)
         if new_tags:
             print(f"[WARN] git hash 未变，但发现新标签: {new_tags}")
@@ -748,16 +775,17 @@ def main():
     all_label_ids = extract_label_ids_from_operators(repo_path)
     print(f"[INFO] 从算子源码提取到 {len(all_label_ids)} 个 label_id")
 
-    # 与母表现有 tag_enum 对比
+    # 与母表现有 enum 对比（v2.0结构）
     master_path = Path(SCHEMA_DIR) / "schema_master_raw.yaml"
     with master_path.open() as f:
         master_data = yaml.safe_load(f)
-    existing_enum = set(master_data.get("range_tag", {}).get("tag_enum", []))
+    rt_enum = master_data.get("tables", {}).get("range_tag", {}).get("enum_columns", {}).get("tag_name", {})
+    existing_enum = set(rt_enum.get("values", []))
     new_tags = sorted(set(all_label_ids) - existing_enum)
     if new_tags:
         print(f"[WARN] 发现新标签（当前enum中不存在）: {new_tags}")
     else:
-        print(f"[OK] 所有提取到的 label_id 均已在 tag_enum 中")
+        print(f"[OK] 所有提取到的 label_id 均已在 range_tag.tag_name enum 中")
 
     # 询问是否更新
     if os.environ.get("AUTO_UPDATE_SCHEMA", "").lower() in ("1", "true", "yes"):
