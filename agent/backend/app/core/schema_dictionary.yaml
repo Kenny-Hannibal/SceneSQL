@@ -1013,3 +1013,99 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+  CrossConflict:
+    description: 'TODO: 补充 CrossConflict 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowSpeedOvertake:
+    description: 'TODO: 补充 LowSpeedOvertake 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  ObstacleAvoidance:
+    description: 'TODO: 补充 ObstacleAvoidance 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RunFullYellowLight:
+    description: 'TODO: 补充 RunFullYellowLight 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RunYellowLight:
+    description: 'TODO: 补充 RunYellowLight 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  SlowFrontLaneChange:
+    description: 'TODO: 补充 SlowFrontLaneChange 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  VRUCrossConflict:
+    description: 'TODO: 补充 VRUCrossConflict 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_curb:
+    description: 'TODO: 补充 route_deviation_curb 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_guide_line:
+    description: 'TODO: 补充 route_deviation_guide_line 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_newpath_need_action:
+    description: 'TODO: 补充 route_deviation_sd_newpath_need_action 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_newpath_noneed_action:
+    description: 'TODO: 补充 route_deviation_sd_newpath_noneed_action 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_yaw:
+    description: 'TODO: 补充 route_deviation_sd_yaw 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag

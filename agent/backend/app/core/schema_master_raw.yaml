@@ -1,7 +1,6 @@
 version: 2.0.0
-note: "本文件是 SceneSQL Schema 的唯一权威源（母表），包含：\n  - SQLite 数据库完整表结构（9张表）\n  - range_tag\
-  \ 标签枚举（tag_enum）\n  - 标签语义描述（tag_semantics）\n  - 注入源说明、实际/潜在标签列表、git_version\n\n\
-  schema_structure.yaml 和 schema_dictionary.yaml 由 derive_schemas.py 从本文件自动派生。\n"
+note: "本文件是 SceneSQL Schema 的唯一权威源（母表），包含：\n  - SQLite 数据库完整表结构（9张表）\n  - range_tag 标签枚举（tag_enum）\n  - 标签语义描述（tag_semantics）\n  - 注入源说明、实际/潜在标签列表、git_version\n\nschema_structure.yaml 和 schema_dictionary.yaml\
+  \ 由 derive_schemas.py 从本文件自动派生。\n"
 source_files:
   sqlite_writer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/downstream/ubm/to_sqlite_db.py
   tokenizer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py
@@ -529,17 +528,14 @@ range_tag:
   - id: cloud_operators_add_event
     description: tokenizer_processor_new.py 中注册的 cloud 端算子通过 add_event() 添加
     path: L2_Pred/rule_based_mining/semantic_mining/activity_new/
-    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list
-      → to_sqlite_db._inject_range_tag_to_virtual_table() → virtual_table → SQLite
+    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list → to_sqlite_db._inject_range_tag_to_virtual_table() → virtual_table → SQLite
 
       '
     note: 标签是否出现取决于算子是否被触发（场景匹配）
   - id: car_end_behavior_tags
     description: 车端 bag 文件中的行为标签
     parser: gsbag_parser/topic_parser/em_behavior_tag_parser.py
-    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经
-      Filter 合并后存入 label_info JSON。 在部分 pipeline 版本中，label_info 会被合并到 TokenizerResult，最终进入
-      SQLite。
+    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经 Filter 合并后存入 label_info JSON。 在部分 pipeline 版本中，label_info 会被合并到 TokenizerResult，最终进入 SQLite。
 
       '
     note: 车端标签命名规范与 cloud 端不同（如 CRUISE_STRAIGHT, INTERSECTION_RIGHTTURN）
@@ -942,17 +938,15 @@ range_tag:
       - INTERSECTION_UTURNLANE
   tag_enum:
   - AbnormalLaneChange
-  - AbnormalRightLaneChangeToRightestStopV3
-  - AbnormalRightLaneChangeToRightestStopV5
   - ActiveWiperState
   - AvoidanceBorrowLane
   - Avoidance_InLane
-  - BinCounter
   - CloseFollow
+  - CrawlingFollow
+  - CrossConflict
   - CrossStopLineOnYellowLight
   - CrossVRUV1
   - CrossVehicle
-  - CrawlingFollow
   - Cutin
   - GreenLightNotProceeding
   - HighSteeringWheelTorque
@@ -960,20 +954,18 @@ range_tag:
   - Jerk
   - LaneChange
   - LaneKeep
-  - LaneMerging
+  - LowSpeedOvertake
   - LowTTC
-  - NoSpeedIncrease
   - NotCenter
+  - ObstacleAvoidance
   - ObstacleCollision
   - ObstacleNearMiss
-  - OffRamp
-  - OnRamp
-  - OtherRamp
   - OverSpeedLimit
-  - RainLevel
-  - Roundabout
+  - RunFullYellowLight
   - RunRedLight
+  - RunYellowLight
   - Slope
+  - SlowFrontLaneChange
   - SolidLaneChange
   - SteeringSmallSwing
   - SteeringWheelSlam
@@ -981,49 +973,29 @@ range_tag:
   - TrafficIntersection
   - TrafficLightAbnormal
   - Turning
-  - YellowLightStop
-  - route_deviation
-  - stationary
+  - VRUCrossConflict
+  - accelerating
   - creeping
   - cruising
   - decelerating
-  - accelerating
   - hard_braking
+  - over_rain_level
   - reversing
-  - steering_slightly
+  - route_deviation_curb
+  - route_deviation_guide_line
+  - route_deviation_sd_newpath_need_action
+  - route_deviation_sd_newpath_noneed_action
+  - route_deviation_sd_yaw
+  - stationary
+  - steering_left_120_185
   - steering_left_15_60
   - steering_left_60_120
-  - steering_left_120_185
   - steering_left_above_185
+  - steering_right_120_185
   - steering_right_15_60
   - steering_right_60_120
-  - steering_right_120_185
   - steering_right_above_185
-  - navi_guide_line_infos_empty
-  - navi_not_in_sd
-  - navi_keep
-  - navi_enter
-  - navi_exit
-  - navi_other
-  - navi_turn_left
-  - navi_turn_right
-  - navi_u_turn
-  - CRUISE_CURVE
-  - CRUISE_FOLLOW
-  - CRUISE_STRAIGHT
-  - INTERSECTION_RIGHTTURN
-  - INTERSECTION_STRAIGHT
-  - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
-  - CongestedFollow
-  - CRUISE_CREEP
-  - CRUISE_RAMP
-  - CRUISE_SLOWFOLLOW
-  - CRUISE_SLOWMOVE
-  - INTERSECTION_LEFTTURN
-  - LANECHANGE_ABANDON
-  - over_rain_level
-  - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
-  - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+  - steering_slightly
   tag_semantics:
     AbnormalLaneChange:
       description: 异常变道行为
@@ -2030,9 +2002,104 @@ range_tag:
       - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
       related_tables:
       - range_tag
+    CrossConflict:
+      description: 'TODO: 补充 CrossConflict 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    LowSpeedOvertake:
+      description: 'TODO: 补充 LowSpeedOvertake 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    ObstacleAvoidance:
+      description: 'TODO: 补充 ObstacleAvoidance 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    RunFullYellowLight:
+      description: 'TODO: 补充 RunFullYellowLight 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    RunYellowLight:
+      description: 'TODO: 补充 RunYellowLight 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    SlowFrontLaneChange:
+      description: 'TODO: 补充 SlowFrontLaneChange 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    VRUCrossConflict:
+      description: 'TODO: 补充 VRUCrossConflict 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    route_deviation_curb:
+      description: 'TODO: 补充 route_deviation_curb 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    route_deviation_guide_line:
+      description: 'TODO: 补充 route_deviation_guide_line 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    route_deviation_sd_newpath_need_action:
+      description: 'TODO: 补充 route_deviation_sd_newpath_need_action 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    route_deviation_sd_newpath_noneed_action:
+      description: 'TODO: 补充 route_deviation_sd_newpath_noneed_action 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
+    route_deviation_sd_yaw:
+      description: 'TODO: 补充 route_deviation_sd_yaw 的语义描述'
+      sub_tags: []
+      source: auto_detected
+      operator: unknown
+      limitations: []
+      related_tables:
+      - range_tag
   notes:
-  - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*,
-    AVOIDANCE_*, INTERSECTION_*
+  - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*, AVOIDANCE_*, INTERSECTION_*
   - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
   - param 列为 JSON 字符串，可用 json_extract() 提取子标签（sub_tag）、障碍物 ID 等
 not_in_sqlite:
@@ -2093,7 +2160,7 @@ not_in_sqlite:
     - IntersectionCountOperator
     note: 这些算子的 add_event 不会被执行
 git_version:
-  data_mining_repo: 6db12fafcba9330fb4bb1ba615d9a8ae7cde9341
-  branch: origin/data_mining/master
-  synced_at: '2026-05-26T16:19:45+08:00'
+  data_mining_repo: fe3781f8d19551a9678a96bd2772ee222a63392b
+  branch: data_mining/master
+  synced_at: '2026-06-30T11:30:23.916498+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准

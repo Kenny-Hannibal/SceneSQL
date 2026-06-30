@@ -447,7 +447,15 @@ def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
                     label_ids.update(_extract_from_file(op_file))
     
     # 排除不可能出现在 range_tag 中的值
+    # 以及被 CASE WHEN THEN 重命名的原始 label_id（真实 tag_name 是重命名后的版本）
     exclude = {"EgoIntoIntersection", ""}
+    # Steering算子: 代码内部使用 steering_15_60 等，但 SQL CASE 重命名为 steering_left_15_60 等
+    # 这些原始值不会出现在 range_tag 的 tag_name 列中
+    _RENAMED_RAW_IDS = {
+        "steering_15_60", "steering_60_120", "steering_120_185", "steering_above_185",
+        "steering_m60_m15", "steering_m120_m60", "steering_m185_m120", "steering_below_m185",
+    }
+    exclude.update(_RENAMED_RAW_IDS)
     label_ids -= exclude
     
     return sorted(label_ids)

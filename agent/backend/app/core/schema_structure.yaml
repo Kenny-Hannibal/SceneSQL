@@ -356,17 +356,15 @@ database_schema:
     - tag_name
     enum:
     - AbnormalLaneChange
-    - AbnormalRightLaneChangeToRightestStopV3
-    - AbnormalRightLaneChangeToRightestStopV5
     - ActiveWiperState
     - AvoidanceBorrowLane
     - Avoidance_InLane
-    - BinCounter
     - CloseFollow
+    - CrawlingFollow
+    - CrossConflict
     - CrossStopLineOnYellowLight
     - CrossVRUV1
     - CrossVehicle
-    - CrawlingFollow
     - Cutin
     - GreenLightNotProceeding
     - HighSteeringWheelTorque
@@ -374,20 +372,18 @@ database_schema:
     - Jerk
     - LaneChange
     - LaneKeep
-    - LaneMerging
+    - LowSpeedOvertake
     - LowTTC
-    - NoSpeedIncrease
     - NotCenter
+    - ObstacleAvoidance
     - ObstacleCollision
     - ObstacleNearMiss
-    - OffRamp
-    - OnRamp
-    - OtherRamp
     - OverSpeedLimit
-    - RainLevel
-    - Roundabout
+    - RunFullYellowLight
     - RunRedLight
+    - RunYellowLight
     - Slope
+    - SlowFrontLaneChange
     - SolidLaneChange
     - SteeringSmallSwing
     - SteeringWheelSlam
@@ -395,49 +391,29 @@ database_schema:
     - TrafficIntersection
     - TrafficLightAbnormal
     - Turning
-    - YellowLightStop
-    - route_deviation
-    - stationary
+    - VRUCrossConflict
+    - accelerating
     - creeping
     - cruising
     - decelerating
-    - accelerating
     - hard_braking
+    - over_rain_level
     - reversing
-    - steering_slightly
+    - route_deviation_curb
+    - route_deviation_guide_line
+    - route_deviation_sd_newpath_need_action
+    - route_deviation_sd_newpath_noneed_action
+    - route_deviation_sd_yaw
+    - stationary
+    - steering_left_120_185
     - steering_left_15_60
     - steering_left_60_120
-    - steering_left_120_185
     - steering_left_above_185
+    - steering_right_120_185
     - steering_right_15_60
     - steering_right_60_120
-    - steering_right_120_185
     - steering_right_above_185
-    - navi_guide_line_infos_empty
-    - navi_not_in_sd
-    - navi_keep
-    - navi_enter
-    - navi_exit
-    - navi_other
-    - navi_turn_left
-    - navi_turn_right
-    - navi_u_turn
-    - CRUISE_CURVE
-    - CRUISE_FOLLOW
-    - CRUISE_STRAIGHT
-    - INTERSECTION_RIGHTTURN
-    - INTERSECTION_STRAIGHT
-    - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
-    - CongestedFollow
-    - CRUISE_CREEP
-    - CRUISE_RAMP
-    - CRUISE_SLOWFOLLOW
-    - CRUISE_SLOWMOVE
-    - INTERSECTION_LEFTTURN
-    - LANECHANGE_ABANDON
-    - over_rain_level
-    - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
-    - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+    - steering_slightly
     notes:
     - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*,
       AVOIDANCE_*, INTERSECTION_*
