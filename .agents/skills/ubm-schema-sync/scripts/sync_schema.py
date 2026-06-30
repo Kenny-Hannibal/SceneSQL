@@ -411,6 +411,150 @@ def sync_etl_core_tables() -> dict:
     return {"changed": True, "old": old_tables, "new": schema_tables, "added": added, "removed": removed}
 
 
+def extract_map_enums(repo_path: Path) -> dict:
+    """从 op_map_schema.py 提取 map 表的枚举值（link_type, link_class, link_attribute, link_turn_type,
+    lane_type, lane_turn_type, lane_trans_type）。
+    
+    返回格式:
+    {
+        "static_link": {
+            "link_type": ["未知", "主路", ...],
+            "link_turn_type": [...],
+            "link_class": [...],
+            "link_attribute": [...]
+        },
+        "static_lane": {
+            "lane_type": [...],
+            "lane_turn_type": [...],
+            "lane_trans_type": [...]
+        },
+        "dynamic_link": { ... },  # 同 static_link 的 link_type/link_attribute
+        "dynamic_lane": { ... }   # 同 static_lane 的 lane_* 枚举
+    }
+    """
+    base = repo_path
+    if not (base / "UBM_mining" / "ubm_data_mining").exists():
+        ubm = base
+    else:
+        ubm = base / "UBM_mining" / "ubm_data_mining"
+    
+    # 尝试多个路径查找 op_map_schema.py
+    candidates = [
+        ubm / "user_workspace" / "yangxin" / "op_map_schema.py",
+        ubm / "L2_Pred" / "downstream" / "ubm" / "op_map_schema.py",
+    ]
+    schema_file = None
+    for c in candidates:
+        if c.exists():
+            schema_file = c
+            break
+    
+    if schema_file is None:
+        print("[WARN] 未找到 op_map_schema.py，跳过 map 枚举提取")
+        return {}
+    
+    import re
+    content = schema_file.read_text(encoding="utf-8", errors="replace")
+    
+    # 提取函数中的映射字典值
+    # 格式：_get_xxx_description 函数中的 link_type_map = { 0: "未知", 1: "主路", ... }
+    # 我们提取所有中文枚举值
+    
+    def _extract_dict_values(func_name: str, dict_var_name: str) -> list[str]:
+        """从指定转换函数的特定字典变量中提取所有中文值。
+        
+        op_map_schema.py 中每个 _get_xxx_description 函数包含两个映射字典:
+        1. xxx_str_map = { "ENUM_NAME": "中文值", ... }  (字符串枚举→中文)
+        2. xxx_map = { 0: "中文值", 1: "中文值", ... }    (整数→中文)
+        
+        我们只提取 dict_var_name 对应的字典值（通常是整数映射的xxx_map）。
+        """
+        # 找到函数定义
+        func_pattern = rf'def {func_name}\('
+        func_start = re.search(func_pattern, content)
+        if not func_start:
+            return []
+        
+        # 找到函数体（从def到下一个同级别def或文件结尾）
+        func_start_pos = func_start.start()
+        # 找下一个同级别def（行首不留空格的def）
+        next_def = re.search(r'\ndef [a-zA-Z_]', content[func_start_pos + 10:])
+        func_end_pos = (func_start_pos + 10 + next_def.start()) if next_def else len(content)
+        func_body = content[func_start_pos:func_end_pos]
+        
+        # 在函数体内找到 dict_var_name = { ... } 字典
+        dict_pattern = rf'{dict_var_name}\s*=\s*\{{'
+        dict_match = re.search(dict_pattern, func_body)
+        if not dict_match:
+            return []
+        
+        # 从字典开始位置提取到匹配的 }
+        dict_start = dict_match.end()
+        brace_count = 1
+        pos = dict_start
+        while pos < len(func_body) and brace_count > 0:
+            if func_body[pos] == '{':
+                brace_count += 1
+            elif func_body[pos] == '}':
+                brace_count -= 1
+            pos += 1
+        
+        dict_text = func_body[dict_start:pos - 1]  # 不含外层{}
+        
+        # 提取冒号右侧的中文值
+        values = re.findall(r':\s*"([^"]+)"', dict_text)
+        
+        # 去重并保持顺序
+        seen = set()
+        result = []
+        for v in values:
+            # 只保留含中文的值（过滤英文枚举名如LINK_TYPE_MAIN）
+            if v and any('\u4e00' <= c <= '\u9fff' for c in v):
+                if v not in seen:
+                    seen.add(v)
+                    result.append(v)
+        return result
+    
+    # 各枚举对应的提取函数名和字典变量名
+    # op_map_schema.py 中整数映射字典的命名规则：去掉前缀的 xxx_map
+    func_map = {
+        "link_type": ("_get_link_type_description", "link_type_map"),
+        "link_turn_type": ("_get_link_turn_type_description", "link_turn_type_map"),
+        "link_class": ("_get_link_class_description", "link_class_map"),
+        "link_attribute": ("_get_link_attribute_description", "link_attribute_map"),
+        "lane_type": ("_get_lane_type_description", "lane_type_map"),
+        "lane_turn_type": ("_get_lane_turn_type_description", "turn_type_map"),
+        "lane_trans_type": ("_get_lane_trans_type_description", "trans_type_map"),
+    }
+    
+    enums = {}
+    for col_name, (func_name, dict_var) in func_map.items():
+        vals = _extract_dict_values(func_name, dict_var)
+        if vals:
+            enums[col_name] = vals
+    
+    # 组装成表级结构
+    result = {}
+    static_link_enums = {}
+    for k in ["link_type", "link_turn_type", "link_class", "link_attribute"]:
+        if k in enums:
+            static_link_enums[k] = enums[k]
+    if static_link_enums:
+        result["static_link"] = static_link_enums
+        result["dynamic_link"] = {k: enums[k] for k in ["link_type", "link_attribute"] if k in enums}
+    
+    static_lane_enums = {}
+    for k in ["lane_type", "lane_turn_type", "lane_trans_type"]:
+        if k in enums:
+            static_lane_enums[k] = enums[k]
+    if static_lane_enums:
+        result["static_lane"] = static_lane_enums
+        result["dynamic_lane"] = static_lane_enums  # lane枚举表间共享
+    
+    print(f"[INFO] 从 op_map_schema.py 提取到 map 枚举: { {k: {kk: len(vv) for kk, vv in v.items()} for k, v in result.items()} }")
+    return result
+
+
 def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
     """从算子源码中提取所有可能的 label_id 值。
     
@@ -670,6 +814,35 @@ def update_master_and_derive(repo_path: Path, new_hash: str, branch: str, new_la
                         "related_tables": ["range_tag"],
                     }
                     print(f"[WARN] tag_semantics 中缺少 {tag}，已补占位符")
+    
+    # 更新 map 表枚举（从 op_map_schema.py 提取）
+    _dm_path = Path(os.environ.get("DATA_MINING_PROJECT_PATH", ""))
+    map_enums = extract_map_enums(_dm_path) if _dm_path.exists() else {}
+    if map_enums:
+        tables = data.get("tables", {})
+        map_changed = False
+        for table_name, col_enums in map_enums.items():
+            tbl = tables.get(table_name, {})
+            enum_cols = tbl.setdefault("enum_columns", {})
+            for col_name, extracted_values in col_enums.items():
+                col_info = enum_cols.get(col_name, {})
+                old_values = col_info.get("values", [])
+                # 合并策略：提取值为基础，保留母表中已有的额外值（如来自str_map的值）
+                merged_set = list(extracted_values)  # 提取值保持顺序
+                added_from_master = [v for v in old_values if v not in set(extracted_values)]
+                if added_from_master:
+                    merged_set.extend(added_from_master)  # 追加母表独有的值
+                if set(merged_set) != set(old_values):
+                    col_info["values"] = merged_set
+                    enum_cols[col_name] = col_info
+                    new_in_extracted = sorted(set(extracted_values) - set(old_values))
+                    only_in_master = sorted(set(old_values) - set(extracted_values))
+                    print(f"[INFO] {table_name}.{col_name}: {len(old_values)}→{len(merged_set)} values"
+                          + (f", new from code:{new_in_extracted}" if new_in_extracted else "")
+                          + (f", kept from master:{only_in_master}" if only_in_master else ""))
+                    map_changed = True
+        if map_changed:
+            print(f"[OK] map 表枚举已从 op_map_schema.py 同步")
     
     with master_path.open("w") as f:
         yaml.dump(data, f, allow_unicode=True, sort_keys=False, width=200)
