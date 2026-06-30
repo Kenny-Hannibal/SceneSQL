@@ -1,98 +1,374 @@
 version: 2.0.0
-note: "本文件是 SceneSQL Schema 的唯一权威源（母表），包含：\n  - SQLite 数据库完整表结构（9张表）\n  - range_tag 标签枚举（tag_enum）\n  - 标签语义描述（tag_semantics）\n  - 注入源说明、实际/潜在标签列表、git_version\n\nschema_structure.yaml 和 schema_dictionary.yaml\
-  \ 由 derive_schemas.py 从本文件自动派生。\n"
+note: 'Schema母表v2.0: 按表分组织enum值。enum值挂到具体表的具体列上。'
 source_files:
   sqlite_writer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/downstream/ubm/to_sqlite_db.py
   tokenizer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py
   car_end_tag_parser: /root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/topic_parser/em_behavior_tag_parser.py
   car_end_tag_map: /root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/tag_map.py
   user_workspace: /root/data/data_mining/UBM_mining/ubm_data_mining/user_workspace/
-sqlite_database:
-  engine: SQLite
-  sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260522_T68_1131_97ba3f_sdpro_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
-  note: ONLY to_sqlite_db.py writes to SQLite. Downstream processors NEVER write back.
-  tables:
-  - name: dynamic_lane
+git_version:
+  data_mining_repo: fe3781f8d19551a9678a96bd2772ee222a63392b
+  branch: data_mining/master
+  synced_at: '2026-06-30T13:59:31.774241+08:00'
+  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
+tables:
+  range_tag:
+    description: 时间区间标签表——每个标签标记一个时间区间[start_ts, end_ts]内的场景/行为
     columns:
-    - name: ts
+    - name: start_ts
       type: BIGINT
       notnull: false
       pk: true
-    - name: lane_id
-      type: TEXT
-      notnull: false
-      pk: true
-    - name: ref_link_id
-      type: INTEGER
-      notnull: false
-      pk: false
-    - name: left_boundary_id
-      type: INTEGER
-      notnull: false
-      pk: false
-    - name: right_boundary_id
-      type: INTEGER
-      notnull: false
-      pk: false
-    - name: lane_type
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: lane_turn_type
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: lane_trans_type
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: predecessors
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: successors
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: lane_relate_obs_ids
-      type: TEXT
-      notnull: false
-      pk: false
-  - name: dynamic_link
-    columns:
-    - name: ts
+    - name: end_ts
       type: BIGINT
       notnull: false
       pk: true
-    - name: link_id
+    - name: tag_name
       type: TEXT
       notnull: false
       pk: true
-    - name: link_type
+    - name: param
       type: TEXT
       notnull: false
       pk: false
-    - name: link_attribute
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: link_exp_speed_limit
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: link_predecessor
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: link_successor
-      type: TEXT
-      notnull: false
-      pk: false
-    - name: include_lane_ids
-      type: TEXT
-      notnull: false
-      pk: false
-  - name: dynamic_obj
+    enum_columns:
+      tag_name:
+        values:
+        - AVOIDANCE_INLANE
+        - AVOIDANCE_INSAMELANE
+        - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
+        - AVOIDANCE_LANEYIELDCARORTRUCK
+        - AVOIDANCE_LANEYIELDCONE
+        - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
+        - AVOIDANCE_LANEYIELDVRU
+        - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+        - AbnormalLaneChange
+        - AbnormalRightLaneChangeToRightestStop
+        - ActiveWiperState
+        - AvoidanceBorrowLane
+        - BinCounter
+        - CRUISE_CARORTRUCKCROSS
+        - CRUISE_CARORTRUCKCUTIN
+        - CRUISE_CARORTRUCKCUTOUT
+        - CRUISE_CLOSECUTIN
+        - CRUISE_CONGESTION
+        - CRUISE_CREEP
+        - CRUISE_CURVE
+        - CRUISE_CUTIN
+        - CRUISE_CUTOUT
+        - CRUISE_DISTANTFOLLOW
+        - CRUISE_FOLLOW
+        - CRUISE_FREESPACEAVOIDANCE
+        - CRUISE_FREESPACEYIELD
+        - CRUISE_LEADCUTOUTLEADINGSTOPPED
+        - CRUISE_RAMP
+        - CRUISE_SLOWFOLLOW
+        - CRUISE_SLOWMOVE
+        - CRUISE_STRAIGHT
+        - CRUISE_VRUCROSS
+        - CRUISE_VRUCUTIN
+        - CRUISE_VRUCUTOUT
+        - CloseFollow
+        - CongestedFollow
+        - CrossConflict
+        - CrossStopLineOnYellowLight
+        - CrossVRU
+        - CrossVehicle
+        - Cutin
+        - GreenLightNotProceeding
+        - HighAccPedal
+        - HighSteeringWheelTorque
+        - INTERSECTION_LEFTTURN
+        - INTERSECTION_RIGHTTURN
+        - INTERSECTION_ROUNDABOUT
+        - INTERSECTION_ROUNDABOUTUNSIGNAL
+        - INTERSECTION_STRAIGHT
+        - INTERSECTION_UTURNLANE
+        - InteractivePedestrian
+        - InteractiveVRU
+        - InteractiveVehicle
+        - Intersection
+        - Jerk
+        - LANECHANGE_ABANDON
+        - LANECHANGE_AVOIDANCE
+        - LANECHANGE_DIVERGELANECHANGERIGHTTURN
+        - LANECHANGE_FREEWAY
+        - LANECHANGE_MERGELANECHANGEDROP
+        - LANECHANGE_MERGELANECHANGEMAINROAD
+        - LANECHANGE_MERGELANECHANGEZIPPER
+        - LANECHANGE_NAVIGATION
+        - LANECHANGE_NAVLANECHANGECONGESTION
+        - LANECHANGE_NAVLANECHANGERAMP
+        - LANECHANGE_OVERTAKE
+        - LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST
+        - LANECHANGE_OVERTAKELEFTCARORTRUCK
+        - LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST
+        - LANECHANGE_OVERTAKERIGHTCARORTRUCK
+        - LaneChange
+        - LaneKeep
+        - LowTTC
+        - NoSpeedIncrease
+        - NotCenter
+        - ObstacleAvoidance
+        - ObstacleCollision
+        - ObstacleNearMiss
+        - OnRamp
+        - OppositeLaneDriving
+        - OtherRamp
+        - OverSpeedLimit
+        - RunFullYellowLight
+        - RunRedLight
+        - RunYellowLight
+        - STOPANDGO_BRAKESTOPANTICRASHBUCKET
+        - STOPANDGO_BRAKESTOPCONE
+        - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+        - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+        - STOPANDGO_STARTCONGESTION
+        - STOPANDGO_STARTFOLLOWOBSTACLE
+        - STOPANDGO_STARTNONFOLLOWOBSTACLE
+        - STOPANDGO_STARTRAMP
+        - STOPANDGO_STOP
+        - STOPANDGO_STOPBEHINDOBSTACLE
+        - Slope
+        - SolidLaneChange
+        - SpeedIncreaseStats
+        - SteeringSmallSwing
+        - SteeringWheelSlam
+        - StraightDriving
+        - ToRoadsideStop
+        - TrafficIntersection
+        - TrafficLightAbnormal
+        - Turning
+        - VRUCrossConflict
+        - YieldToPedestrian
+        - accelerating
+        - creeping
+        - cruising
+        - decelerating
+        - hard_braking
+        - invalid_navi_guide_line_infos_empty
+        - invalid_navi_not_in_sd
+        - invalid_topology_ego_static_map_link_id_invalid
+        - invalid_topology_ego_static_map_link_id_not_match
+        - invalid_topology_no_map_schema
+        - invalid_topology_other_no_match
+        - navi_enter
+        - navi_exit
+        - navi_keep
+        - navi_other
+        - navi_turn_left
+        - navi_turn_right
+        - navi_u_turn
+        - over_rain_level
+        - reversing
+        - route_deviation_curb
+        - route_deviation_guide_line
+        - route_deviation_sd_newpath_need_action
+        - route_deviation_sd_newpath_noneed_action
+        - route_deviation_sd_yaw
+        - stationary
+        - steering_left_120_185
+        - steering_left_15_60
+        - steering_left_60_120
+        - steering_left_above_185
+        - steering_right_120_185
+        - steering_right_15_60
+        - steering_right_60_120
+        - steering_slightly
+        - topology_auxiliary
+        - topology_bridge
+        - topology_interchange
+        - topology_interchange_roundabout
+        - topology_intersection
+        - topology_intersection_cross_road
+        - topology_intersection_multi_fork
+        - topology_intersection_other
+        - topology_intersection_small_cross_road
+        - topology_intersection_small_t_junction
+        - topology_intersection_straight_intersection
+        - topology_intersection_t_junction
+        - topology_intersection_y_junction
+        - topology_left_turn_lane
+        - topology_main
+        - topology_merge
+        - topology_ramp
+        - topology_right_turn_lane
+        - topology_roundabout
+        - topology_service_area
+        - topology_split
+        - topology_toll_station
+        - topology_tunnel
+        - topology_tunnel_roundabout
+        - topology_unstructured_road
+        source_map:
+          AVOIDANCE_INLANE: 车端
+          AVOIDANCE_INSAMELANE: 车端
+          AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST: 车端
+          AVOIDANCE_LANEYIELDCARORTRUCK: 车端
+          AVOIDANCE_LANEYIELDCONE: 车端
+          AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE: 车端
+          AVOIDANCE_LANEYIELDVRU: 车端
+          AVOIDANCE_MULTIOBSTACLEAROUNDEGO: 车端
+          AbnormalLaneChange: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_abnormal_lane_change.py
+          AbnormalRightLaneChangeToRightestStop: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_abnormal_right_lc_stop.py
+          ActiveWiperState: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_wiper.py
+          AvoidanceBorrowLane: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_avoidance_borrow_lane.py
+          BinCounter: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_bin_counter.py
+          CRUISE_CARORTRUCKCROSS: 车端
+          CRUISE_CARORTRUCKCUTIN: 车端
+          CRUISE_CARORTRUCKCUTOUT: 车端
+          CRUISE_CLOSECUTIN: 车端
+          CRUISE_CONGESTION: 车端
+          CRUISE_CREEP: 车端
+          CRUISE_CURVE: 车端
+          CRUISE_CUTIN: 车端
+          CRUISE_CUTOUT: 车端
+          CRUISE_DISTANTFOLLOW: 车端
+          CRUISE_FOLLOW: 车端
+          CRUISE_FREESPACEAVOIDANCE: 车端
+          CRUISE_FREESPACEYIELD: 车端
+          CRUISE_LEADCUTOUTLEADINGSTOPPED: 车端
+          CRUISE_RAMP: 车端
+          CRUISE_SLOWFOLLOW: 车端
+          CRUISE_SLOWMOVE: 车端
+          CRUISE_STRAIGHT: 车端
+          CRUISE_VRUCROSS: 车端
+          CRUISE_VRUCUTIN: 车端
+          CRUISE_VRUCUTOUT: 车端
+          CloseFollow: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_close_follow.py
+          CongestedFollow: L2_Pred/rule_based_mining/semantic_mining/activity_new/past_op/valid/op_congested_follow.py
+          CrossConflict: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_conflict.py
+          CrossStopLineOnYellowLight: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          CrossVRU: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_vru.py
+          CrossVehicle: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_vehicle.py
+          Cutin: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cutin.py
+          GreenLightNotProceeding: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          HighAccPedal: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_high_acc_pedal.py
+          HighSteeringWheelTorque: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_high_steering_torque.py
+          INTERSECTION_LEFTTURN: 车端
+          INTERSECTION_RIGHTTURN: 车端
+          INTERSECTION_ROUNDABOUT: 车端
+          INTERSECTION_ROUNDABOUTUNSIGNAL: 车端
+          INTERSECTION_STRAIGHT: 车端
+          INTERSECTION_UTURNLANE: 车端
+          InteractivePedestrian: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_pedestrian.py
+          InteractiveVRU: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_vru.py
+          InteractiveVehicle: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_vehicle.py
+          Intersection: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_intersection.py
+          Jerk: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_jerk.py
+          LANECHANGE_ABANDON: 车端
+          LANECHANGE_AVOIDANCE: 车端
+          LANECHANGE_DIVERGELANECHANGERIGHTTURN: 车端
+          LANECHANGE_FREEWAY: 车端
+          LANECHANGE_MERGELANECHANGEDROP: 车端
+          LANECHANGE_MERGELANECHANGEMAINROAD: 车端
+          LANECHANGE_MERGELANECHANGEZIPPER: 车端
+          LANECHANGE_NAVIGATION: 车端
+          LANECHANGE_NAVLANECHANGECONGESTION: 车端
+          LANECHANGE_NAVLANECHANGERAMP: 车端
+          LANECHANGE_OVERTAKE: 车端
+          LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST: 车端
+          LANECHANGE_OVERTAKELEFTCARORTRUCK: 车端
+          LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST: 车端
+          LANECHANGE_OVERTAKERIGHTCARORTRUCK: 车端
+          LaneChange: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_lane_change.py
+          LaneKeep: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_lane_keep.py
+          LowTTC: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_low_ttc.py
+          NoSpeedIncrease: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_no_speed_increase.py
+          NotCenter: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_not_center.py
+          ObstacleAvoidance: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_avoidance.py
+          ObstacleCollision: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_collision.py
+          ObstacleNearMiss: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_near_miss.py
+          OnRamp: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_on_ramp.py
+          OppositeLaneDriving: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_opposite_lane_driving.py
+          OtherRamp: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_other_ramp.py
+          OverSpeedLimit: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_over_speed.py
+          RunFullYellowLight: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          RunRedLight: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          RunYellowLight: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          STOPANDGO_BRAKESTOPANTICRASHBUCKET: 车端
+          STOPANDGO_BRAKESTOPCONE: 车端
+          STOPANDGO_FIRSTCARSTARTATGREENLIGHT: 车端
+          STOPANDGO_FIRSTCARSTOPATREDLIGHT: 车端
+          STOPANDGO_STARTCONGESTION: 车端
+          STOPANDGO_STARTFOLLOWOBSTACLE: 车端
+          STOPANDGO_STARTNONFOLLOWOBSTACLE: 车端
+          STOPANDGO_STARTRAMP: 车端
+          STOPANDGO_STOP: 车端
+          STOPANDGO_STOPBEHINDOBSTACLE: 车端
+          Slope: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_slope.py
+          SolidLaneChange: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_solid_lane_change.py
+          SpeedIncreaseStats: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_speed_increase_stats.py
+          SteeringSmallSwing: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_steering_small_swing.py
+          SteeringWheelSlam: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_steering_wheel_slam.py
+          StraightDriving: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_straight_driving.py
+          ToRoadsideStop: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_to_roadside_stop.py
+          TrafficIntersection: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_intersection.py
+          TrafficLightAbnormal: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
+          Turning: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_turning.py
+          VRUCrossConflict: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_vru_cross_conflict.py
+          YieldToPedestrian: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_yield_to_pedestrian.py
+          accelerating: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          creeping: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          cruising: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          decelerating: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          hard_braking: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          invalid_navi_guide_line_infos_empty: user_workspace/xiangchenming/op_navi_command.py
+          invalid_navi_not_in_sd: user_workspace/xiangchenming/op_navi_command.py
+          invalid_topology_ego_static_map_link_id_invalid: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          invalid_topology_ego_static_map_link_id_not_match: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          invalid_topology_no_map_schema: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          invalid_topology_other_no_match: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          navi_enter: user_workspace/xiangchenming/op_navi_command.py
+          navi_exit: user_workspace/xiangchenming/op_navi_command.py
+          navi_keep: user_workspace/xiangchenming/op_navi_command.py
+          navi_other: user_workspace/xiangchenming/op_navi_command.py
+          navi_turn_left: user_workspace/xiangchenming/op_navi_command.py
+          navi_turn_right: user_workspace/xiangchenming/op_navi_command.py
+          navi_u_turn: user_workspace/xiangchenming/op_navi_command.py
+          over_rain_level: L2_Pred/rule_based_mining/semantic_mining/feature_op/weather_feature.py
+          reversing: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          route_deviation_curb: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+          route_deviation_guide_line: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+          route_deviation_sd_newpath_need_action: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+          route_deviation_sd_newpath_noneed_action: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+          route_deviation_sd_yaw: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+          stationary: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
+          steering_left_120_185: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_left_15_60: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_left_60_120: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_left_above_185: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_right_120_185: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_right_15_60: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_right_60_120: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          steering_slightly: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
+          topology_auxiliary: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_bridge: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_interchange: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_interchange_roundabout: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_cross_road: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_multi_fork: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_other: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_small_cross_road: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_small_t_junction: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_straight_intersection: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_t_junction: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_intersection_y_junction: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_left_turn_lane: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_main: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_merge: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_ramp: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_right_turn_lane: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_roundabout: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_service_area: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_split: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_toll_station: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_tunnel: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_tunnel_roundabout: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+          topology_unstructured_road: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  dynamic_obj:
+    description: 动态障碍物表——每个时间步的动态物体位置/速度/类型信息
     columns:
     - name: ts
       type: BIGINT
@@ -218,7 +494,77 @@ sqlite_database:
       type: BOOLEAN
       notnull: false
       pk: false
-  - name: ego
+    enum_columns:
+      type:
+        values:
+        - animal
+        - bus
+        - car
+        - cyclist
+        - motorcycle
+        - motorcyclist
+        - pedestrian
+        - stroller
+        - suv
+        - truck
+        - wheelchair
+  static_obj:
+    description: 静态障碍物表——每个时间步的静态物体位置/类型信息
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: obj_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: ts_ms
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: x
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: y
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: z
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: l
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: w
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: h
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: heading
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: param
+      type: TEXT
+      notnull: false
+      pk: false
+    enum_columns:
+      type:
+        values:
+        - traffic_warning_object
+  ego:
+    description: 自车状态表——每个时间步的自车速度/加速度/转向/信号灯等状态
     columns:
     - name: ts
       type: BIGINT
@@ -388,7 +734,48 @@ sqlite_database:
       type: INTEGER
       notnull: false
       pk: false
-  - name: intersection_info
+    enum_columns:
+      traffic_light_status:
+        values:
+        - -1
+        - 1
+        - 2
+        - 3
+        value_descriptions:
+          '-1': 无信号灯
+          '1': 绿灯
+          '2': 黄灯
+          '3': 红灯
+      latest_traffic_light_status:
+        values:
+        - 绿
+        - 黄
+        - 红
+        - 未知
+        value_descriptions:
+          绿: 绿灯
+          黄: 黄灯
+          红: 红灯
+          未知: 未知
+      split_merge_tag:
+        values:
+        - split
+        - merge
+        - none
+        value_descriptions:
+          split: 分流
+          merge: 合流
+          none: 无
+        note: 此列在ego表中可能不存在，由topology_constraint_feature产出，实际存入range_tag
+      wiper_status:
+        values:
+        - 关闭
+        - 间歇档
+      navigation_status:
+        values:
+        - 导航中
+  intersection_info:
+    description: 路口信息表——记录路口ID、车道数、自车车道索引、车道详情
     columns:
     - name: intersection_id
       type: TEXT
@@ -406,36 +793,9 @@ sqlite_database:
       type: TEXT
       notnull: false
       pk: false
-    note: 存储 EgoIntoIntersection 事件（从 range_tag 中过滤，单独存放）
-  - name: range_tag
-    columns:
-    - name: start_ts
-      type: BIGINT
-      notnull: false
-      pk: true
-    - name: end_ts
-      type: BIGINT
-      notnull: false
-      pk: true
-    - name: tag_name
-      type: TEXT
-      notnull: false
-      pk: true
-    - name: param
-      type: TEXT
-      notnull: false
-      pk: false
-    primary_key:
-    - start_ts
-    - end_ts
-    - tag_name
-  - name: static_lane
-    columns:
-    - name: lane_id
-      type: TEXT
-      notnull: false
-      pk: true
-  - name: static_link
+    enum_columns: {}
+  static_link:
+    description: 静态道路链接表——道路拓扑链接的静态属性
     columns:
     - name: link_id
       type: TEXT
@@ -473,349 +833,748 @@ sqlite_database:
       type: FLOAT
       notnull: false
       pk: false
-  - name: static_obj
+    enum_columns:
+      link_type:
+        values:
+        - 主干道
+        - 主路
+        - 入口匝道
+        - 匝道
+        - 路口
+        - 辅路
+      link_turn_type:
+        values:
+        - 右转
+        - 左转
+        - 掉头
+        - 直行
+        - 直行右转
+        - 路口
+        - 进入
+        - 退出
+      link_class:
+        values:
+        - 主要大街/城市快速道
+        - 主要道路
+        - 国道
+        - 次要道路
+        - 省道
+        - 高速公路
+      link_attribute:
+        values:
+        - 无特殊属性
+        - 隧道
+        - 其他
+  dynamic_link:
+    description: 动态道路链接表——随时间变化的道路拓扑链接属性
     columns:
     - name: ts
       type: BIGINT
       notnull: false
       pk: true
-    - name: obj_id
+    - name: link_id
       type: TEXT
       notnull: false
       pk: true
-    - name: ts_ms
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: x
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: y
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: z
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: l
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: w
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: h
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: heading
-      type: FLOAT
-      notnull: false
-      pk: false
-    - name: type
+    - name: link_type
       type: TEXT
       notnull: false
       pk: false
-    - name: param
+    - name: link_attribute
       type: TEXT
       notnull: false
       pk: false
-range_tag:
-  injection_sources:
-  - id: cloud_operators_add_event
-    description: tokenizer_processor_new.py 中注册的 cloud 端算子通过 add_event() 添加
-    path: L2_Pred/rule_based_mining/semantic_mining/activity_new/
-    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list → to_sqlite_db._inject_range_tag_to_virtual_table() → virtual_table → SQLite
+    - name: link_exp_speed_limit
+      type: FLOAT
+      notnull: false
+      pk: false
+    - name: link_predecessor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_successor
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: include_lane_ids
+      type: TEXT
+      notnull: false
+      pk: false
+    enum_columns:
+      link_type:
+        values:
+        - 主干道
+        - 主路
+        - 入口匝道
+        - 匝道
+        - 路口
+        - 辅路
+      link_attribute:
+        values:
+        - 无特殊属性
+        - 隧道
+        - 其他
+  dynamic_lane:
+    description: 动态车道表——随时间变化的车道属性
+    columns:
+    - name: ts
+      type: BIGINT
+      notnull: false
+      pk: true
+    - name: lane_id
+      type: TEXT
+      notnull: false
+      pk: true
+    - name: ref_link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: left_boundary_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: right_boundary_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: lane_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_turn_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_trans_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: predecessors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: successors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_relate_obs_ids
+      type: TEXT
+      notnull: false
+      pk: false
+    enum_columns:
+      lane_type:
+        values:
+        - LANE_TYPE_EMERGENCY
+        - 未知
+      lane_turn_type:
+        values:
+        - TURN_TYPE_AHEADRIGHT
+        - TURN_TYPE_LEFTLUTURN
+        - 右转
+        - 左转
+        - 掉头
+        - 直行
+        - 路口
+      lane_trans_type:
+        values:
+        - TRANS_TYPE_Ending
+        - TRANS_TYPE_FullConnect
+        - TRANS_TYPE_LeftConnect
+        - TRANS_TYPE_OneSplitTwo
+        - TRANS_TYPE_RightConnect
+        - TRANS_TYPE_UNDEFINED
+  static_lane:
+    description: 静态车道表——车道的静态属性
+    columns:
+    - name: lane_id
+      type: TEXT
+      notnull: false
+      pk: true
+    enum_columns: {}
+tag_semantics:
+  AbnormalLaneChange:
+    description: 异常变道行为
+    sub_tags: []
+    source: cloud_operator
+    operator: AbnormalLaneChange
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStopV3:
+    description: 自车无合理动机异常右变道到最右车道停车（V3 版本）
+    sub_tags:
+    - RightLaneChangeAndStop
+    source: cloud_operator
+    operator: AbnormalRightLaneChangeToRightestStopV3
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStopV5:
+    description: 自车无合理动机异常右变道到最右车道停车（V5 版本）
+    sub_tags:
+    - RightLaneChangeAndStop
+    source: cloud_operator
+    operator: AbnormalRightLaneChangeToRightestStopV5
+    limitations: []
+    related_tables:
+    - range_tag
+  ActiveWiperState:
+    description: 车辆雨刮器处于激活工作状态
+    sub_tags:
+    - ActiveWiperState
+    source: cloud_operator
+    operator: ActiveWiperState
+    limitations:
+    - 仅在雨刮器启动时触发，不记录关闭状态
+    related_tables:
+    - range_tag
+  AvoidanceBorrowLane:
+    description: 自车借用左右车道避让前方障碍物后返回原车道
+    sub_tags:
+    - AvoidanceBorrowLaneLeft
+    - AvoidanceBorrowLaneRight
+    source: cloud_operator
+    operator: AvoidanceBorrowLane
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  Avoidance_InLane:
+    description: 自车在当前车道内避让前方障碍物
+    sub_tags:
+    - AvoidanceInLaneLeft
+    source: cloud_operator
+    operator: FixedOptimizedOpbAvoidanceInLane
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  BinCounter:
+    description: Bin 计数校验标签（产线专用）
+    sub_tags:
+    - BinOK
+    source: cloud_operator
+    operator: BinCounter
+    limitations:
+    - 每袋仅生成一个事件，用于产线数据校验
+    related_tables:
+    - range_tag
+  CloseFollow:
+    description: 自车与前车近距离跟车（高碰撞风险）
+    sub_tags:
+    - CloseFollow
+    source: cloud_operator
+    operator: CloseFollowOperator
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrossStopLineOnYellowLight:
+    description: 车辆黄灯期间越过停止线
+    sub_tags:
+    - CrossStopLineOnYellowLight
+    source: cloud_operator
+    operator: CrossStopLineOnYellowLight
+    limitations: []
+    related_tables:
+    - range_tag
+  CrossVRUV1:
+    description: VRU（行人/骑行者）横穿自车路径
+    sub_tags:
+    - Cross_From_Left
+    - Cross_From_Right
+    source: cloud_operator
+    operator: CrossVRUOperator_v1
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrossVehicle:
+    description: 侧方车辆横穿自车路径，自车减速避让
+    sub_tags:
+    - Cross_From_Left
+    - Cross_From_Right
+    source: cloud_operator
+    operator: CrossVehicleOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  CrawlingFollow:
+    description: 极低速蠕行跟车（走走停停、车距极近）
+    sub_tags:
+    - CrawlingFollow
+    source: cloud_operator
+    operator: CrawlingFollowOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  Cutin:
+    description: 他车切入自车车道前方
+    sub_tags:
+    - CarCutin
+    - CarCloseCutin
+    - TruckBusCutin
+    - TruckBusCloseCutin
+    - VruCutin
+    - VruCloseCutin
+    source: cloud_operator
+    operator: CutinOperator
+    limitations:
+    - sub_tag（切入车辆类型/距离）存储在 param JSON 中，查询需用 json_extract(param, '$.sub_tag')
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  GreenLightNotProceeding:
+    description: 绿灯亮起后车辆未及时起步通行
+    sub_tags:
+    - GreenLightNotProceeding
+    source: cloud_operator
+    operator: GreenLightNotProceeding
+    limitations: []
+    related_tables:
+    - range_tag
+  HighSteeringWheelTorque:
+    description: 方向盘力矩过大
+    sub_tags:
+    - HighSteeringWheelTorque
+    source: cloud_operator
+    operator: HighSteeringWheelTorqueOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  Intersection:
+    description: 自车处于路口区域（直行 / 左转 / 右转 / 掉头 / 不稳定路口）
+    sub_tags:
+    - IsIntersection
+    - LeftIntersection
+    - LuturnIntersection
+    - RightIntersection
+    - UnstableIntersection
+    source: cloud_operator
+    operator: IntersectionOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    - 与 INTERSECTION_STRAIGHT/INTERSECTION_RIGHTTURN（车端标签）不同源，不重复
+    related_tables:
+    - range_tag
+  Jerk:
+    description: 自车急加速或急刹车（加加速度突变）
+    sub_tags:
+    - brake
+    - speed_up
+    source: cloud_operator
+    operator: JerkOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  LaneChange:
+    description: 自车执行变道行为
+    sub_tags:
+    - LeftLaneChange
+    - RightLaneChange
+    source: cloud_operator
+    operator: LaneChange
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    - 实线变道被单独标记为 SolidLaneChange，不在此标签内
+    related_tables:
+    - range_tag
+  LaneKeep:
+    description: 自车保持当前车道直行
+    sub_tags:
+    - LaneKeep
+    source: add_table_direct
+    operator: op_lane_keep.py
+    limitations:
+    - 此标签不走 add_event 路径，而是通过 add_table 直接写入 virtual_table
+    related_tables:
+    - range_tag
+  LaneMerging:
+    description: 自车行驶在车道合并路段
+    sub_tags: []
+    source: cloud_operator
+    operator: LaneMergingOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  LowTTC:
+    description: 自车与障碍物碰撞时间过低（高风险）
+    sub_tags:
+    - TTC_Risk
+    source: cloud_operator
+    operator: LowTTCOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  NoSpeedIncrease:
+    description: 自车低于限速且不主动提速（不追限速）
+    sub_tags:
+    - 10-20
+    source: cloud_operator
+    operator: NoSpeedIncreaseOperator
+    limitations:
+    - sub_tag 表示速度差区间，存储在 param JSON 中
+    related_tables:
+    - range_tag
+  NotCenter:
+    description: 自车未在车道中心行驶
+    sub_tags: []
+    source: cloud_operator
+    operator: NotCenter
+    limitations: []
+    related_tables:
+    - range_tag
+  ObstacleCollision:
+    description: 自车与障碍物发生碰撞
+    sub_tags:
+    - ObstacleCollision
+    source: cloud_operator
+    operator: ObstacleCollision
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  ObstacleNearMiss:
+    description: 自车与障碍物发生近碰（未实际碰撞但距离极近）
+    sub_tags:
+    - ObstacleNearMiss
+    source: cloud_operator
+    operator: ObstacleNearMiss
+    limitations: []
+    related_tables:
+    - range_tag
+    - dynamic_obj
+  OffRamp:
+    description: 自车行驶在高速 / 快速路下匝道
+    sub_tags:
+    - OffRamp
+    source: cloud_operator
+    operator: OffRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OnRamp:
+    description: 自车行驶在高速 / 快速路上匝道
+    sub_tags:
+    - OnRamp
+    source: cloud_operator
+    operator: OnRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OtherRamp:
+    description: 自车行驶在其他匝道路段
+    sub_tags:
+    - OtherRamp
+    source: cloud_operator
+    operator: OtherRampOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  OverSpeedLimit:
+    description: 自车行驶速度超过道路限速
+    sub_tags:
+    - OverSpeedLimit
+    source: cloud_operator
+    operator: OverSpeedLimitOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  RainLevel:
+    description: 降雨状态（小雨 / 中雨 / 大雨，持续超 10 秒）
+    sub_tags:
+    - heavy_rain
+    - light_rain
+    - moderate_rain
+    source: cloud_operator
+    operator: RainLevelOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  Roundabout:
+    description: 自车行驶在环岛路段
+    sub_tags:
+    - Roundabout
+    source: cloud_operator
+    operator: RoundaboutOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  RunRedLight:
+    description: 车辆闯红灯越过停止线
+    sub_tags:
+    - RunRedLight
+    source: cloud_operator
+    operator: RunRedLight
+    limitations: []
+    related_tables:
+    - range_tag
+  Slope:
+    description: 车辆行驶在坡道路段
+    sub_tags: []
+    source: user_workspace
+    operator: SlopeSchemaOperator
+    author: zhanglikai
+    limitations:
+    - 仅基于地图海拔数据计算，不感知实际路面坡度
+    - sub_tag（上坡/下坡等）存储在 param JSON 中
+    related_tables:
+    - range_tag
+  SolidLaneChange:
+    description: 车辆在实线区域违规变道
+    sub_tags:
+    - SolidLeftLaneChange
+    - SolidRightLaneChange
+    source: cloud_operator
+    operator: SolidLaneChange
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  SteeringSmallSwing:
+    description: 方向盘小角度左右连续交替摆动
+    sub_tags:
+    - LeftRightAlternateSwing
+    source: cloud_operator
+    operator: SteeringSwingOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  SteeringWheelSlam:
+    description: 自车猛打方向盘（短时高强度急转向）
+    sub_tags:
+    - SteeringWheelSlam
+    source: cloud_operator
+    operator: SteeringWheelSlamOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  StraightDriving:
+    description: 自车直行超过 3 秒（测试标签）
+    sub_tags:
+    - long_straight
+    - medium_straight
+    - short_straight
+    source: cloud_operator
+    operator: StraightDrivingOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  TrafficIntersection:
+    description: 自车处于交通灯控制的路口
+    sub_tags:
+    - TrafficIntersection
+    source: cloud_operator
+    operator: TrafficIntersection
+    limitations: []
+    related_tables:
+    - range_tag
+  TrafficLightAbnormal:
+    description: 交通灯信号状态异常
+    sub_tags:
+    - TrafficLightAbnormal
+    source: cloud_operator
+    operator: TrafficLightAbnormal
+    limitations: []
+    related_tables:
+    - range_tag
+  Turning:
+    description: 自车转向（左转 / 右转 / 掉头）
+    sub_tags:
+    - turn_back
+    - turn_left
+    - turn_right
+    source: cloud_operator
+    operator: TurningOperator
+    limitations:
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  YellowLightStop:
+    description: 黄灯停车控制
+    sub_tags: []
+    source: cloud_operator
+    operator: YellowLightStopController
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation:
+    description: 自车行驶路线偏离
+    sub_tags: []
+    source: cloud_operator
+    operator: YawOperator
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CURVE:
+    description: 弯道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 命名规范与 cloud 端标签不同
+    related_tables:
+    - range_tag
+  CRUISE_FOLLOW:
+    description: 跟行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_STRAIGHT:
+    description: 直道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  INTERSECTION_RIGHTTURN:
+    description: 路口右转
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=RightIntersection 不同源
+    related_tables:
+    - range_tag
+  INTERSECTION_STRAIGHT:
+    description: 路口直行
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=IsIntersection 不同源
+    related_tables:
+    - range_tag
+  AVOIDANCE_MULTIOBSTACLEAROUNDEGO:
+    description: 多障碍物绕行避让
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: AVOIDANCE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CongestedFollow:
+    description: 拥堵跟车
+    sub_tags: []
+    source: cloud_operator
+    operator: CongestedFollow
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CREEP:
+    description: 蠕行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_RAMP:
+    description: 匝道巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_SLOWFOLLOW:
+    description: 慢行跟车巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  CRUISE_SLOWMOVE:
+    description: 慢行巡航
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: CRUISE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  INTERSECTION_LEFTTURN:
+    description: 路口左转
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: INTERSECTION
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    - 与 cloud 端的 Intersection + sub_tag=LeftIntersection 不同源
+    related_tables:
+    - range_tag
+  LANECHANGE_ABANDON:
+    description: 放弃变道
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: LANECHANGE
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  over_rain_level:
+    description: 降雨状态（与 RainLevel 相同算子，但使用 over_rain_level 作为 tag_name）
+    sub_tags:
+    - heavy_rain
+    - light_rain
+    - moderate_rain
+    source: cloud_operator
+    operator: RainLevelOperator
+    dynamic_label_id: true
+    limitations:
+    - 与 RainLevel 使用同一算子 RainLevelOperator，但 tag_name 存储为 over_rain_level
+    - sub_tag 信息存储在 param JSON 中
+    related_tables:
+    - range_tag
+  STOPANDGO_FIRSTCARSTARTATGREENLIGHT:
+    description: 红绿灯路口首车绿灯起步
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: STOPANDGO
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  STOPANDGO_FIRSTCARSTOPATREDLIGHT:
+    description: 红绿灯路口首车红灯停车
+    sub_tags: []
+    source: car_end_behavior_tag
+    category: STOPANDGO
+    limitations:
+    - 车端标签，来自 bag 文件的 beh_tag 消息
+    related_tables:
+    - range_tag
+  car_end_behavior_tags:
+    description: 车端行为标签完整列表
+    source: car_end_behavior_tag
+    note: '以下标签取决于 bag 文件中的 beh_tag 消息内容，不保证每个 DB 中都存在。 命名统一以大写字母 + 下划线分隔。
 
       '
-    note: 标签是否出现取决于算子是否被触发（场景匹配）
-  - id: car_end_behavior_tags
-    description: 车端 bag 文件中的行为标签
-    parser: gsbag_parser/topic_parser/em_behavior_tag_parser.py
-    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经 Filter 合并后存入 label_info JSON。 在部分 pipeline 版本中，label_info 会被合并到 TokenizerResult，最终进入 SQLite。
-
-      '
-    note: 车端标签命名规范与 cloud 端不同（如 CRUISE_STRAIGHT, INTERSECTION_RIGHTTURN）
-  - id: user_workspace_add_event
-    description: user_workspace 自定义算子通过 add_event() 注入
-    current_operators:
-    - name: SlopeSchemaOperator
-      author: zhanglikai
-      label_id: Slope
-      enabled: true
-    note: 其他 user_workspace 算子（DrTrajectory, EgoAcc, MapSchema）不写 range_tag
-  - id: add_table_direct
-    description: 算子绕过 add_event，直接通过 add_table("range_tag") 写入 virtual_table
-    current_operators:
-    - name: LaneKeep
-      file: op_lane_keep.py
-      note: add_event 被注释掉，改用 add_table 直接写入 horizontal table
-  actual_tags_from_sample_db:
-    description: 从样本 DB 中 DISTINCT 查询得到的实际存在的标签
-    sample_db: /mnt/gacrnd-oss/gac_liulian/common_data/sqlite_dbs/20260522_T68_1131_97ba3f_sdpro_1.5w/101ZW4jVEfmiEK5lqQEAOz202605.db
-    tags:
-    - name: ActiveWiperState
-      source: cloud_operator
-      operator: ActiveWiperState
-    - name: BinCounter
-      source: cloud_operator
-      operator: BinCounter
-    - name: Intersection
-      source: cloud_operator
-      operator: IntersectionOperator
-    - name: LaneKeep
-      source: add_table_direct
-      operator: op_lane_keep.py
-      note: add_event 被注释
-    - name: LowTTC
-      source: cloud_operator
-      operator: LowTTCOperator
-    - name: NoSpeedIncrease
-      source: cloud_operator
-      operator: NoSpeedIncreaseOperator
-    - name: ObstacleCollision
-      source: cloud_operator
-      operator: ObstacleCollision
-    - name: OverSpeedLimit
-      source: cloud_operator
-      operator: OverSpeedLimitOperator
-    - name: StraightDriving
-      source: cloud_operator
-      operator: StraightDrivingOperator
-    - name: TrafficIntersection
-      source: cloud_operator
-      operator: TrafficIntersection
-    - name: Turning
-      source: cloud_operator
-      operator: TurningOperator
-    - name: route_deviation
-      source: cloud_operator
-      operator: YawOperator
-    - name: accelerating
-      source: cloud_operator
-      operator: SpeedStateOperator
-      note: 动态 label_id（state_name）
-    - name: cruising
-      source: cloud_operator
-      operator: SpeedStateOperator
-      note: 动态 label_id（state_name）
-    - name: decelerating
-      source: cloud_operator
-      operator: SpeedStateOperator
-      note: 动态 label_id（state_name）
-    - name: navi_enter
-      source: cloud_operator
-      operator: NaviCommandOperator
-      note: 动态 label_id（sub_type）
-    - name: navi_keep
-      source: cloud_operator
-      operator: NaviCommandOperator
-      note: 动态 label_id（sub_type）
-    - name: navi_u_turn
-      source: cloud_operator
-      operator: NaviCommandOperator
-      note: 动态 label_id（sub_type）
-    - name: steering_left_120_185
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: steering_left_15_60
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: steering_left_60_120
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: steering_right_15_60
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: steering_right_60_120
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: steering_slightly
-      source: cloud_operator
-      operator: SteeringOperator
-      note: 动态 label_id（转角区间）
-    - name: Slope
-      source: user_workspace
-      operator: SlopeSchemaOperator
-      author: zhanglikai
-    - name: CRUISE_CURVE
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: CRUISE_FOLLOW
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: CRUISE_STRAIGHT
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: INTERSECTION_RIGHTTURN
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: INTERSECTION
-    - name: INTERSECTION_STRAIGHT
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: INTERSECTION
-    - name: AVOIDANCE_MULTIOBSTACLEAROUNDEGO
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: AVOIDANCE
-    - name: CongestedFollow
-      source: cloud_operator
-      operator: CongestedFollow
-    - name: CRUISE_CREEP
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: CRUISE_RAMP
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: CRUISE_SLOWFOLLOW
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: CRUISE_SLOWMOVE
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: CRUISE
-    - name: INTERSECTION_LEFTTURN
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: INTERSECTION
-    - name: LANECHANGE_ABANDON
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: LANECHANGE
-    - name: over_rain_level
-      source: cloud_operator
-      operator: RainLevelOperator
-      note: 动态 label_id（同 RainLevel 算子，tag_name 为 over_rain_level）
-    - name: STOPANDGO_FIRSTCARSTARTATGREENLIGHT
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: STOPANDGO
-    - name: STOPANDGO_FIRSTCARSTOPATREDLIGHT
-      source: car_end_behavior_tag
-      parser: em_behavior_tag_parser
-      category: STOPANDGO
-  potential_tags_not_in_sample:
-    description: '以下标签理论上会通过上述注入源进入 SQLite，但在样本 DB 中未出现。 未出现原因：样本 bag 的场景未触发对应算子，或车端未产生对应行为标签。
-
-      '
-    cloud_operators_fixed_label_id:
-    - name: AbnormalLaneChange
-      operator: AbnormalLaneChange
-    - name: AbnormalRightLaneChangeToRightestStopV3
-      operator: AbnormalRightLaneChangeToRightestStopV3
-    - name: AbnormalRightLaneChangeToRightestStopV5
-      operator: AbnormalRightLaneChangeToRightestStopV5
-    - name: AvoidanceBorrowLane
-      operator: AvoidanceBorrowLane
-    - name: Avoidance_InLane
-      operator: FixedOptimizedOpbAvoidanceInLane
-    - name: CloseFollow
-      operator: CloseFollowOperator
-    - name: CrossStopLineOnYellowLight
-      operator: CrossStopLineOnYellowLight
-    - name: CrossVRUV1
-      operator: CrossVRUOperator_v1
-    - name: CrossVehicle
-      operator: CrossVehicleOperator
-    - name: CrawlingFollow
-      operator: CrawlingFollowOperator
-    - name: Cutin
-      operator: CutinOperator
-    - name: EgoIntoIntersection
-      operator: IntersectionOperator
-      note: 被过滤到 intersection_info 表，不在 range_tag
-    - name: GreenLightNotProceeding
-      operator: GreenLightNotProceeding
-    - name: HighSteeringWheelTorque
-      operator: HighSteeringWheelTorqueOperator
-    - name: Jerk
-      operator: JerkOperator
-    - name: LaneChange
-      operator: LaneChange
-    - name: LaneMerging
-      operator: LaneMergingOperator
-    - name: NotCenter
-      operator: NotCenter
-    - name: ObstacleNearMiss
-      operator: ObstacleNearMiss
-    - name: OffRamp
-      operator: OffRampOperator
-    - name: OnRamp
-      operator: OnRampOperator
-    - name: OtherRamp
-      operator: OtherRampOperator
-    - name: RainLevel
-      operator: RainLevelOperator
-    - name: Roundabout
-      operator: RoundaboutOperator
-    - name: RunRedLight
-      operator: RunRedLight
-    - name: SolidLaneChange
-      operator: SolidLaneChange
-    - name: SteeringSmallSwing
-      operator: SteeringSwingOperator
-    - name: SteeringWheelSlam
-      operator: SteeringWheelSlamOperator
-    - name: TrafficLightAbnormal
-      operator: TrafficLightAbnormal
-    - name: YellowLightStop
-      operator: YellowLightStopController
-    cloud_operators_dynamic_label_id:
-      speed_state:
-        operator: SpeedStateOperator
-        note: label_id = state_name，父标签名 SpeedState 不会出现在 DB 中，以下值互斥
-        values:
-        - stationary
-        - creeping
-        - cruising
-        - decelerating
-        - accelerating
-        - hard_braking
-        - reversing
-      steering:
-        operator: SteeringOperator
-        note: label_id = 转角区间，父标签名 Steering 不会出现在 DB 中，以下值互斥
-        values:
-        - steering_slightly
-        - steering_left_15_60
-        - steering_left_60_120
-        - steering_left_120_185
-        - steering_left_above_185
-        - steering_right_15_60
-        - steering_right_60_120
-        - steering_right_120_185
-        - steering_right_above_185
-      navi_command:
-        operator: NaviCommandOperator
-        note: label_id = sub_type，父标签名 NaviCommand 不会出现在 DB 中，以下值互斥
-        values:
-        - navi_guide_line_infos_empty
-        - navi_not_in_sd
-        - navi_keep
-        - navi_enter
-        - navi_exit
-        - navi_other
-        - navi_turn_left
-        - navi_turn_right
-        - navi_u_turn
-    car_end_behavior_tags_potential:
-      note: 车端标签取决于 bag 文件中的 beh_tag 消息内容
+    categories:
       cruise:
+      - CRUISE_UNKNOWN
       - CRUISE_CONGESTION
       - CRUISE_FREESPACE
       - CRUISE_PREDECELERATE
@@ -841,13 +1600,12 @@ range_tag:
       - CRUISE_CARORTRUCKCROSS
       - CRUISE_FOLLOWVRUBRAKE
       - CRUISE_VRUCUTIN
-      - CRUISE_CARORTRUCKCUTOUT
-      - CRUISE_VRUCROSS
       - CRUISE_NRUBRAKE
       - CRUISE_CLOSECUTIN
       - CRUISE_VRUCUTOUT
       - CRUISE_OVERTAKECUTIN
       stop_and_go:
+      - STOPANDGO_UNKNOWN
       - STOPANDGO_STOPBEHINDOBSTACLE
       - STOPANDGO_STARTFOLLOWOBSTACLE
       - STOPANDGO_STARTNONFOLLOWOBSTACLE
@@ -881,6 +1639,7 @@ range_tag:
       - STOPANDGO_BRAKESTOPGRIDZONE
       - STOPANDGO_BRAKESTOPEMERGENCY
       lanechange:
+      - LANECHANGE_UNKNOWN
       - LANECHANGE_NAVIGATION
       - LANECHANGE_OVERTAKE
       - LANECHANGE_AVOIDANCE
@@ -904,6 +1663,7 @@ range_tag:
       - LANECHANGE_DIVERGELANECHANGESTRAIGHT
       - LANECHANGE_NAVLANECHANGEMERGE
       avoidance:
+      - AVOIDANCE_UNKNOWN
       - AVOIDANCE_INLANE
       - AVOIDANCE_INSAMELANE
       - AVOIDANCE_INREVERSELANE
@@ -925,6 +1685,7 @@ range_tag:
       - AVOIDANCE_LANEBORROWYIELDCLOSE
       - AVOIDANCE_LANEBORROWYIELDSOLIDLINE
       intersection:
+      - INTERSECTION_UNKNOWN
       - INTERSECTION_LEFTTURN
       - INTERSECTION_UTURN
       - INTERSECTION_ROUNDABOUT
@@ -936,1231 +1697,1319 @@ range_tag:
       - INTERSECTION_ROUNDABOUTUNSIGNAL
       - INTERSECTION_TOLLBOOTHETC
       - INTERSECTION_UTURNLANE
-  tag_enum:
-  - AbnormalLaneChange
-  - ActiveWiperState
-  - AvoidanceBorrowLane
-  - Avoidance_InLane
-  - CloseFollow
-  - CrawlingFollow
-  - CrossConflict
-  - CrossStopLineOnYellowLight
-  - CrossVRUV1
-  - CrossVehicle
-  - Cutin
-  - GreenLightNotProceeding
-  - HighSteeringWheelTorque
-  - Intersection
-  - Jerk
-  - LaneChange
-  - LaneKeep
-  - LowSpeedOvertake
-  - LowTTC
-  - NotCenter
-  - ObstacleAvoidance
-  - ObstacleCollision
-  - ObstacleNearMiss
-  - OverSpeedLimit
-  - RunFullYellowLight
-  - RunRedLight
-  - RunYellowLight
-  - Slope
-  - SlowFrontLaneChange
-  - SolidLaneChange
-  - SteeringSmallSwing
-  - SteeringWheelSlam
-  - StraightDriving
-  - TrafficIntersection
-  - TrafficLightAbnormal
-  - Turning
-  - VRUCrossConflict
-  - accelerating
-  - creeping
-  - cruising
-  - decelerating
-  - hard_braking
-  - over_rain_level
-  - reversing
-  - route_deviation_curb
-  - route_deviation_guide_line
-  - route_deviation_sd_newpath_need_action
-  - route_deviation_sd_newpath_noneed_action
-  - route_deviation_sd_yaw
-  - stationary
-  - steering_left_120_185
-  - steering_left_15_60
-  - steering_left_60_120
-  - steering_left_above_185
-  - steering_right_120_185
-  - steering_right_15_60
-  - steering_right_60_120
-  - steering_right_above_185
-  - steering_slightly
-  tag_semantics:
-    AbnormalLaneChange:
-      description: 异常变道行为
-      sub_tags: []
-      source: cloud_operator
-      operator: AbnormalLaneChange
-      limitations: []
-      related_tables:
-      - range_tag
-    AbnormalRightLaneChangeToRightestStopV3:
-      description: 自车无合理动机异常右变道到最右车道停车（V3 版本）
-      sub_tags:
-      - RightLaneChangeAndStop
-      source: cloud_operator
-      operator: AbnormalRightLaneChangeToRightestStopV3
-      limitations: []
-      related_tables:
-      - range_tag
-    AbnormalRightLaneChangeToRightestStopV5:
-      description: 自车无合理动机异常右变道到最右车道停车（V5 版本）
-      sub_tags:
-      - RightLaneChangeAndStop
-      source: cloud_operator
-      operator: AbnormalRightLaneChangeToRightestStopV5
-      limitations: []
-      related_tables:
-      - range_tag
-    ActiveWiperState:
-      description: 车辆雨刮器处于激活工作状态
-      sub_tags:
-      - ActiveWiperState
-      source: cloud_operator
-      operator: ActiveWiperState
-      limitations:
-      - 仅在雨刮器启动时触发，不记录关闭状态
-      related_tables:
-      - range_tag
-    AvoidanceBorrowLane:
-      description: 自车借用左右车道避让前方障碍物后返回原车道
-      sub_tags:
-      - AvoidanceBorrowLaneLeft
-      - AvoidanceBorrowLaneRight
-      source: cloud_operator
-      operator: AvoidanceBorrowLane
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    Avoidance_InLane:
-      description: 自车在当前车道内避让前方障碍物
-      sub_tags:
-      - AvoidanceInLaneLeft
-      source: cloud_operator
-      operator: FixedOptimizedOpbAvoidanceInLane
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    BinCounter:
-      description: Bin 计数校验标签（产线专用）
-      sub_tags:
-      - BinOK
-      source: cloud_operator
-      operator: BinCounter
-      limitations:
-      - 每袋仅生成一个事件，用于产线数据校验
-      related_tables:
-      - range_tag
-    CloseFollow:
-      description: 自车与前车近距离跟车（高碰撞风险）
-      sub_tags:
-      - CloseFollow
-      source: cloud_operator
-      operator: CloseFollowOperator
-      limitations: []
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    CrossStopLineOnYellowLight:
-      description: 车辆黄灯期间越过停止线
-      sub_tags:
-      - CrossStopLineOnYellowLight
-      source: cloud_operator
-      operator: CrossStopLineOnYellowLight
-      limitations: []
-      related_tables:
-      - range_tag
-    CrossVRUV1:
-      description: VRU（行人/骑行者）横穿自车路径
-      sub_tags:
-      - Cross_From_Left
-      - Cross_From_Right
-      source: cloud_operator
-      operator: CrossVRUOperator_v1
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    CrossVehicle:
-      description: 侧方车辆横穿自车路径，自车减速避让
-      sub_tags:
-      - Cross_From_Left
-      - Cross_From_Right
-      source: cloud_operator
-      operator: CrossVehicleOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    CrawlingFollow:
-      description: 极低速蠕行跟车（走走停停、车距极近）
-      sub_tags:
-      - CrawlingFollow
-      source: cloud_operator
-      operator: CrawlingFollowOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    Cutin:
-      description: 他车切入自车车道前方
-      sub_tags:
-      - CarCutin
-      - CarCloseCutin
-      - TruckBusCutin
-      - TruckBusCloseCutin
-      - VruCutin
-      - VruCloseCutin
-      source: cloud_operator
-      operator: CutinOperator
-      limitations:
-      - sub_tag（切入车辆类型/距离）存储在 param JSON 中，查询需用 json_extract(param, '$.sub_tag')
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    GreenLightNotProceeding:
-      description: 绿灯亮起后车辆未及时起步通行
-      sub_tags:
-      - GreenLightNotProceeding
-      source: cloud_operator
-      operator: GreenLightNotProceeding
-      limitations: []
-      related_tables:
-      - range_tag
-    HighSteeringWheelTorque:
-      description: 方向盘力矩过大
-      sub_tags:
-      - HighSteeringWheelTorque
-      source: cloud_operator
-      operator: HighSteeringWheelTorqueOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    Intersection:
-      description: 自车处于路口区域（直行 / 左转 / 右转 / 掉头 / 不稳定路口）
-      sub_tags:
-      - IsIntersection
-      - LeftIntersection
-      - LuturnIntersection
-      - RightIntersection
-      - UnstableIntersection
-      source: cloud_operator
-      operator: IntersectionOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      - 与 INTERSECTION_STRAIGHT/INTERSECTION_RIGHTTURN（车端标签）不同源，不重复
-      related_tables:
-      - range_tag
-    Jerk:
-      description: 自车急加速或急刹车（加加速度突变）
-      sub_tags:
-      - brake
-      - speed_up
-      source: cloud_operator
-      operator: JerkOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    LaneChange:
-      description: 自车执行变道行为
-      sub_tags:
-      - LeftLaneChange
-      - RightLaneChange
-      source: cloud_operator
-      operator: LaneChange
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      - 实线变道被单独标记为 SolidLaneChange，不在此标签内
-      related_tables:
-      - range_tag
-    LaneKeep:
-      description: 自车保持当前车道直行
-      sub_tags:
-      - LaneKeep
-      source: add_table_direct
-      operator: op_lane_keep.py
-      limitations:
-      - 此标签不走 add_event 路径，而是通过 add_table 直接写入 virtual_table
-      related_tables:
-      - range_tag
-    LaneMerging:
-      description: 自车行驶在车道合并路段
-      sub_tags: []
-      source: cloud_operator
-      operator: LaneMergingOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    LowTTC:
-      description: 自车与障碍物碰撞时间过低（高风险）
-      sub_tags:
-      - TTC_Risk
-      source: cloud_operator
-      operator: LowTTCOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    NoSpeedIncrease:
-      description: 自车低于限速且不主动提速（不追限速）
-      sub_tags:
-      - 10-20
-      source: cloud_operator
-      operator: NoSpeedIncreaseOperator
-      limitations:
-      - sub_tag 表示速度差区间，存储在 param JSON 中
-      related_tables:
-      - range_tag
-    NotCenter:
-      description: 自车未在车道中心行驶
-      sub_tags: []
-      source: cloud_operator
-      operator: NotCenter
-      limitations: []
-      related_tables:
-      - range_tag
-    ObstacleCollision:
-      description: 自车与障碍物发生碰撞
-      sub_tags:
-      - ObstacleCollision
-      source: cloud_operator
-      operator: ObstacleCollision
-      limitations: []
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    ObstacleNearMiss:
-      description: 自车与障碍物发生近碰（未实际碰撞但距离极近）
-      sub_tags:
-      - ObstacleNearMiss
-      source: cloud_operator
-      operator: ObstacleNearMiss
-      limitations: []
-      related_tables:
-      - range_tag
-      - dynamic_obj
-    OffRamp:
-      description: 自车行驶在高速 / 快速路下匝道
-      sub_tags:
-      - OffRamp
-      source: cloud_operator
-      operator: OffRampOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    OnRamp:
-      description: 自车行驶在高速 / 快速路上匝道
-      sub_tags:
-      - OnRamp
-      source: cloud_operator
-      operator: OnRampOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    OtherRamp:
-      description: 自车行驶在其他匝道路段
-      sub_tags:
-      - OtherRamp
-      source: cloud_operator
-      operator: OtherRampOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    OverSpeedLimit:
-      description: 自车行驶速度超过道路限速
-      sub_tags:
-      - OverSpeedLimit
-      source: cloud_operator
-      operator: OverSpeedLimitOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    RainLevel:
-      description: 降雨状态（小雨 / 中雨 / 大雨，持续超 10 秒）
-      sub_tags:
-      - heavy_rain
-      - light_rain
-      - moderate_rain
-      source: cloud_operator
-      operator: RainLevelOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    Roundabout:
-      description: 自车行驶在环岛路段
-      sub_tags:
-      - Roundabout
-      source: cloud_operator
-      operator: RoundaboutOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    RunRedLight:
-      description: 车辆闯红灯越过停止线
-      sub_tags:
-      - RunRedLight
-      source: cloud_operator
-      operator: RunRedLight
-      limitations: []
-      related_tables:
-      - range_tag
-    Slope:
-      description: 车辆行驶在坡道路段
-      sub_tags: []
-      source: user_workspace
-      operator: SlopeSchemaOperator
-      author: zhanglikai
-      limitations:
-      - 仅基于地图海拔数据计算，不感知实际路面坡度
-      - sub_tag（上坡/下坡等）存储在 param JSON 中
-      related_tables:
-      - range_tag
-    SolidLaneChange:
-      description: 车辆在实线区域违规变道
-      sub_tags:
-      - SolidLeftLaneChange
-      - SolidRightLaneChange
-      source: cloud_operator
-      operator: SolidLaneChange
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    SteeringSmallSwing:
-      description: 方向盘小角度左右连续交替摆动
-      sub_tags:
-      - LeftRightAlternateSwing
-      source: cloud_operator
-      operator: SteeringSwingOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    SteeringWheelSlam:
-      description: 自车猛打方向盘（短时高强度急转向）
-      sub_tags:
-      - SteeringWheelSlam
-      source: cloud_operator
-      operator: SteeringWheelSlamOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    StraightDriving:
-      description: 自车直行超过 3 秒（测试标签）
-      sub_tags:
-      - long_straight
-      - medium_straight
-      - short_straight
-      source: cloud_operator
-      operator: StraightDrivingOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    TrafficIntersection:
-      description: 自车处于交通灯控制的路口
-      sub_tags:
-      - TrafficIntersection
-      source: cloud_operator
-      operator: TrafficIntersection
-      limitations: []
-      related_tables:
-      - range_tag
-    TrafficLightAbnormal:
-      description: 交通灯信号状态异常
-      sub_tags:
-      - TrafficLightAbnormal
-      source: cloud_operator
-      operator: TrafficLightAbnormal
-      limitations: []
-      related_tables:
-      - range_tag
-    Turning:
-      description: 自车转向（左转 / 右转 / 掉头）
-      sub_tags:
-      - turn_back
-      - turn_left
-      - turn_right
-      source: cloud_operator
-      operator: TurningOperator
-      limitations:
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    YellowLightStop:
-      description: 黄灯停车控制
-      sub_tags: []
-      source: cloud_operator
-      operator: YellowLightStopController
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation:
-      description: 自车行驶路线偏离
-      sub_tags: []
-      source: cloud_operator
-      operator: YawOperator
-      limitations: []
-      related_tables:
-      - range_tag
-    CRUISE_CURVE:
-      description: 弯道巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      - 命名规范与 cloud 端标签不同
-      related_tables:
-      - range_tag
-    CRUISE_FOLLOW:
-      description: 跟行巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    CRUISE_STRAIGHT:
-      description: 直道巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    INTERSECTION_RIGHTTURN:
-      description: 路口右转
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: INTERSECTION
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      - 与 cloud 端的 Intersection + sub_tag=RightIntersection 不同源
-      related_tables:
-      - range_tag
-    INTERSECTION_STRAIGHT:
-      description: 路口直行
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: INTERSECTION
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      - 与 cloud 端的 Intersection + sub_tag=IsIntersection 不同源
-      related_tables:
-      - range_tag
-    AVOIDANCE_MULTIOBSTACLEAROUNDEGO:
-      description: 多障碍物绕行避让
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: AVOIDANCE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    CongestedFollow:
-      description: 拥堵跟车
-      sub_tags: []
-      source: cloud_operator
-      operator: CongestedFollow
-      limitations: []
-      related_tables:
-      - range_tag
-    CRUISE_CREEP:
-      description: 蠕行巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    CRUISE_RAMP:
-      description: 匝道巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    CRUISE_SLOWFOLLOW:
-      description: 慢行跟车巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    CRUISE_SLOWMOVE:
-      description: 慢行巡航
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: CRUISE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    INTERSECTION_LEFTTURN:
-      description: 路口左转
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: INTERSECTION
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      - 与 cloud 端的 Intersection + sub_tag=LeftIntersection 不同源
-      related_tables:
-      - range_tag
-    LANECHANGE_ABANDON:
-      description: 放弃变道
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: LANECHANGE
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    over_rain_level:
-      description: 降雨状态（与 RainLevel 相同算子，但使用 over_rain_level 作为 tag_name）
-      sub_tags:
-      - heavy_rain
-      - light_rain
-      - moderate_rain
-      source: cloud_operator
-      operator: RainLevelOperator
-      dynamic_label_id: true
-      limitations:
-      - 与 RainLevel 使用同一算子 RainLevelOperator，但 tag_name 存储为 over_rain_level
-      - sub_tag 信息存储在 param JSON 中
-      related_tables:
-      - range_tag
-    STOPANDGO_FIRSTCARSTARTATGREENLIGHT:
-      description: 红绿灯路口首车绿灯起步
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: STOPANDGO
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    STOPANDGO_FIRSTCARSTOPATREDLIGHT:
-      description: 红绿灯路口首车红灯停车
-      sub_tags: []
-      source: car_end_behavior_tag
-      category: STOPANDGO
-      limitations:
-      - 车端标签，来自 bag 文件的 beh_tag 消息
-      related_tables:
-      - range_tag
-    car_end_behavior_tags:
-      description: 车端行为标签完整列表
-      source: car_end_behavior_tag
-      note: '以下标签取决于 bag 文件中的 beh_tag 消息内容，不保证每个 DB 中都存在。 命名统一以大写字母 + 下划线分隔。
-
-        '
-      categories:
-        cruise:
-        - CRUISE_UNKNOWN
-        - CRUISE_CONGESTION
-        - CRUISE_FREESPACE
-        - CRUISE_PREDECELERATE
-        - CRUISE_YIELDTOPEDESTRIANS
-        - CRUISE_EMERGENCYBRAKE
-        - CRUISE_SLOWMOVE
-        - CRUISE_CUTIN
-        - CRUISE_CUTOUT
-        - CRUISE_SLOWFOLLOW
-        - CRUISE_CREEP
-        - CRUISE_RAMP
-        - CRUISE_CROSS
-        - CRUISE_FREESPACEAVOIDANCE
-        - CRUISE_DISTANTFOLLOW
-        - CRUISE_FOLLOWBICYCLISTORTRICYLISTBRAKE
-        - CRUISE_BICYCLISTORTRICYCLISTCUTIN
-        - CRUISE_LEADCUTOUTLEADINGSTOPPED
-        - CRUISE_BICYCLISTORTRICYCLISTCROSS
-        - CRUISE_FREESPACEYIELD
-        - CRUISE_FOLLOWCARORTRUCKBRAKE
-        - CRUISE_CARORTRUCKCUTIN
-        - CRUISE_BICYCLISTORTRICYCLISTCUTOUT
-        - CRUISE_CARORTRUCKCROSS
-        - CRUISE_FOLLOWVRUBRAKE
-        - CRUISE_VRUCUTIN
-        - CRUISE_NRUBRAKE
-        - CRUISE_CLOSECUTIN
-        - CRUISE_VRUCUTOUT
-        - CRUISE_OVERTAKECUTIN
-        stop_and_go:
-        - STOPANDGO_UNKNOWN
-        - STOPANDGO_STOPBEHINDOBSTACLE
-        - STOPANDGO_STARTFOLLOWOBSTACLE
-        - STOPANDGO_STARTNONFOLLOWOBSTACLE
-        - STOPANDGO_FIRSTCARSTOPATREDLIGHT
-        - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
-        - STOPANDGO_BRAKESTOP
-        - STOPANDGO_STOP
-        - STOPANDGO_FOLLOWSTOPVEHICLE
-        - STOPANDGO_STARTCONGESTION
-        - STOPANDGO_STARTRAMP
-        - STOPANDGO_TRAFFICLIGHTGREENFLASHSTOP
-        - STOPANDGO_TRAFFICLIGHTREDSTART
-        - STOPANDGO_BRAKESTOPSTATICVEHICLE
-        - STOPANDGO_STOPINLANE
-        - STOPANDGO_FOLLOWSTOP_CONGESTION
-        - STOPANDGO_STARTCURB
-        - STOPANDGO_TRAFFICLIGHTYELLOWFLASHSTOP
-        - STOPANDGO_TRAFFICLIGHTGREENFLASHGO
-        - STOPANDGO_BRAKESTOPBICYCLISTORTRICYCLIST
-        - STOPANDGO_STOPPULLOVER
-        - STOPANDGO_FOLLOWSTOPRAMP
-        - STOPANDGO_STARTSPOT
-        - STOPANDGO_TRAFFICLIGHTYELLOWSTOP
-        - STOPANDGO_TRAFFICLIGHTINACTIVEGO
-        - STOPANDGO_BRAKESTOPVRU
-        - STOPANDGO_FOLLOWSTOPESCAPE
-        - STOPANDGO_TRAFFICLIGHTREDWAIT
-        - STOPANDGO_BRAKESTOPCONE
-        - STOPANDGO_BRAKESTOPANTICRASHBUCKET
-        - STOPANDGO_BRAKESTOPCONSTRUCTIONSIGN
-        - STOPANDGO_BRAKESTOPGRIDZONE
-        - STOPANDGO_BRAKESTOPEMERGENCY
-        lanechange:
-        - LANECHANGE_UNKNOWN
-        - LANECHANGE_NAVIGATION
-        - LANECHANGE_OVERTAKE
-        - LANECHANGE_AVOIDANCE
-        - LANECHANGE_TRUNSIGNAL
-        - LANECHANGE_ABANDON
-        - LANECHANGE_MERGEDIVERGE
-        - LANECHANGE_FREEWAY
-        - LANECHANGE_NAVLANECHANGEMAIN
-        - LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST
-        - LANECHANGE_ABANDONLANECHANGEAUTO
-        - LANECHANGE_MERGELANECHANGEDROP
-        - LANECHANGE_NAVLANECHANGEDIVERGE
-        - LANECHANGE_OVERTAKERIGHTCARORTRUCK
-        - LANECHANGE_MERGEROADZIPPER
-        - LANECHANGE_NAVLANECHANGERAMP
-        - LANECHANGE_NAVLANECHANGECONGESTION
-        - LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST
-        - LANECHANGE_OVERTAKELEFTCARORTRUCK
-        - LANECHANGE_NAVLANECHANGEPARALLEL
-        - LANECHANGE_DIVERGELANECHANGERIGHTTURN
-        - LANECHANGE_DIVERGELANECHANGESTRAIGHT
-        - LANECHANGE_NAVLANECHANGEMERGE
-        avoidance:
-        - AVOIDANCE_UNKNOWN
-        - AVOIDANCE_INLANE
-        - AVOIDANCE_INSAMELANE
-        - AVOIDANCE_INREVERSELANE
-        - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
-        - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
-        - AVOIDANCE_LANEBORROWYIELDBICYCLISTORTRICYCLIST
-        - AVOIDANCE_LANEBORROWYIELDOPPOSITE
-        - AVOIDANCE_LANEYIELDCARORTRUCK
-        - AVOIDANCE_LANEBORROWYIELDCARORTRUCK
-        - AVOIDANCE_LANEBORROWOVERTAKEOPPOSITE
-        - AVOIDANCE_LANEYIELDVRU
-        - AVOIDANCE_LANEBORROWYIELDVRU
-        - AVOIDANCE_LANEBORROWDRIVE
-        - AVOIDANCE_LANEYIELDCONE
-        - AVOIDANCE_LANEBORROWYIELDCONE
-        - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
-        - AVOIDANCE_LANEBORROWYIELDDIVERGE
-        - AVOIDANCE_LANEYIELDCRUB
-        - AVOIDANCE_LANEBORROWYIELDCLOSE
-        - AVOIDANCE_LANEBORROWYIELDSOLIDLINE
-        intersection:
-        - INTERSECTION_UNKNOWN
-        - INTERSECTION_LEFTTURN
-        - INTERSECTION_UTURN
-        - INTERSECTION_ROUNDABOUT
-        - INTERSECTION_TOLLBOOTH
-        - INTERSECTION_UTURNLEFTTURNLANE
-        - INTERSECTION_ROUNDABOUTSIGNAL
-        - INTERSECTION_TOLLBOOTHMANUAL
-        - INTERSECTION_UTURNDASHEDLINE
-        - INTERSECTION_ROUNDABOUTUNSIGNAL
-        - INTERSECTION_TOLLBOOTHETC
-        - INTERSECTION_UTURNLANE
-    stationary:
-      description: 自车静止状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 与 creeping/cruising/decelerating/accelerating/hard_braking/reversing 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    creeping:
-      description: 自车蠕行状态（极低速移动）
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    cruising:
-      description: 自车巡航状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    decelerating:
-      description: 自车减速状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    accelerating:
-      description: 自车加速状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    hard_braking:
-      description: 自车急刹车状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    reversing:
-      description: 自车倒车状态
-      sub_tags: []
-      source: cloud_operator
-      operator: SpeedStateOperator
-      dynamic_label_id: true
-      parent_operator: SpeedState
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_slightly:
-      description: 方向盘小角度转动
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 各 steering_* 标签互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_left_15_60:
-      description: 方向盘左转 15°~60°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_left_60_120:
-      description: 方向盘左转 60°~120°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_left_120_185:
-      description: 方向盘左转 120°~185°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_left_above_185:
-      description: 方向盘左转超过 185°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_right_15_60:
-      description: 方向盘右转 15°~60°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_right_60_120:
-      description: 方向盘右转 60°~120°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_right_120_185:
-      description: 方向盘右转 120°~185°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    steering_right_above_185:
-      description: 方向盘右转超过 185°
-      sub_tags: []
-      source: cloud_operator
-      operator: SteeringOperator
-      dynamic_label_id: true
-      parent_operator: Steering
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_guide_line_infos_empty:
-      description: 导航输入异常（guide_line_info_dict 为空）
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 各 navi_* 标签互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_not_in_sd:
-      description: 自车不在 SD 导航状态
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_keep:
-      description: 导航直行
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_enter:
-      description: 导航进入
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_exit:
-      description: 导航驶出
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_other:
-      description: 导航其他场景
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_turn_left:
-      description: 导航左转
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_turn_right:
-      description: 导航右转
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    navi_u_turn:
-      description: 导航掉头
-      sub_tags: []
-      source: cloud_operator
-      operator: NaviCommandOperator
-      dynamic_label_id: true
-      parent_operator: NaviCommand
-      limitations:
-      - 互斥
-      - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
-      related_tables:
-      - range_tag
-    CrossConflict:
-      description: 'TODO: 补充 CrossConflict 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    LowSpeedOvertake:
-      description: 'TODO: 补充 LowSpeedOvertake 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    ObstacleAvoidance:
-      description: 'TODO: 补充 ObstacleAvoidance 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    RunFullYellowLight:
-      description: 'TODO: 补充 RunFullYellowLight 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    RunYellowLight:
-      description: 'TODO: 补充 RunYellowLight 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    SlowFrontLaneChange:
-      description: 'TODO: 补充 SlowFrontLaneChange 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    VRUCrossConflict:
-      description: 'TODO: 补充 VRUCrossConflict 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation_curb:
-      description: 'TODO: 补充 route_deviation_curb 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation_guide_line:
-      description: 'TODO: 补充 route_deviation_guide_line 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation_sd_newpath_need_action:
-      description: 'TODO: 补充 route_deviation_sd_newpath_need_action 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation_sd_newpath_noneed_action:
-      description: 'TODO: 补充 route_deviation_sd_newpath_noneed_action 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-    route_deviation_sd_yaw:
-      description: 'TODO: 补充 route_deviation_sd_yaw 的语义描述'
-      sub_tags: []
-      source: auto_detected
-      operator: unknown
-      limitations: []
-      related_tables:
-      - range_tag
-  notes:
-  - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*, AVOIDANCE_*, INTERSECTION_*
-  - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
-  - param 列为 JSON 字符串，可用 json_extract() 提取子标签（sub_tag）、障碍物 ID 等
-not_in_sqlite:
-  description: 以下标签/结果明确不会回写到 SQLite，只输出到 JSON 文件
-  categories:
-  - name: db_py_rule_query_results
-    description: db_py_rule/ 中 SQL SELECT 查询结果
-    output: sql_query_result.json
-    examples:
-    - cross_conflict
-    - pedestrian_crossing
-    - obj_cut_in
-    - ego_cut_in
-    - meeting_oncoming
-    - left_turn_conflict
-    - right_turn_conflict
-    - Intersection_Crossing
-    - Intersection_Stop
-    note: 这些 SQL 查询 SQLite 的 ego/dynamic_obj/range_tag 等表，结果写入 JSON
-  - name: release_db_rule_py_convert_results
-    description: release_db_rule_py/ 和 raw_convert_rules/ 中标签转换结果
-    output: convert_sql.json
-    examples:
-    - Solid_LaneChange
-    - Run_RedLight
-    - Car_Cutin
-    - VruPed_Cross
-    - turning_left
-    note: 基于 range_tag 已有标签做名字映射或规则转换，输出到 JSON
-  - name: track_tags
-    description: TrackConverter 生成的 track 标签
-    output: '{bag_id}_api_track.json'
-    examples:
-    - ego_speed_track
-    - lng_action_track
-    - lat_action_track
-    - navigation_command_track
-    - intent_phase_track
-    - traffic_light_state_track
-    - lane_curvature_track
-    - link_type_track
-    - link_attribute_track
-    - link_class_track
-    note: TrackConverter 读取 sql_query_result JSON，按时间轴生成 track 片段
-  - name: user_workspace_disabled
-    description: user_workspace 中被 disabled 的算子
-    examples:
-    - CustomOperator (sufei/op_custom_operator.py, enabled=false)
-    note: 即使 enabled，也只添加示例行，不是真实业务标签
-  - name: unregistered_operators
-    description: 代码中存在但 tokenizer_processor_new.py 中未注册的算子
-    examples:
-    - BrakeStop
-    - AbnormalRightLaneChangeToRightestStopV4
-    - AbnormalRightLaneChangeToRightestStopV6
-    - SpeedIncreaseStatsOperator
-    - DataStatistics
-    - IntersectionCountOperator
-    note: 这些算子的 add_event 不会被执行
-git_version:
-  data_mining_repo: fe3781f8d19551a9678a96bd2772ee222a63392b
-  branch: data_mining/master
-  synced_at: '2026-06-30T11:30:23.916498+08:00'
-  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
+  stationary:
+    description: 自车静止状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 与 creeping/cruising/decelerating/accelerating/hard_braking/reversing 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  creeping:
+    description: 自车蠕行状态（极低速移动）
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  cruising:
+    description: 自车巡航状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  decelerating:
+    description: 自车减速状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  accelerating:
+    description: 自车加速状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  hard_braking:
+    description: 自车急刹车状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  reversing:
+    description: 自车倒车状态
+    sub_tags: []
+    source: cloud_operator
+    operator: SpeedStateOperator
+    dynamic_label_id: true
+    parent_operator: SpeedState
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_slightly:
+    description: 方向盘小角度转动
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 各 steering_* 标签互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_15_60:
+    description: 方向盘左转 15°~60°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_60_120:
+    description: 方向盘左转 60°~120°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_120_185:
+    description: 方向盘左转 120°~185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_left_above_185:
+    description: 方向盘左转超过 185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_15_60:
+    description: 方向盘右转 15°~60°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_60_120:
+    description: 方向盘右转 60°~120°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_120_185:
+    description: 方向盘右转 120°~185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  steering_right_above_185:
+    description: 方向盘右转超过 185°
+    sub_tags: []
+    source: cloud_operator
+    operator: SteeringOperator
+    dynamic_label_id: true
+    parent_operator: Steering
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_guide_line_infos_empty:
+    description: 导航输入异常（guide_line_info_dict 为空）
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 各 navi_* 标签互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_not_in_sd:
+    description: 自车不在 SD 导航状态
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_keep:
+    description: 导航直行
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_enter:
+    description: 导航进入
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_exit:
+    description: 导航驶出
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_other:
+    description: 导航其他场景
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_turn_left:
+    description: 导航左转
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_turn_right:
+    description: 导航右转
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  navi_u_turn:
+    description: 导航掉头
+    sub_tags: []
+    source: cloud_operator
+    operator: NaviCommandOperator
+    dynamic_label_id: true
+    parent_operator: NaviCommand
+    limitations:
+    - 互斥
+    - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
+    related_tables:
+    - range_tag
+  CrossConflict:
+    description: 'TODO: 补充 CrossConflict 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowSpeedOvertake:
+    description: 'TODO: 补充 LowSpeedOvertake 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  ObstacleAvoidance:
+    description: 'TODO: 补充 ObstacleAvoidance 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RunFullYellowLight:
+    description: 'TODO: 补充 RunFullYellowLight 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RunYellowLight:
+    description: 'TODO: 补充 RunYellowLight 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  SlowFrontLaneChange:
+    description: 'TODO: 补充 SlowFrontLaneChange 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  VRUCrossConflict:
+    description: 'TODO: 补充 VRUCrossConflict 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_curb:
+    description: 'TODO: 补充 route_deviation_curb 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_guide_line:
+    description: 'TODO: 补充 route_deviation_guide_line 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_newpath_need_action:
+    description: 'TODO: 补充 route_deviation_sd_newpath_need_action 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_newpath_noneed_action:
+    description: 'TODO: 补充 route_deviation_sd_newpath_noneed_action 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  route_deviation_sd_yaw:
+    description: 'TODO: 补充 route_deviation_sd_yaw 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_INLANE:
+    description: 'TODO: 补充 AVOIDANCE_INLANE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_INSAMELANE:
+    description: 'TODO: 补充 AVOIDANCE_INSAMELANE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCARORTRUCK:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCONE:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCONE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCRUB:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCRUB 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDVRU:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDVRU 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStop:
+    description: 'TODO: 补充 AbnormalRightLaneChangeToRightestStop 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStopV1:
+    description: 'TODO: 补充 AbnormalRightLaneChangeToRightestStopV1 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  Avoidance_InLane_VLM:
+    description: 'TODO: 补充 Avoidance_InLane_VLM 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCROSS:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCROSS 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCUTIN:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCUTIN 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCUTOUT:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCUTOUT 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CLOSECUTIN:
+    description: 'TODO: 补充 CRUISE_CLOSECUTIN 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CONGESTION:
+    description: 'TODO: 补充 CRUISE_CONGESTION 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CUTIN:
+    description: 'TODO: 补充 CRUISE_CUTIN 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CUTOUT:
+    description: 'TODO: 补充 CRUISE_CUTOUT 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_DISTANTFOLLOW:
+    description: 'TODO: 补充 CRUISE_DISTANTFOLLOW 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_FREESPACEAVOIDANCE:
+    description: 'TODO: 补充 CRUISE_FREESPACEAVOIDANCE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_FREESPACEYIELD:
+    description: 'TODO: 补充 CRUISE_FREESPACEYIELD 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_LEADCUTOUTLEADINGSTOPPED:
+    description: 'TODO: 补充 CRUISE_LEADCUTOUTLEADINGSTOPPED 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCROSS:
+    description: 'TODO: 补充 CRUISE_VRUCROSS 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCUTIN:
+    description: 'TODO: 补充 CRUISE_VRUCUTIN 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCUTOUT:
+    description: 'TODO: 补充 CRUISE_VRUCUTOUT 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CrossVRU:
+    description: 'TODO: 补充 CrossVRU 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  HighAccPedal:
+    description: 'TODO: 补充 HighAccPedal 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  HighSpeed:
+    description: 'TODO: 补充 HighSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_ROUNDABOUT:
+    description: 'TODO: 补充 INTERSECTION_ROUNDABOUT 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_ROUNDABOUTUNSIGNAL:
+    description: 'TODO: 补充 INTERSECTION_ROUNDABOUTUNSIGNAL 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_UTURNLANE:
+    description: 'TODO: 补充 INTERSECTION_UTURNLANE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  InteractivePedestrian:
+    description: 'TODO: 补充 InteractivePedestrian 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  InteractiveVRU:
+    description: 'TODO: 补充 InteractiveVRU 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  InteractiveVehicle:
+    description: 'TODO: 补充 InteractiveVehicle 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_AVOIDANCE:
+    description: 'TODO: 补充 LANECHANGE_AVOIDANCE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_DIVERGELANECHANGERIGHTTURN:
+    description: 'TODO: 补充 LANECHANGE_DIVERGELANECHANGERIGHTTURN 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_FREEWAY:
+    description: 'TODO: 补充 LANECHANGE_FREEWAY 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEDROP:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEDROP 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEMAINROAD:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEMAINROAD 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEZIPPER:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEZIPPER 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVIGATION:
+    description: 'TODO: 补充 LANECHANGE_NAVIGATION 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVLANECHANGECONGESTION:
+    description: 'TODO: 补充 LANECHANGE_NAVLANECHANGECONGESTION 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVLANECHANGERAMP:
+    description: 'TODO: 补充 LANECHANGE_NAVLANECHANGERAMP 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKE:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKELEFTCARORTRUCK:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKELEFTCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKERIGHTCARORTRUCK:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKERIGHTCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LongitudinalAcceleration:
+    description: 'TODO: 补充 LongitudinalAcceleration 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LongitudinalDeceleration:
+    description: 'TODO: 补充 LongitudinalDeceleration 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowSpeed:
+    description: 'TODO: 补充 LowSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowerSpeed:
+    description: 'TODO: 补充 LowerSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  MediumLowSpeed:
+    description: 'TODO: 补充 MediumLowSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  MediumSpeed:
+    description: 'TODO: 补充 MediumSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  NavLaneChangeLate:
+    description: 'TODO: 补充 NavLaneChangeLate 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OnRightestLane:
+    description: 'TODO: 补充 OnRightestLane 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OppositeLaneDriving:
+    description: 'TODO: 补充 OppositeLaneDriving 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OppositeLaneDrivingV1:
+    description: 'TODO: 补充 OppositeLaneDrivingV1 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OppositeLaneDrivingV2:
+    description: 'TODO: 补充 OppositeLaneDrivingV2 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RoadConstruction:
+    description: 'TODO: 补充 RoadConstruction 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_BRAKESTOPANTICRASHBUCKET:
+    description: 'TODO: 补充 STOPANDGO_BRAKESTOPANTICRASHBUCKET 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_BRAKESTOPCONE:
+    description: 'TODO: 补充 STOPANDGO_BRAKESTOPCONE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTCONGESTION:
+    description: 'TODO: 补充 STOPANDGO_STARTCONGESTION 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTFOLLOWOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STARTFOLLOWOBSTACLE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTNONFOLLOWOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STARTNONFOLLOWOBSTACLE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTRAMP:
+    description: 'TODO: 补充 STOPANDGO_STARTRAMP 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STOP:
+    description: 'TODO: 补充 STOPANDGO_STOP 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STOPBEHINDOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STOPBEHINDOBSTACLE 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  SpeedIncreaseStats:
+    description: 'TODO: 补充 SpeedIncreaseStats 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  Static:
+    description: 'TODO: 补充 Static 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  ToRoadsideStop:
+    description: 'TODO: 补充 ToRoadsideStop 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  WrongWay_Deviation:
+    description: 'TODO: 补充 WrongWay_Deviation 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  WrongwayNavi:
+    description: 'TODO: 补充 WrongwayNavi 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  YieldToPedestrian:
+    description: 'TODO: 补充 YieldToPedestrian 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  animal:
+    description: 'TODO: 补充 animal 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  bus:
+    description: 'TODO: 补充 bus 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  car:
+    description: 'TODO: 补充 car 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  cyclist:
+    description: 'TODO: 补充 cyclist 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_navi_guide_line_infos_empty:
+    description: 'TODO: 补充 invalid_navi_guide_line_infos_empty 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_navi_not_in_sd:
+    description: 'TODO: 补充 invalid_navi_not_in_sd 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_topology_ego_static_map_link_id_invalid:
+    description: 'TODO: 补充 invalid_topology_ego_static_map_link_id_invalid 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_topology_ego_static_map_link_id_not_match:
+    description: 'TODO: 补充 invalid_topology_ego_static_map_link_id_not_match 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_topology_no_map_schema:
+    description: 'TODO: 补充 invalid_topology_no_map_schema 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_topology_other_no_match:
+    description: 'TODO: 补充 invalid_topology_other_no_match 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  motorcyclist:
+    description: 'TODO: 补充 motorcyclist 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  pedestrian:
+    description: 'TODO: 补充 pedestrian 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  stroller:
+    description: 'TODO: 补充 stroller 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  suv:
+    description: 'TODO: 补充 suv 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_auxiliary:
+    description: 'TODO: 补充 topology_auxiliary 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_bridge:
+    description: 'TODO: 补充 topology_bridge 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_interchange:
+    description: 'TODO: 补充 topology_interchange 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_interchange_roundabout:
+    description: 'TODO: 补充 topology_interchange_roundabout 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection:
+    description: 'TODO: 补充 topology_intersection 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_cross_road:
+    description: 'TODO: 补充 topology_intersection_cross_road 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_multi_fork:
+    description: 'TODO: 补充 topology_intersection_multi_fork 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_other:
+    description: 'TODO: 补充 topology_intersection_other 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_small_cross_road:
+    description: 'TODO: 补充 topology_intersection_small_cross_road 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_small_t_junction:
+    description: 'TODO: 补充 topology_intersection_small_t_junction 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_straight_intersection:
+    description: 'TODO: 补充 topology_intersection_straight_intersection 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_t_junction:
+    description: 'TODO: 补充 topology_intersection_t_junction 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_intersection_y_junction:
+    description: 'TODO: 补充 topology_intersection_y_junction 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_left_turn_lane:
+    description: 'TODO: 补充 topology_left_turn_lane 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_main:
+    description: 'TODO: 补充 topology_main 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_merge:
+    description: 'TODO: 补充 topology_merge 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_ramp:
+    description: 'TODO: 补充 topology_ramp 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_right_turn_lane:
+    description: 'TODO: 补充 topology_right_turn_lane 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_roundabout:
+    description: 'TODO: 补充 topology_roundabout 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_service_area:
+    description: 'TODO: 补充 topology_service_area 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_split:
+    description: 'TODO: 补充 topology_split 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_toll_station:
+    description: 'TODO: 补充 topology_toll_station 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_tunnel:
+    description: 'TODO: 补充 topology_tunnel 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_tunnel_roundabout:
+    description: 'TODO: 补充 topology_tunnel_roundabout 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_unstructured_road:
+    description: 'TODO: 补充 topology_unstructured_road 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  truck:
+    description: 'TODO: 补充 truck 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  wheelchair:
+    description: 'TODO: 补充 wheelchair 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag

@@ -1,7 +1,7 @@
 version: 2.0.0
 note: '纯 SQLite 结构文件，用于 LLM SQL 生成阶段注入 prompt。
 
-  不含任何自然语言解释，只包含表名、列名、数据类型、主键、标签枚举值。
+  不含任何自然语言解释，只包含表名、列名、数据类型、主键、枚举值。
 
   字段/标签的详细定义请查阅 schema_dictionary.yaml。
 
@@ -9,81 +9,202 @@ note: '纯 SQLite 结构文件，用于 LLM SQL 生成阶段注入 prompt。
   本文件由 derive_schemas.py 从 schema_master_raw.yaml 自动派生，请勿手动编辑。'
 database_schema:
   tables:
-  - name: dynamic_lane
-    type: vertical_timeseries
+  - name: range_tag
+    type: horizontal_event
+    description: 时间区间标签表——每个标签标记一个时间区间[start_ts, end_ts]内的场景/行为
     columns:
-    - name: ts
+    - name: start_ts
       type: BIGINT
       nullable: true
       pk: true
-    - name: lane_id
-      type: TEXT
-      nullable: true
-      pk: true
-    - name: ref_link_id
-      type: INTEGER
-      nullable: true
-    - name: left_boundary_id
-      type: INTEGER
-      nullable: true
-    - name: right_boundary_id
-      type: INTEGER
-      nullable: true
-    - name: lane_type
-      type: TEXT
-      nullable: true
-    - name: lane_turn_type
-      type: TEXT
-      nullable: true
-    - name: lane_trans_type
-      type: TEXT
-      nullable: true
-    - name: predecessors
-      type: TEXT
-      nullable: true
-    - name: successors
-      type: TEXT
-      nullable: true
-    - name: lane_relate_obs_ids
-      type: TEXT
-      nullable: true
-    primary_key:
-    - ts
-    - lane_id
-  - name: dynamic_link
-    type: vertical_timeseries
-    columns:
-    - name: ts
+    - name: end_ts
       type: BIGINT
       nullable: true
       pk: true
-    - name: link_id
+    - name: tag_name
       type: TEXT
       nullable: true
       pk: true
-    - name: link_type
-      type: TEXT
-      nullable: true
-    - name: link_attribute
-      type: TEXT
-      nullable: true
-    - name: link_exp_speed_limit
-      type: FLOAT
-      nullable: true
-    - name: link_predecessor
-      type: TEXT
-      nullable: true
-    - name: link_successor
-      type: TEXT
-      nullable: true
-    - name: include_lane_ids
+      enum:
+      - AVOIDANCE_INLANE
+      - AVOIDANCE_INSAMELANE
+      - AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST
+      - AVOIDANCE_LANEYIELDCARORTRUCK
+      - AVOIDANCE_LANEYIELDCONE
+      - AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE
+      - AVOIDANCE_LANEYIELDVRU
+      - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
+      - AbnormalLaneChange
+      - AbnormalRightLaneChangeToRightestStop
+      - ActiveWiperState
+      - AvoidanceBorrowLane
+      - BinCounter
+      - CRUISE_CARORTRUCKCROSS
+      - CRUISE_CARORTRUCKCUTIN
+      - CRUISE_CARORTRUCKCUTOUT
+      - CRUISE_CLOSECUTIN
+      - CRUISE_CONGESTION
+      - CRUISE_CREEP
+      - CRUISE_CURVE
+      - CRUISE_CUTIN
+      - CRUISE_CUTOUT
+      - CRUISE_DISTANTFOLLOW
+      - CRUISE_FOLLOW
+      - CRUISE_FREESPACEAVOIDANCE
+      - CRUISE_FREESPACEYIELD
+      - CRUISE_LEADCUTOUTLEADINGSTOPPED
+      - CRUISE_RAMP
+      - CRUISE_SLOWFOLLOW
+      - CRUISE_SLOWMOVE
+      - CRUISE_STRAIGHT
+      - CRUISE_VRUCROSS
+      - CRUISE_VRUCUTIN
+      - CRUISE_VRUCUTOUT
+      - CloseFollow
+      - CongestedFollow
+      - CrossConflict
+      - CrossStopLineOnYellowLight
+      - CrossVRU
+      - CrossVehicle
+      - Cutin
+      - GreenLightNotProceeding
+      - HighAccPedal
+      - HighSteeringWheelTorque
+      - INTERSECTION_LEFTTURN
+      - INTERSECTION_RIGHTTURN
+      - INTERSECTION_ROUNDABOUT
+      - INTERSECTION_ROUNDABOUTUNSIGNAL
+      - INTERSECTION_STRAIGHT
+      - INTERSECTION_UTURNLANE
+      - InteractivePedestrian
+      - InteractiveVRU
+      - InteractiveVehicle
+      - Intersection
+      - Jerk
+      - LANECHANGE_ABANDON
+      - LANECHANGE_AVOIDANCE
+      - LANECHANGE_DIVERGELANECHANGERIGHTTURN
+      - LANECHANGE_FREEWAY
+      - LANECHANGE_MERGELANECHANGEDROP
+      - LANECHANGE_MERGELANECHANGEMAINROAD
+      - LANECHANGE_MERGELANECHANGEZIPPER
+      - LANECHANGE_NAVIGATION
+      - LANECHANGE_NAVLANECHANGECONGESTION
+      - LANECHANGE_NAVLANECHANGERAMP
+      - LANECHANGE_OVERTAKE
+      - LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST
+      - LANECHANGE_OVERTAKELEFTCARORTRUCK
+      - LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST
+      - LANECHANGE_OVERTAKERIGHTCARORTRUCK
+      - LaneChange
+      - LaneKeep
+      - LowTTC
+      - NoSpeedIncrease
+      - NotCenter
+      - ObstacleAvoidance
+      - ObstacleCollision
+      - ObstacleNearMiss
+      - OnRamp
+      - OppositeLaneDriving
+      - OtherRamp
+      - OverSpeedLimit
+      - RunFullYellowLight
+      - RunRedLight
+      - RunYellowLight
+      - STOPANDGO_BRAKESTOPANTICRASHBUCKET
+      - STOPANDGO_BRAKESTOPCONE
+      - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+      - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+      - STOPANDGO_STARTCONGESTION
+      - STOPANDGO_STARTFOLLOWOBSTACLE
+      - STOPANDGO_STARTNONFOLLOWOBSTACLE
+      - STOPANDGO_STARTRAMP
+      - STOPANDGO_STOP
+      - STOPANDGO_STOPBEHINDOBSTACLE
+      - Slope
+      - SolidLaneChange
+      - SpeedIncreaseStats
+      - SteeringSmallSwing
+      - SteeringWheelSlam
+      - StraightDriving
+      - ToRoadsideStop
+      - TrafficIntersection
+      - TrafficLightAbnormal
+      - Turning
+      - VRUCrossConflict
+      - YieldToPedestrian
+      - accelerating
+      - creeping
+      - cruising
+      - decelerating
+      - hard_braking
+      - invalid_navi_guide_line_infos_empty
+      - invalid_navi_not_in_sd
+      - invalid_topology_ego_static_map_link_id_invalid
+      - invalid_topology_ego_static_map_link_id_not_match
+      - invalid_topology_no_map_schema
+      - invalid_topology_other_no_match
+      - navi_enter
+      - navi_exit
+      - navi_keep
+      - navi_other
+      - navi_turn_left
+      - navi_turn_right
+      - navi_u_turn
+      - over_rain_level
+      - reversing
+      - route_deviation_curb
+      - route_deviation_guide_line
+      - route_deviation_sd_newpath_need_action
+      - route_deviation_sd_newpath_noneed_action
+      - route_deviation_sd_yaw
+      - stationary
+      - steering_left_120_185
+      - steering_left_15_60
+      - steering_left_60_120
+      - steering_left_above_185
+      - steering_right_120_185
+      - steering_right_15_60
+      - steering_right_60_120
+      - steering_slightly
+      - topology_auxiliary
+      - topology_bridge
+      - topology_interchange
+      - topology_interchange_roundabout
+      - topology_intersection
+      - topology_intersection_cross_road
+      - topology_intersection_multi_fork
+      - topology_intersection_other
+      - topology_intersection_small_cross_road
+      - topology_intersection_small_t_junction
+      - topology_intersection_straight_intersection
+      - topology_intersection_t_junction
+      - topology_intersection_y_junction
+      - topology_left_turn_lane
+      - topology_main
+      - topology_merge
+      - topology_ramp
+      - topology_right_turn_lane
+      - topology_roundabout
+      - topology_service_area
+      - topology_split
+      - topology_toll_station
+      - topology_tunnel
+      - topology_tunnel_roundabout
+      - topology_unstructured_road
+    - name: param
       type: TEXT
       nullable: true
     primary_key:
-    - ts
-    - link_id
+    - start_ts
+    - end_ts
+    - tag_name
+    notes:
+    - range_tag是时间区间标签表，tag_name列的枚举值是所有合法标签
+    - '标签来源: 车端行为标签(refDictEn) + 云端算子(op_*.py + feature_op)'
   - name: dynamic_obj
     type: vertical_timeseries
+    description: 动态障碍物表——每个时间步的动态物体位置/速度/类型信息
     columns:
     - name: ts
       type: BIGINT
@@ -165,6 +286,18 @@ database_schema:
     - name: type
       type: TEXT
       nullable: true
+      enum:
+      - animal
+      - bus
+      - car
+      - cyclist
+      - motorcycle
+      - motorcyclist
+      - pedestrian
+      - stroller
+      - suv
+      - truck
+      - wheelchair
     - name: absolute_velocity_x
       type: FLOAT
       nullable: true
@@ -183,8 +316,56 @@ database_schema:
     primary_key:
     - ts
     - obj_id
+  - name: static_obj
+    type: vertical_timeseries
+    description: 静态障碍物表——每个时间步的静态物体位置/类型信息
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: true
+      pk: true
+    - name: obj_id
+      type: TEXT
+      nullable: true
+      pk: true
+    - name: ts_ms
+      type: FLOAT
+      nullable: true
+    - name: x
+      type: FLOAT
+      nullable: true
+    - name: y
+      type: FLOAT
+      nullable: true
+    - name: z
+      type: FLOAT
+      nullable: true
+    - name: l
+      type: FLOAT
+      nullable: true
+    - name: w
+      type: FLOAT
+      nullable: true
+    - name: h
+      type: FLOAT
+      nullable: true
+    - name: heading
+      type: FLOAT
+      nullable: true
+    - name: type
+      type: TEXT
+      nullable: true
+      enum:
+      - traffic_warning_object
+    - name: param
+      type: TEXT
+      nullable: true
+    primary_key:
+    - ts
+    - obj_id
   - name: ego
     type: vertical_timeseries
+    description: 自车状态表——每个时间步的自车速度/加速度/转向/信号灯等状态
     columns:
     - name: ts
       type: BIGINT
@@ -244,6 +425,16 @@ database_schema:
     - name: traffic_light_status
       type: INTEGER
       nullable: true
+      enum:
+      - -1
+      - 1
+      - 2
+      - 3
+      enum_descriptions:
+        '-1': 无信号灯
+        '1': 绿灯
+        '2': 黄灯
+        '3': 红灯
     - name: ego_hq_lane_ids_on_cross_section
       type: TEXT
       nullable: true
@@ -274,15 +465,30 @@ database_schema:
     - name: latest_traffic_light_status
       type: TEXT
       nullable: true
+      enum:
+      - 绿
+      - 黄
+      - 红
+      - 未知
+      enum_descriptions:
+        绿: 绿灯
+        黄: 黄灯
+        红: 红灯
+        未知: 未知
     - name: latest_stop_line_direction
       type: FLOAT
       nullable: true
     - name: navigation_status
       type: TEXT
       nullable: true
+      enum:
+      - 导航中
     - name: wiper_status
       type: TEXT
       nullable: true
+      enum:
+      - 关闭
+      - 间歇档
     - name: indicator_status
       type: TEXT
       nullable: true
@@ -315,8 +521,11 @@ database_schema:
       nullable: true
     primary_key:
     - ts
+    notes:
+    - ego表无tag_name列，其分类列(traffic_light_status等)由车端传感器直接上报
   - name: intersection_info
     type: horizontal_event
+    description: 路口信息表——记录路口ID、车道数、自车车道索引、车道详情
     columns:
     - name: intersection_id
       type: TEXT
@@ -332,104 +541,9 @@ database_schema:
       nullable: true
     notes:
     - 存储 EgoIntoIntersection 事件，从 range_tag 中过滤后单独存放
-  - name: range_tag
-    type: horizontal_event
-    columns:
-    - name: start_ts
-      type: BIGINT
-      nullable: true
-      pk: true
-    - name: end_ts
-      type: BIGINT
-      nullable: true
-      pk: true
-    - name: tag_name
-      type: TEXT
-      nullable: true
-      pk: true
-    - name: param
-      type: TEXT
-      nullable: true
-    primary_key:
-    - start_ts
-    - end_ts
-    - tag_name
-    enum:
-    - AbnormalLaneChange
-    - ActiveWiperState
-    - AvoidanceBorrowLane
-    - Avoidance_InLane
-    - CloseFollow
-    - CrawlingFollow
-    - CrossConflict
-    - CrossStopLineOnYellowLight
-    - CrossVRUV1
-    - CrossVehicle
-    - Cutin
-    - GreenLightNotProceeding
-    - HighSteeringWheelTorque
-    - Intersection
-    - Jerk
-    - LaneChange
-    - LaneKeep
-    - LowSpeedOvertake
-    - LowTTC
-    - NotCenter
-    - ObstacleAvoidance
-    - ObstacleCollision
-    - ObstacleNearMiss
-    - OverSpeedLimit
-    - RunFullYellowLight
-    - RunRedLight
-    - RunYellowLight
-    - Slope
-    - SlowFrontLaneChange
-    - SolidLaneChange
-    - SteeringSmallSwing
-    - SteeringWheelSlam
-    - StraightDriving
-    - TrafficIntersection
-    - TrafficLightAbnormal
-    - Turning
-    - VRUCrossConflict
-    - accelerating
-    - creeping
-    - cruising
-    - decelerating
-    - hard_braking
-    - over_rain_level
-    - reversing
-    - route_deviation_curb
-    - route_deviation_guide_line
-    - route_deviation_sd_newpath_need_action
-    - route_deviation_sd_newpath_noneed_action
-    - route_deviation_sd_yaw
-    - stationary
-    - steering_left_120_185
-    - steering_left_15_60
-    - steering_left_60_120
-    - steering_left_above_185
-    - steering_right_120_185
-    - steering_right_15_60
-    - steering_right_60_120
-    - steering_right_above_185
-    - steering_slightly
-    notes:
-    - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*,
-      AVOIDANCE_*, INTERSECTION_*
-    - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
-    - param 列为 JSON 字符串，可用 json_extract() 提取子标签（sub_tag）、障碍物 ID 等
-  - name: static_lane
-    type: static
-    columns:
-    - name: lane_id
-      type: TEXT
-      nullable: true
-      pk: true
-    primary_key:
-    - lane_id
   - name: static_link
     type: static
+    description: 静态道路链接表——道路拓扑链接的静态属性
     columns:
     - name: link_id
       type: TEXT
@@ -438,15 +552,42 @@ database_schema:
     - name: link_type
       type: TEXT
       nullable: true
+      enum:
+      - 主干道
+      - 主路
+      - 入口匝道
+      - 匝道
+      - 路口
+      - 辅路
     - name: link_turn_type
       type: TEXT
       nullable: true
+      enum:
+      - 右转
+      - 左转
+      - 掉头
+      - 直行
+      - 直行右转
+      - 路口
+      - 进入
+      - 退出
     - name: link_class
       type: TEXT
       nullable: true
+      enum:
+      - 主要大街/城市快速道
+      - 主要道路
+      - 国道
+      - 次要道路
+      - 省道
+      - 高速公路
     - name: link_attribute
       type: TEXT
       nullable: true
+      enum:
+      - 无特殊属性
+      - 隧道
+      - 其他
     - name: link_speed_limit
       type: FLOAT
       nullable: true
@@ -461,47 +602,117 @@ database_schema:
       nullable: true
     primary_key:
     - link_id
-  - name: static_obj
+  - name: dynamic_link
     type: vertical_timeseries
+    description: 动态道路链接表——随时间变化的道路拓扑链接属性
     columns:
     - name: ts
       type: BIGINT
       nullable: true
       pk: true
-    - name: obj_id
+    - name: link_id
       type: TEXT
       nullable: true
       pk: true
-    - name: ts_ms
-      type: FLOAT
-      nullable: true
-    - name: x
-      type: FLOAT
-      nullable: true
-    - name: y
-      type: FLOAT
-      nullable: true
-    - name: z
-      type: FLOAT
-      nullable: true
-    - name: l
-      type: FLOAT
-      nullable: true
-    - name: w
-      type: FLOAT
-      nullable: true
-    - name: h
-      type: FLOAT
-      nullable: true
-    - name: heading
-      type: FLOAT
-      nullable: true
-    - name: type
+    - name: link_type
       type: TEXT
       nullable: true
-    - name: param
+      enum:
+      - 主干道
+      - 主路
+      - 入口匝道
+      - 匝道
+      - 路口
+      - 辅路
+    - name: link_attribute
+      type: TEXT
+      nullable: true
+      enum:
+      - 无特殊属性
+      - 隧道
+      - 其他
+    - name: link_exp_speed_limit
+      type: FLOAT
+      nullable: true
+    - name: link_predecessor
+      type: TEXT
+      nullable: true
+    - name: link_successor
+      type: TEXT
+      nullable: true
+    - name: include_lane_ids
       type: TEXT
       nullable: true
     primary_key:
     - ts
-    - obj_id
+    - link_id
+  - name: dynamic_lane
+    type: vertical_timeseries
+    description: 动态车道表——随时间变化的车道属性
+    columns:
+    - name: ts
+      type: BIGINT
+      nullable: true
+      pk: true
+    - name: lane_id
+      type: TEXT
+      nullable: true
+      pk: true
+    - name: ref_link_id
+      type: INTEGER
+      nullable: true
+    - name: left_boundary_id
+      type: INTEGER
+      nullable: true
+    - name: right_boundary_id
+      type: INTEGER
+      nullable: true
+    - name: lane_type
+      type: TEXT
+      nullable: true
+      enum:
+      - LANE_TYPE_EMERGENCY
+      - 未知
+    - name: lane_turn_type
+      type: TEXT
+      nullable: true
+      enum:
+      - TURN_TYPE_AHEADRIGHT
+      - TURN_TYPE_LEFTLUTURN
+      - 右转
+      - 左转
+      - 掉头
+      - 直行
+      - 路口
+    - name: lane_trans_type
+      type: TEXT
+      nullable: true
+      enum:
+      - TRANS_TYPE_Ending
+      - TRANS_TYPE_FullConnect
+      - TRANS_TYPE_LeftConnect
+      - TRANS_TYPE_OneSplitTwo
+      - TRANS_TYPE_RightConnect
+      - TRANS_TYPE_UNDEFINED
+    - name: predecessors
+      type: TEXT
+      nullable: true
+    - name: successors
+      type: TEXT
+      nullable: true
+    - name: lane_relate_obs_ids
+      type: TEXT
+      nullable: true
+    primary_key:
+    - ts
+    - lane_id
+  - name: static_lane
+    type: static
+    description: 静态车道表——车道的静态属性
+    columns:
+    - name: lane_id
+      type: TEXT
+      nullable: true
+      pk: true
+    primary_key:
+    - lane_id

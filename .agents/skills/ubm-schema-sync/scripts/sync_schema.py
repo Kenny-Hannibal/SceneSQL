@@ -414,14 +414,21 @@ def sync_etl_core_tables() -> dict:
 def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
     """从算子源码中提取所有可能的 label_id 值。
     
+    标签写入SQLite range_tag有两个来源：
+    1. 云端算子（op_*.py）→ add_event() → TokenizerResult → to_sqlite_db.py
+    2. 车端行为标签（em_behavior_tag_parser.py）→ tag_map.py/refDictEn → TokenizerResult
+    
     扫描路径:
-    - L2_Pred/rule_based_mining/semantic_mining/activity_new/op_*.py (cloud算子)
+    - L2_Pred/rule_based_mining/semantic_mining/activity_new/op_*.py (云端算子，含past_op子目录)
     - user_workspace/*/op_*.py (用户算子)
+    - gsbag_parser/tag_map.py → refDictEn (车端行为标签)
     
     提取策略:
     1. 固定 label_id: label_id = "xxx" 或 "label_id": "xxx"
-    2. 动态 label_id: 从 *_MAP / *_NAME_MAP 等字典中提取值
-    3. add_event() 调用中的 label_id
+    2. 字典值映射 — *_MAP 中的值
+    3. tag_name 赋值
+    4. event dict 中 "name" 字段（add_event前的构建）
+    5. refDictEn 车端行为标签
     """
     base = repo_path
     if not (base / "UBM_mining" / "ubm_data_mining").exists():
@@ -432,19 +439,35 @@ def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
     
     label_ids = set()
     
-    # 扫描 cloud 算子
+    # ---- 来源1: 云端算子 (activity_new/op_*.py) ----
     cloud_dir = ubm / "L2_Pred" / "rule_based_mining" / "semantic_mining" / "activity_new"
     if cloud_dir.exists():
+        # 主目录
         for op_file in sorted(cloud_dir.glob("op_*.py")):
             label_ids.update(_extract_from_file(op_file))
+        # past_op子目录（含历史算子如op_congested_follow.py）
+        for sub in cloud_dir.rglob("op_*.py"):
+            label_ids.update(_extract_from_file(sub))
     
-    # 扫描 user_workspace 算子
+    # ---- 来源2: 用户算子 (user_workspace) ----
     ws_dir = ubm / "user_workspace"
     if ws_dir.exists():
         for author_dir in sorted(ws_dir.iterdir()):
             if author_dir.is_dir():
                 for op_file in sorted(author_dir.glob("op_*.py")):
                     label_ids.update(_extract_from_file(op_file))
+    
+    # ---- 来源2b: feature_op算子 (feature_op/) ----
+    # 包含 topology_constraint_feature.py 等，产出topology_*和invalid_*标签
+    feature_dir = ubm / "L2_Pred" / "rule_based_mining" / "semantic_mining" / "feature_op"
+    if feature_dir.exists():
+        for feat_file in sorted(feature_dir.glob("*.py")):
+            label_ids.update(_extract_feature_tags(feat_file))
+    
+    # ---- 来源3: 车端行为标签 (tag_map.py → refDictEn) ----
+    tag_map_path = ubm / "gsbag_parser" / "tag_map.py"
+    if tag_map_path.exists():
+        label_ids.update(_extract_refDictEn(tag_map_path))
     
     # 排除不可能出现在 range_tag 中的值
     # 以及被 CASE WHEN THEN 重命名的原始 label_id（真实 tag_name 是重命名后的版本）
@@ -456,9 +479,74 @@ def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
         "steering_m60_m15", "steering_m120_m60", "steering_m185_m120", "steering_below_m185",
     }
     exclude.update(_RENAMED_RAW_IDS)
+    # 车端标签中有些typo/无效值
+    _INVALID_VEH_TAGS = {
+        "CRUISE YIELOTOPEDESTRIANS",  # typo: 应为CRUISE_YIELDTOPEDESTRIANS但从未出现在SQLite中
+        "NTERSECTION_UTURN",           # typo: 少了I，实际写入SQLite时已修正为INTERSECTION_UTURN
+        "NTERSECTION_UTURNDASHEDLINE", # typo同上
+    }
+    exclude.update(_INVALID_VEH_TAGS)
     label_ids -= exclude
     
     return sorted(label_ids)
+
+
+def _extract_refDictEn(tag_map_path: Path) -> set[str]:
+    """从 tag_map.py 的 refDictEn 字典中提取所有车端行为标签。
+    
+    这些标签由 em_behavior_tag_parser.py 产出到 TokenizerResult，
+    最终由 to_sqlite_db.py 写入 SQLite range_tag 表。
+    refDictEn 格式: {"0": "INTERSECTION_STRAIGHT", "1": "INTERSECTION_RIGHTTURN", ...}
+    """
+    content = tag_map_path.read_text(errors="ignore")
+    ids = set()
+    
+    # 匹配 refDictEn 字典中的值: "key": "VALUE"
+    # 先定位 refDictEn 块
+    in_refdicten = False
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if "refDictEn" in stripped and "=" in stripped and "{" in stripped:
+            in_refdicten = True
+        if in_refdicten:
+            # 匹配 "数字": "LABEL_NAME"
+            m = re.match(r'\s*"\d+"\s*:\s*"([A-Za-z_][A-Za-z0-9_ ]*)"', stripped)
+            if m:
+                val = m.group(1).strip()
+                if val:
+                    ids.add(val)
+            # 字典结束
+            if "}" in stripped and not stripped.startswith("#"):
+                # 简单检测：行尾}且前面没有{（说明是关闭行）
+                if stripped.endswith("}") and "{" not in stripped:
+                    in_refdicten = False
+    
+    return ids
+
+
+def _extract_feature_tags(filepath: Path) -> set[str]:
+    """从 feature_op 目录的文件中提取标签。
+    
+    重点关注 topology_constraint_feature.py 中的 col_to_tag 字典映射，
+    该文件产出 topology_* 和 invalid_* 标签。
+    格式: 'is_p2_split': 'topology_split', ...
+    """
+    content = filepath.read_text(errors="ignore")
+    ids = set()
+    
+    # 提取 col_to_tag 或类似字典中的值
+    # 匹配 'key': 'value' 模式，value 以 topology_ 或 invalid_ 或 navi_ 开头
+    for m in re.finditer(r"['\"][\w]+['\"]:\s*['\"]([a-z_][a-z0-9_]*)['\"]", content):
+        val = m.group(1)
+        # 只添加看起来是range_tag标签的值（小写+下划线，以已知前缀开头）
+        if any(val.startswith(p) for p in ("topology_", "invalid_", "navi_")):
+            ids.add(val)
+    
+    # 也提取数字key: 'value' 模式（同策略2）
+    for m in re.finditer(r'\d+:\s*["\']([a-z_][a-z0-9_]*)["\']', content):
+        ids.add(m.group(1))
+    
+    return ids
 
 
 def _extract_from_file(filepath: Path) -> set[str]:
@@ -471,8 +559,11 @@ def _extract_from_file(filepath: Path) -> set[str]:
         ids.add(m.group(1))
     
     # 策略2: 字典值映射 — 如 YAW_STATUS_NAME_MAP = {1: 'route_deviation_curb', ...}
-    # 匹配 数字key: 'value' 模式（限 activity_new 目录下的算子）
-    if "activity_new" in str(filepath):
+    # 或 NAVI_STATE_INDEX_MAP = {1: "navi_keep", ...}
+    # 匹配 数字key: 'value' 模式（activity_new + user_workspace + feature_op 目录下的算子）
+    fname = str(filepath)
+    if any(d in fname for d in ("activity_new", "user_workspace", "feature_op")):
+        # 小写标签：route_deviation_*, navi_*, invalid_* 等
         for m in re.finditer(r'\d+:\s*["\']([a-z_][a-z0-9_]*)["\']', content):
             ids.add(m.group(1))
     
@@ -483,6 +574,35 @@ def _extract_from_file(filepath: Path) -> set[str]:
         _OBJ_TYPE_VALUES = {"animal", "bus", "car", "cyclist", "motorcyclist",
                            "pedestrian", "stroller", "suv", "truck", "wheelchair"}
         if val.lower() not in _OBJ_TYPE_VALUES:
+            ids.add(val)
+    
+    # 策略4: event dict 中 "name" 字段 — 当算子没有显式 label_id 时，
+    # add_event() 中 event["label_id"] = event["name"]（tokenizer_processor_new.py逻辑）
+    # 匹配 "name": "XXX" 在 event 构建字典中
+    for m in re.finditer(r'"name"\s*:\s*"([A-Za-z_][A-Za-z0-9_]*)"', content):
+        val = m.group(1)
+        # 排除算子自身类名
+        _OPERATOR_CLASS_NAMES = {
+            "NaviCommand", "OnRampOperator", "OtherRampOperator",
+        }
+        if val in _OPERATOR_CLASS_NAMES:
+            continue
+        # 策略4a: 全大写+下划线 → 典型range_tag标签
+        if val.isupper() and "_" in val:
+            ids.add(val)
+        # 策略4b: 已知算子产出的tag_name（通过event["name"] → label_id映射）
+        _KNOWN_EVENT_NAME_TAGS = {
+            "OnRamp", "OtherRamp", "BinCounter", "NoSpeedIncrease",
+            "CongestedFollow", "CloseFollow", "CrawlingFollow",
+        }
+        if val in _KNOWN_EVENT_NAME_TAGS:
+            ids.add(val)
+    
+    # 策略5: 函数调用中的字符串参数 — 如 _build_event_info(..., "OnRamp")
+    # 某些算子通过变量传递event_name，但调用处使用字符串字面量
+    for m in re.finditer(r'(?:_build_event_info|add_event)\s*\([^)]*"([A-Z][A-Za-z0-9_]*)"', content):
+        val = m.group(1)
+        if val not in {"Operator", "OperatorBranch", "BaseOperator"}:
             ids.add(val)
     
     return ids
@@ -607,7 +727,7 @@ def main():
         sys.exit(0)
 
     # 获取相关 commit
-    print(f"[INFO] 分析 {old_hash[:12]}..{new_hash[:12]} 的变更...")
+    print(f"[INFO] 分析 {old_hash[:12] if old_hash else 'N/A'}..{new_hash[:12]} 的变更...")
     commits = get_commit_log(repo_path, old_hash, new_hash)
     impact = analyze_impact(commits)
 

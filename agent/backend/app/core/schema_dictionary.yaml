@@ -16,6 +16,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_abnormal_lane_change.py
   AbnormalRightLaneChangeToRightestStopV3:
     description: 自车无合理动机异常右变道到最右车道停车（V3 版本）
     sub_tags:
@@ -44,6 +45,7 @@ tags:
     - 仅在雨刮器启动时触发，不记录关闭状态
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_wiper.py
   AvoidanceBorrowLane:
     description: 自车借用左右车道避让前方障碍物后返回原车道
     sub_tags:
@@ -55,6 +57,7 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_avoidance_borrow_lane.py
   Avoidance_InLane:
     description: 自车在当前车道内避让前方障碍物
     sub_tags:
@@ -75,6 +78,7 @@ tags:
     - 每袋仅生成一个事件，用于产线数据校验
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_bin_counter.py
   CloseFollow:
     description: 自车与前车近距离跟车（高碰撞风险）
     sub_tags:
@@ -85,6 +89,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_close_follow.py
   CrossStopLineOnYellowLight:
     description: 车辆黄灯期间越过停止线
     sub_tags:
@@ -94,6 +99,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   CrossVRUV1:
     description: VRU（行人/骑行者）横穿自车路径
     sub_tags:
@@ -118,6 +124,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_vehicle.py
   CrawlingFollow:
     description: 极低速蠕行跟车（走走停停、车距极近）
     sub_tags:
@@ -143,6 +150,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cutin.py
   GreenLightNotProceeding:
     description: 绿灯亮起后车辆未及时起步通行
     sub_tags:
@@ -152,6 +160,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   HighSteeringWheelTorque:
     description: 方向盘力矩过大
     sub_tags:
@@ -161,6 +170,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_high_steering_torque.py
   Intersection:
     description: 自车处于路口区域（直行 / 左转 / 右转 / 掉头 / 不稳定路口）
     sub_tags:
@@ -176,6 +186,7 @@ tags:
     - 与 INTERSECTION_STRAIGHT/INTERSECTION_RIGHTTURN（车端标签）不同源，不重复
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_intersection.py
   Jerk:
     description: 自车急加速或急刹车（加加速度突变）
     sub_tags:
@@ -187,6 +198,7 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_jerk.py
   LaneChange:
     description: 自车执行变道行为
     sub_tags:
@@ -199,16 +211,18 @@ tags:
     - 实线变道被单独标记为 SolidLaneChange，不在此标签内
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_lane_change.py
   LaneKeep:
     description: 自车保持当前车道直行
     sub_tags:
     - LaneKeep
-    source: add_table_direct
+    source: cloud_operator
     operator: op_lane_keep.py
     limitations:
     - 此标签不走 add_event 路径，而是通过 add_table 直接写入 virtual_table
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_lane_keep.py
   LaneMerging:
     description: 自车行驶在车道合并路段
     sub_tags: []
@@ -228,6 +242,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_low_ttc.py
   NoSpeedIncrease:
     description: 自车低于限速且不主动提速（不追限速）
     sub_tags:
@@ -238,6 +253,7 @@ tags:
     - sub_tag 表示速度差区间，存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_no_speed_increase.py
   NotCenter:
     description: 自车未在车道中心行驶
     sub_tags: []
@@ -246,6 +262,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_not_center.py
   ObstacleCollision:
     description: 自车与障碍物发生碰撞
     sub_tags:
@@ -256,6 +273,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_collision.py
   ObstacleNearMiss:
     description: 自车与障碍物发生近碰（未实际碰撞但距离极近）
     sub_tags:
@@ -266,6 +284,7 @@ tags:
     related_tables:
     - range_tag
     - dynamic_obj
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_near_miss.py
   OffRamp:
     description: 自车行驶在高速 / 快速路下匝道
     sub_tags:
@@ -284,6 +303,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_on_ramp.py
   OtherRamp:
     description: 自车行驶在其他匝道路段
     sub_tags:
@@ -293,6 +313,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_other_ramp.py
   OverSpeedLimit:
     description: 自车行驶速度超过道路限速
     sub_tags:
@@ -302,6 +323,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_over_speed.py
   RainLevel:
     description: 降雨状态（小雨 / 中雨 / 大雨，持续超 10 秒）
     sub_tags:
@@ -332,10 +354,11 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   Slope:
     description: 车辆行驶在坡道路段
     sub_tags: []
-    source: user_workspace
+    source: cloud_operator
     operator: SlopeSchemaOperator
     author: zhanglikai
     limitations:
@@ -343,6 +366,7 @@ tags:
     - sub_tag（上坡/下坡等）存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_slope.py
   SolidLaneChange:
     description: 车辆在实线区域违规变道
     sub_tags:
@@ -354,6 +378,7 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_solid_lane_change.py
   SteeringSmallSwing:
     description: 方向盘小角度左右连续交替摆动
     sub_tags:
@@ -363,6 +388,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_steering_small_swing.py
   SteeringWheelSlam:
     description: 自车猛打方向盘（短时高强度急转向）
     sub_tags:
@@ -372,6 +398,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_steering_wheel_slam.py
   StraightDriving:
     description: 自车直行超过 3 秒（测试标签）
     sub_tags:
@@ -384,6 +411,7 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_straight_driving.py
   TrafficIntersection:
     description: 自车处于交通灯控制的路口
     sub_tags:
@@ -393,6 +421,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_intersection.py
   TrafficLightAbnormal:
     description: 交通灯信号状态异常
     sub_tags:
@@ -402,6 +431,7 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   Turning:
     description: 自车转向（左转 / 右转 / 掉头）
     sub_tags:
@@ -414,6 +444,7 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_turning.py
   YellowLightStop:
     description: 黄灯停车控制
     sub_tags: []
@@ -433,7 +464,7 @@ tags:
   CRUISE_CURVE:
     description: 弯道巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -443,7 +474,7 @@ tags:
   CRUISE_FOLLOW:
     description: 跟行巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -452,7 +483,7 @@ tags:
   CRUISE_STRAIGHT:
     description: 直道巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -461,7 +492,7 @@ tags:
   INTERSECTION_RIGHTTURN:
     description: 路口右转
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: INTERSECTION
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -471,7 +502,7 @@ tags:
   INTERSECTION_STRAIGHT:
     description: 路口直行
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: INTERSECTION
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -481,7 +512,7 @@ tags:
   AVOIDANCE_MULTIOBSTACLEAROUNDEGO:
     description: 多障碍物绕行避让
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: AVOIDANCE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -495,10 +526,11 @@ tags:
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/past_op/valid/op_congested_follow.py
   CRUISE_CREEP:
     description: 蠕行巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -507,7 +539,7 @@ tags:
   CRUISE_RAMP:
     description: 匝道巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -516,7 +548,7 @@ tags:
   CRUISE_SLOWFOLLOW:
     description: 慢行跟车巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -525,7 +557,7 @@ tags:
   CRUISE_SLOWMOVE:
     description: 慢行巡航
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: CRUISE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -534,7 +566,7 @@ tags:
   INTERSECTION_LEFTTURN:
     description: 路口左转
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: INTERSECTION
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -544,7 +576,7 @@ tags:
   LANECHANGE_ABANDON:
     description: 放弃变道
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: LANECHANGE
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -564,10 +596,11 @@ tags:
     - sub_tag 信息存储在 param JSON 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/weather_feature.py
   STOPANDGO_FIRSTCARSTARTATGREENLIGHT:
     description: 红绿灯路口首车绿灯起步
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: STOPANDGO
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -576,7 +609,7 @@ tags:
   STOPANDGO_FIRSTCARSTOPATREDLIGHT:
     description: 红绿灯路口首车红灯停车
     sub_tags: []
-    source: car_end_behavior_tag
+    source: vehicle
     category: STOPANDGO
     limitations:
     - 车端标签，来自 bag 文件的 beh_tag 消息
@@ -725,6 +758,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   creeping:
     description: 自车蠕行状态（极低速移动）
     sub_tags: []
@@ -737,6 +771,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   cruising:
     description: 自车巡航状态
     sub_tags: []
@@ -749,6 +784,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   decelerating:
     description: 自车减速状态
     sub_tags: []
@@ -761,6 +797,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   accelerating:
     description: 自车加速状态
     sub_tags: []
@@ -773,6 +810,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   hard_braking:
     description: 自车急刹车状态
     sub_tags: []
@@ -785,6 +823,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   reversing:
     description: 自车倒车状态
     sub_tags: []
@@ -797,6 +836,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/ego_motion_feature.py
   steering_slightly:
     description: 方向盘小角度转动
     sub_tags: []
@@ -809,6 +849,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_left_15_60:
     description: 方向盘左转 15°~60°
     sub_tags: []
@@ -821,6 +862,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_left_60_120:
     description: 方向盘左转 60°~120°
     sub_tags: []
@@ -833,6 +875,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_left_120_185:
     description: 方向盘左转 120°~185°
     sub_tags: []
@@ -845,6 +888,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_left_above_185:
     description: 方向盘左转超过 185°
     sub_tags: []
@@ -857,6 +901,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_right_15_60:
     description: 方向盘右转 15°~60°
     sub_tags: []
@@ -869,6 +914,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_right_60_120:
     description: 方向盘右转 60°~120°
     sub_tags: []
@@ -881,6 +927,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_right_120_185:
     description: 方向盘右转 120°~185°
     sub_tags: []
@@ -893,6 +940,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/steering_feature.py
   steering_right_above_185:
     description: 方向盘右转超过 185°
     sub_tags: []
@@ -941,6 +989,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_enter:
     description: 导航进入
     sub_tags: []
@@ -953,6 +1002,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_exit:
     description: 导航驶出
     sub_tags: []
@@ -965,6 +1015,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_other:
     description: 导航其他场景
     sub_tags: []
@@ -977,6 +1028,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_turn_left:
     description: 导航左转
     sub_tags: []
@@ -989,6 +1041,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_turn_right:
     description: 导航右转
     sub_tags: []
@@ -1001,6 +1054,7 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   navi_u_turn:
     description: 导航掉头
     sub_tags: []
@@ -1013,14 +1067,16 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
   CrossConflict:
     description: 'TODO: 补充 CrossConflict 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_conflict.py
   LowSpeedOvertake:
     description: 'TODO: 补充 LowSpeedOvertake 的语义描述'
     sub_tags: []
@@ -1032,27 +1088,30 @@ tags:
   ObstacleAvoidance:
     description: 'TODO: 补充 ObstacleAvoidance 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_obstacle_avoidance.py
   RunFullYellowLight:
     description: 'TODO: 补充 RunFullYellowLight 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   RunYellowLight:
     description: 'TODO: 补充 RunYellowLight 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_traffic_light.py
   SlowFrontLaneChange:
     description: 'TODO: 补充 SlowFrontLaneChange 的语义描述'
     sub_tags: []
@@ -1064,48 +1123,1081 @@ tags:
   VRUCrossConflict:
     description: 'TODO: 补充 VRUCrossConflict 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_vru_cross_conflict.py
   route_deviation_curb:
     description: 'TODO: 补充 route_deviation_curb 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
   route_deviation_guide_line:
     description: 'TODO: 补充 route_deviation_guide_line 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
   route_deviation_sd_newpath_need_action:
     description: 'TODO: 补充 route_deviation_sd_newpath_need_action 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
   route_deviation_sd_newpath_noneed_action:
     description: 'TODO: 补充 route_deviation_sd_newpath_noneed_action 的语义描述'
     sub_tags: []
-    source: auto_detected
+    source: cloud_operator
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
   route_deviation_sd_yaw:
     description: 'TODO: 补充 route_deviation_sd_yaw 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/route_deviation_feature.py
+  AVOIDANCE_INLANE:
+    description: 'TODO: 补充 AVOIDANCE_INLANE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_INSAMELANE:
+    description: 'TODO: 补充 AVOIDANCE_INSAMELANE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCARORTRUCK:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCONE:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCONE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDCRUB:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDCRUB 的语义描述'
     sub_tags: []
     source: auto_detected
     operator: unknown
     limitations: []
     related_tables:
     - range_tag
+  AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDTRUCKINADJACENTLANE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AVOIDANCE_LANEYIELDVRU:
+    description: 'TODO: 补充 AVOIDANCE_LANEYIELDVRU 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  AbnormalRightLaneChangeToRightestStop:
+    description: 'TODO: 补充 AbnormalRightLaneChangeToRightestStop 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_abnormal_right_lc_stop.py
+  AbnormalRightLaneChangeToRightestStopV1:
+    description: 'TODO: 补充 AbnormalRightLaneChangeToRightestStopV1 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  Avoidance_InLane_VLM:
+    description: 'TODO: 补充 Avoidance_InLane_VLM 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCROSS:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCROSS 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCUTIN:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCUTIN 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CARORTRUCKCUTOUT:
+    description: 'TODO: 补充 CRUISE_CARORTRUCKCUTOUT 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CLOSECUTIN:
+    description: 'TODO: 补充 CRUISE_CLOSECUTIN 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CONGESTION:
+    description: 'TODO: 补充 CRUISE_CONGESTION 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CUTIN:
+    description: 'TODO: 补充 CRUISE_CUTIN 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_CUTOUT:
+    description: 'TODO: 补充 CRUISE_CUTOUT 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_DISTANTFOLLOW:
+    description: 'TODO: 补充 CRUISE_DISTANTFOLLOW 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_FREESPACEAVOIDANCE:
+    description: 'TODO: 补充 CRUISE_FREESPACEAVOIDANCE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_FREESPACEYIELD:
+    description: 'TODO: 补充 CRUISE_FREESPACEYIELD 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_LEADCUTOUTLEADINGSTOPPED:
+    description: 'TODO: 补充 CRUISE_LEADCUTOUTLEADINGSTOPPED 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCROSS:
+    description: 'TODO: 补充 CRUISE_VRUCROSS 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCUTIN:
+    description: 'TODO: 补充 CRUISE_VRUCUTIN 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CRUISE_VRUCUTOUT:
+    description: 'TODO: 补充 CRUISE_VRUCUTOUT 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  CrossVRU:
+    description: 'TODO: 补充 CrossVRU 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_cross_vru.py
+  HighAccPedal:
+    description: 'TODO: 补充 HighAccPedal 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_high_acc_pedal.py
+  HighSpeed:
+    description: 'TODO: 补充 HighSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_ROUNDABOUT:
+    description: 'TODO: 补充 INTERSECTION_ROUNDABOUT 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_ROUNDABOUTUNSIGNAL:
+    description: 'TODO: 补充 INTERSECTION_ROUNDABOUTUNSIGNAL 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  INTERSECTION_UTURNLANE:
+    description: 'TODO: 补充 INTERSECTION_UTURNLANE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  InteractivePedestrian:
+    description: 'TODO: 补充 InteractivePedestrian 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_pedestrian.py
+  InteractiveVRU:
+    description: 'TODO: 补充 InteractiveVRU 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_vru.py
+  InteractiveVehicle:
+    description: 'TODO: 补充 InteractiveVehicle 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_interactive_vehicle.py
+  LANECHANGE_AVOIDANCE:
+    description: 'TODO: 补充 LANECHANGE_AVOIDANCE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_DIVERGELANECHANGERIGHTTURN:
+    description: 'TODO: 补充 LANECHANGE_DIVERGELANECHANGERIGHTTURN 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_FREEWAY:
+    description: 'TODO: 补充 LANECHANGE_FREEWAY 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEDROP:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEDROP 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEMAINROAD:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEMAINROAD 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_MERGELANECHANGEZIPPER:
+    description: 'TODO: 补充 LANECHANGE_MERGELANECHANGEZIPPER 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVIGATION:
+    description: 'TODO: 补充 LANECHANGE_NAVIGATION 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVLANECHANGECONGESTION:
+    description: 'TODO: 补充 LANECHANGE_NAVLANECHANGECONGESTION 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_NAVLANECHANGERAMP:
+    description: 'TODO: 补充 LANECHANGE_NAVLANECHANGERAMP 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKE:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKELEFTBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKELEFTCARORTRUCK:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKELEFTCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKERIGHTBICYCLISTORTRICYCLIST 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LANECHANGE_OVERTAKERIGHTCARORTRUCK:
+    description: 'TODO: 补充 LANECHANGE_OVERTAKERIGHTCARORTRUCK 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LongitudinalAcceleration:
+    description: 'TODO: 补充 LongitudinalAcceleration 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LongitudinalDeceleration:
+    description: 'TODO: 补充 LongitudinalDeceleration 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowSpeed:
+    description: 'TODO: 补充 LowSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  LowerSpeed:
+    description: 'TODO: 补充 LowerSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  MediumLowSpeed:
+    description: 'TODO: 补充 MediumLowSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  MediumSpeed:
+    description: 'TODO: 补充 MediumSpeed 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  NavLaneChangeLate:
+    description: 'TODO: 补充 NavLaneChangeLate 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OnRightestLane:
+    description: 'TODO: 补充 OnRightestLane 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OppositeLaneDriving:
+    description: 'TODO: 补充 OppositeLaneDriving 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_opposite_lane_driving.py
+  OppositeLaneDrivingV1:
+    description: 'TODO: 补充 OppositeLaneDrivingV1 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  OppositeLaneDrivingV2:
+    description: 'TODO: 补充 OppositeLaneDrivingV2 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  RoadConstruction:
+    description: 'TODO: 补充 RoadConstruction 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_BRAKESTOPANTICRASHBUCKET:
+    description: 'TODO: 补充 STOPANDGO_BRAKESTOPANTICRASHBUCKET 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_BRAKESTOPCONE:
+    description: 'TODO: 补充 STOPANDGO_BRAKESTOPCONE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTCONGESTION:
+    description: 'TODO: 补充 STOPANDGO_STARTCONGESTION 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTFOLLOWOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STARTFOLLOWOBSTACLE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTNONFOLLOWOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STARTNONFOLLOWOBSTACLE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STARTRAMP:
+    description: 'TODO: 补充 STOPANDGO_STARTRAMP 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STOP:
+    description: 'TODO: 补充 STOPANDGO_STOP 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  STOPANDGO_STOPBEHINDOBSTACLE:
+    description: 'TODO: 补充 STOPANDGO_STOPBEHINDOBSTACLE 的语义描述'
+    sub_tags: []
+    source: vehicle
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  SpeedIncreaseStats:
+    description: 'TODO: 补充 SpeedIncreaseStats 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_speed_limit/op_speed_increase_stats.py
+  Static:
+    description: 'TODO: 补充 Static 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  ToRoadsideStop:
+    description: 'TODO: 补充 ToRoadsideStop 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_to_roadside_stop.py
+  WrongWay_Deviation:
+    description: 'TODO: 补充 WrongWay_Deviation 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  WrongwayNavi:
+    description: 'TODO: 补充 WrongwayNavi 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  YieldToPedestrian:
+    description: 'TODO: 补充 YieldToPedestrian 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_yield_to_pedestrian.py
+  animal:
+    description: 'TODO: 补充 animal 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  bus:
+    description: 'TODO: 补充 bus 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  car:
+    description: 'TODO: 补充 car 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  cyclist:
+    description: 'TODO: 补充 cyclist 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  invalid_navi_guide_line_infos_empty:
+    description: 'TODO: 补充 invalid_navi_guide_line_infos_empty 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
+  invalid_navi_not_in_sd:
+    description: 'TODO: 补充 invalid_navi_not_in_sd 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: user_workspace/xiangchenming/op_navi_command.py
+  invalid_topology_ego_static_map_link_id_invalid:
+    description: 'TODO: 补充 invalid_topology_ego_static_map_link_id_invalid 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  invalid_topology_ego_static_map_link_id_not_match:
+    description: 'TODO: 补充 invalid_topology_ego_static_map_link_id_not_match 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  invalid_topology_no_map_schema:
+    description: 'TODO: 补充 invalid_topology_no_map_schema 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  invalid_topology_other_no_match:
+    description: 'TODO: 补充 invalid_topology_other_no_match 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  motorcyclist:
+    description: 'TODO: 补充 motorcyclist 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  pedestrian:
+    description: 'TODO: 补充 pedestrian 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  stroller:
+    description: 'TODO: 补充 stroller 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  suv:
+    description: 'TODO: 补充 suv 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  topology_auxiliary:
+    description: 'TODO: 补充 topology_auxiliary 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_bridge:
+    description: 'TODO: 补充 topology_bridge 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_interchange:
+    description: 'TODO: 补充 topology_interchange 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_interchange_roundabout:
+    description: 'TODO: 补充 topology_interchange_roundabout 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection:
+    description: 'TODO: 补充 topology_intersection 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_cross_road:
+    description: 'TODO: 补充 topology_intersection_cross_road 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_multi_fork:
+    description: 'TODO: 补充 topology_intersection_multi_fork 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_other:
+    description: 'TODO: 补充 topology_intersection_other 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_small_cross_road:
+    description: 'TODO: 补充 topology_intersection_small_cross_road 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_small_t_junction:
+    description: 'TODO: 补充 topology_intersection_small_t_junction 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_straight_intersection:
+    description: 'TODO: 补充 topology_intersection_straight_intersection 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_t_junction:
+    description: 'TODO: 补充 topology_intersection_t_junction 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_intersection_y_junction:
+    description: 'TODO: 补充 topology_intersection_y_junction 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_left_turn_lane:
+    description: 'TODO: 补充 topology_left_turn_lane 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_main:
+    description: 'TODO: 补充 topology_main 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_merge:
+    description: 'TODO: 补充 topology_merge 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_ramp:
+    description: 'TODO: 补充 topology_ramp 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_right_turn_lane:
+    description: 'TODO: 补充 topology_right_turn_lane 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_roundabout:
+    description: 'TODO: 补充 topology_roundabout 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_service_area:
+    description: 'TODO: 补充 topology_service_area 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_split:
+    description: 'TODO: 补充 topology_split 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_toll_station:
+    description: 'TODO: 补充 topology_toll_station 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_tunnel:
+    description: 'TODO: 补充 topology_tunnel 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_tunnel_roundabout:
+    description: 'TODO: 补充 topology_tunnel_roundabout 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  topology_unstructured_road:
+    description: 'TODO: 补充 topology_unstructured_road 的语义描述'
+    sub_tags: []
+    source: cloud_operator
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+    operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
+  truck:
+    description: 'TODO: 补充 truck 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  wheelchair:
+    description: 'TODO: 补充 wheelchair 的语义描述'
+    sub_tags: []
+    source: auto_detected
+    operator: unknown
+    limitations: []
+    related_tables:
+    - range_tag
+  dynamic_obj.type.animal:
+    description: 动物
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.bus:
+    description: 公交车
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.car:
+    description: 轿车
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.cyclist:
+    description: 骑行者
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.motorcycle:
+    description: 摩托车
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.motorcyclist:
+    description: 摩托车手
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.pedestrian:
+    description: 行人
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.stroller:
+    description: 婴儿车
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.suv:
+    description: SUV
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.truck:
+    description: 卡车
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
+  dynamic_obj.type.wheelchair:
+    description: 轮椅
+    source: vehicle
+    related_tables:
+    - dynamic_obj
+    column: type
