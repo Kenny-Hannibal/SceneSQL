@@ -15,135 +15,131 @@ description: >
   Also triggers on: tag injection, SQLite writer changes, range_tag enum updates, car-end behavior tag changes, user_workspace operator changes.
 ---
 
-# UBM Schema Sync
+# UBM Schema Sync (v2.0)
 
 ## What this skill does
 
 The data-mining repo (`DATA_MINING_PROJECT_PATH`) evolves continuously:
 new operators are added, `add_event()` logic changes, car-end behavior tags expand.
-This skill automates the detection of those changes and produces a report so the
-schema YAML files (`schema_structure.yaml`, `schema_dictionary.yaml`) can be updated.
+This skill automates the detection of those changes and produces a report + auto-updates schema files.
 
-**Additionally**, whenever `schema_structure.yaml` gains or loses tables, the ETL script
-`agent/backend/app/services/etl/etl_sqlite_to_parquet.py` is automatically kept in sync
-so that `CORE_TABLES` always matches the schema definition.
+## Schema v2.0 Architecture
 
-**Key rule:** Only `to_sqlite_db.py` writes to SQLite. All other processors
-(track converter, db_py_rule queries) only read SQLite or output JSON.
+**母表 = 唯一权威源**，structure 和 dictionary 从母表自动派生：
 
-## How it works (no functions — scripts + LLM)
+```
+schema_master_raw.yaml (母表)
+  ├── tables.{table_name}.enum_columns.{col_name}.values  (per-table per-column枚举)
+  ├── tables.{table_name}.enum_columns.{col_name}.source_map  (枚举值来源标注)
+  ├── tag_semantics  (标签语义描述，跨表共享)
+  ├── git_version
+  │
+  ├── 派生 → schema_structure.yaml (给LLM: 表结构+enum)
+  └── 派生 → schema_dictionary.yaml (给LLM: 标签语义)
+```
 
-This skill has no callable functions. Instead it provides:
-1. `scripts/sync_schema.py` — deterministic script that compares git hashes, generates a Markdown report, **and auto-syncs ETL `CORE_TABLES`**
-2. `references/injection_sources.md` — methodology for manually verifying what enters SQLite
-3. This SKILL.md — workflow for the LLM to follow
+**人只维护母表**，`derive_schemas.py` 自动生成 structure 和 dictionary。
+**`sync_schema.py`** 检测git变动 → 自动提取label_id → 更新母表 → 自动派生。
 
-The LLM (you) runs the script, reads the report, decides what needs updating,
-and edits the schema files. The ETL `CORE_TABLES` sync is fully automatic.
+### Key v2.0 Change from v1.0
 
-## Prerequisites
+v1.0: `range_tag.tag_enum` (flat list)
+v2.0: `tables.range_tag.enum_columns.tag_name.values` (per-table per-column)
 
-- `DATA_MINING_PROJECT_PATH` set in `.env` (default: `/root/data/data_mining/UBM_mining/ubm_data_mining`)
-- The mining repo is a git repo on branch `data_mining/master` (may appear as detached HEAD)
-- PyYAML installed
+All sync paths in `sync_schema.py` have been updated for v2.0 structure.
+
+## How it works
+
+Two scripts do the heavy lifting:
+
+1. **`scripts/sync_schema.py`** — compares git hashes, extracts label_ids from source code, auto-updates母表, auto-derives structure/dictionary
+2. **`scripts/derive_schemas.py`** — reads母表, generates `schema_structure.yaml` + `schema_dictionary.yaml`
+
+The LLM runs the script, the script does everything automatically.
+
+## Label Extraction Pipeline (5 strategies)
+
+`extract_label_ids_from_operators()` scans source code with 5 strategies:
+
+| Strategy | Source | What it extracts |
+|----------|--------|------------------|
+| 1 | `activity_new/op_*.py` | `label_id = "TAG_NAME"` explicit declarations |
+| 2 | `activity_new/op_*.py` + `user_workspace/` | `CASE WHEN ... THEN "TAG_NAME"` SQL renames |
+| 3 | `tag_map.py` refDictEn | Car-end behavior tags (64 tags) |
+| 4 | Refactored operator functions | Label names from function signatures |
+| 5 | `_build_event_info(..., "TAG_NAME")` | Event construction calls |
+
+### Exclusion rules (NOT range_tag tags)
+
+- `_RENAMED_RAW_IDS`: steering_15_60 etc (renamed to steering_left_15_60 by CASE)
+- `_INVALID_VEH_TAGS`: typos (CRUISE YIELOTOPEDESTRIANS, NTERSECTION_UTURN)
+- `_OBJ_TYPE_VALUES`: car/bus/pedestrian etc (these are dynamic_obj.type, NOT range_tag.tag_name)
 
 ## Step-by-step workflow
 
-### Step 1 — Detect changes
-
-Run the sync script. It reads the previous git hash stored in `schema_master_raw.yaml`
-and diffs against the current HEAD of `data_mining/master`:
+### Step 1 — Run sync (automatic)
 
 ```bash
-cd /root/data/text2sql
-python .agents/skills/ubm-schema-sync/scripts/sync_schema.py
+cd /data/var/workspace/projects/projects/SceneSQL
+DATA_MINING_PROJECT_PATH=/data/var/workspace/projects/projects/data_mining \
+AUTO_UPDATE_SCHEMA=1 \
+python3 .agents/skills/ubm-schema-sync/scripts/sync_schema.py
 ```
 
-The script:
-1. Gets current commit hash + branch (`origin/data_mining/master` if detached HEAD)
-2. Reads previous hash from `schema_master_raw.yaml → git_version.data_mining_repo`
-3. Runs `git log PREV..HEAD` filtered to SQLite-relevant files:
-   - `L2_Pred/downstream/ubm/to_sqlite_db.py` — SQLite writer
-   - `L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py` — operator registry
-   - `L2_Pred/rule_based_mining/semantic_mining/activity_new/op_*.py` — operators with add_event
-   - `user_workspace/*/*.py` — custom operators
-   - `gsbag_parser/tag_map.py` / `em_behavior_tag_parser.py` — car-end tags
-   - `mining_pipeline.py` — pipeline orchestration
-4. Generates `/tmp/schema_sync_report.md`
-5. **Auto-syncs `CORE_TABLES` in `etl_sqlite_to_parquet.py` against `schema_structure.yaml`**
-6. Prompts to update `git_version` in all three schema files
+What the script does:
+1. Reads current git hash of data_mining repo
+2. Compares with hash stored in母表 `git_version.data_mining_repo`
+3. If hash changed: generates `/tmp/schema_sync_report.md` with relevant commits
+4. **Always**: extracts all label_ids from source code (5 strategies above)
+5. Compares extracted labels vs母表 existing `range_tag.tag_name.values`
+6. If new labels found: **auto-appends** to母表 + updates source_map + adds tag_semantics TODO placeholders
+7. **Auto-derives** `schema_structure.yaml` + `schema_dictionary.yaml`
+8. **Auto-syncs** ETL `CORE_TABLES` in `etl_sqlite_to_parquet.py`
 
-If the report says "no relevant changes", the schema enum probably does not need updating.
-Still answer `y` to record the new git hash.
+Even if git hash unchanged, the script still checks for new labels (in case previous sync missed some).
 
-### Step 2 — Read the report
+### Step 2 — Review and fill TODOs
 
-If the report shows changed files, open `references/injection_sources.md` to understand:
-- How to verify whether an `op_*.py` injects into `range_tag`
-- How `to_sqlite_db.py` filtering affects tag presence
-- How car-end tags flow into SQLite
-- The difference between `add_event()` (standard) and `add_table("range_tag")` (direct)
+After sync, new tags get `description: "TODO: 补充 XXX 的语义描述"` in tag_semantics.
+These need human/LLM review to fill in proper descriptions.
 
-### Step 3 — Update schema files manually
+### Step 3 — Verify with SQLite DB (validation, not primary workflow)
 
-The script **does not auto-update enum values** — this requires human/LLM judgment.
+SQL DB scanning is a **complementary validation method**, not the primary sync mechanism:
 
-1. **Update `schema_structure.yaml`**
-   - Add/remove tag names from `range_tag.enum`
-   - Update table/column defs if `to_sqlite_db.py` changed (e.g. new `CREATE TABLE`)
-   - ⚠️ **Any table added/removed here will be automatically reflected in ETL `CORE_TABLES`** when the sync script runs
+```python
+# Compare actual SQLite tags vs schema
+import sqlite3, glob, yaml
 
-2. **Update `schema_dictionary.yaml`**
-   - Add new tag entries under `tags:`
-   - Remove obsolete entries
-   - Update `limitations`, `sub_tags`, `source`, `operator`
+db_dir = "/mnt/ubm_code_nas/gac_huangzijian/common_data/sqlite_dbs/20260616_T68_2434_c5afa57_1.5w"
+actual_tags = set()
+for db in glob.glob(f"{db_dir}/*.db"):
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT DISTINCT tag_name FROM range_tag").fetchall()
+    actual_tags.update(r[0] for r in rows)
+    conn.close()
 
-3. **Update `schema_master_raw.yaml`** (reference doc)
-   - Update `actual_tags_from_sample_db` if a new DB was sampled
-   - Update `potential_tags_not_in_sample`
+with open('agent/backend/app/core/schema_master_raw.yaml') as f:
+    schema_tags = set(yaml.safe_load(f)['tables']['range_tag']['enum_columns']['tag_name']['values'])
 
-### Step 4 — ETL auto-sync (automatic)
-
-The sync script reads `schema_structure.yaml → database_schema.tables[].name` and
-compares it against `etl_sqlite_to_parquet.py → CORE_TABLES`.
-
-- If tables match → nothing happens.
-- If `schema_structure.yaml` has new tables → they are **appended** to `CORE_TABLES`.
-- If tables were removed from schema → they are **removed** from `CORE_TABLES`.
-
-This step runs automatically at the start of the script, regardless of git hash changes.
-Check the report's "ETL 同步状态" section for details.
-
-### Step 5 — Record the new git hash
-
-Run the script again (or answer `y` at the prompt) to write the new commit hash
-into all three schema files' `git_version` block.
-
-## Schema git_version format
-
-Each schema file contains:
-
-```yaml
-git_version:
-  data_mining_repo: 1df5784fe76e3d67d08edac2da9bcbeae65b42cc
-  branch: origin/data_mining/master
-  synced_at: "2026-05-19T17:14:52+08:00"
-  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
+missing = sorted(actual_tags - schema_tags)  # Should be EMPTY
+print(f"SQLite有但Schema缺失: {missing if missing else 'NONE ✓'}")
 ```
 
-Future syncs diff from this hash, so the report is always incremental.
+**Important distinction**: 
+- **Primary workflow**: git diff on data_mining code → sync_schema.py auto-extracts → updates母表
+- **Validation**: SQLite DB scan to find gaps in extraction pipeline
+- SQLite DB may be stale (not yet re-generated with latest tags) — only look at big picture, not details
+- If DB has a tag that extraction missed → trace where it's injected in code → fix extraction pipeline
 
-## Auto-update mode
+## Prerequisites
 
-Set `AUTO_UPDATE_SCHEMA=1` to skip the confirmation prompt:
-
-```bash
-export AUTO_UPDATE_SCHEMA=1
-python .agents/skills/ubm-schema-sync/scripts/sync_schema.py
-```
+- `DATA_MINING_PROJECT_PATH` env var pointing to data_mining repo
+- The mining repo is a git repo on branch `data_mining/master`
+- PyYAML installed
 
 ## When NOT to use this skill
 
-- Do NOT use for SQL query generation — handled by agent engine.
-- Do NOT use for rosbag parsing or video extraction.
-- Do NOT use when the user only wants to query existing SQLite data.
+- Do NOT use for SQL query generation — handled by agent engine
+- Do NOT use for rosbag parsing or video extraction
+- Do NOT use when the user only wants to query existing SQLite data
