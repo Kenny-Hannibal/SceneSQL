@@ -885,37 +885,78 @@ tables:
       type: FLOAT
       notnull: false
       pk: false
+    - name: is_intersection_out
+      type: TEXT
+      notnull: false
+      pk: false
     enum_columns:
       link_type:
         values:
-        - 主干道
+        - 未知
         - 主路
-        - 入口匝道
-        - 匝道
-        - 路口
         - 辅路
+        - 入口匝道
+        - 出口匝道
+        - 匝道
+        - 互通立交
+        - 服务区
+        - 路口
+        - 环岛
+        - 人行道
+        - 平行路
+        - 收费站
+        - 主干道
+        - 右转A
+        - 右转B
+        - 左转A
+        - 左转B
+        - 左右掉头
+        - 其他
       link_turn_type:
         values:
-        - 右转
-        - 左转
-        - 掉头
         - 直行
-        - 直行右转
+        - 左转
+        - 左前直行
+        - 右转
+        - 右前直行
+        - 掉头
+        - 左右转
+        - 直行左右转
+        - 右掉头
+        - 直行掉头
+        - 直行右掉头
+        - 左转掉头
+        - 右转右掉头
         - 路口
+        - 主路
         - 进入
         - 退出
+        - 直行右转
+        - 未定义
       link_class:
         values:
+        - 高速公路
+        - 国道
+        - 省道
+        - 县道
+        - 乡道/多公路
+        - 县乡村村内部道路
         - 主要大街/城市快速道
         - 主要道路
-        - 国道
         - 次要道路
-        - 省道
-        - 高速公路
+        - 普通道路
+        - 非导航道路
+        - 道路等级无效值
       link_attribute:
         values:
         - 无特殊属性
         - 隧道
+        - 桥梁
+        - 高架桥
+        - 收费站
+        - 收费站入口
+        - 收费站出口
+        - 断头路
         - 其他
   dynamic_link:
     description: 动态道路链接表——随时间变化的道路拓扑链接属性
@@ -955,16 +996,36 @@ tables:
     enum_columns:
       link_type:
         values:
-        - 主干道
+        - 未知
         - 主路
-        - 入口匝道
-        - 匝道
-        - 路口
         - 辅路
+        - 入口匝道
+        - 出口匝道
+        - 匝道
+        - 互通立交
+        - 服务区
+        - 路口
+        - 环岛
+        - 人行道
+        - 平行路
+        - 收费站
+        - 主干道
+        - 右转A
+        - 右转B
+        - 左转A
+        - 左转B
+        - 左右掉头
+        - 其他
       link_attribute:
         values:
         - 无特殊属性
         - 隧道
+        - 桥梁
+        - 高架桥
+        - 收费站
+        - 收费站入口
+        - 收费站出口
+        - 断头路
         - 其他
   dynamic_lane:
     description: 动态车道表——随时间变化的车道属性
@@ -1016,25 +1077,45 @@ tables:
     enum_columns:
       lane_type:
         values:
-        - LANE_TYPE_EMERGENCY
         - 未知
+        - 机动车道
+        - 非机动车道
+        - 人行道
+        - 公交专用道
+        - 应急车道
+        - 可变车道
+        - 潮汐车道
+        - 匝道
+        - 虚拟车道
+        - 其他
       lane_turn_type:
         values:
-        - TURN_TYPE_AHEADRIGHT
-        - TURN_TYPE_LEFTLUTURN
-        - 右转
-        - 左转
-        - 掉头
         - 直行
+        - 左转
+        - 左前直行
+        - 右转
+        - 右前直行
+        - 掉头
+        - 左右转
+        - 直行左右转
+        - 右掉头
+        - 直行掉头
+        - 直行右掉头
+        - 左转掉头
+        - 右转右掉头
         - 路口
+        - 主路
+        - 进入
+        - 退出
+        - 未定义
       lane_trans_type:
         values:
-        - TRANS_TYPE_Ending
-        - TRANS_TYPE_FullConnect
-        - TRANS_TYPE_LeftConnect
-        - TRANS_TYPE_OneSplitTwo
-        - TRANS_TYPE_RightConnect
-        - TRANS_TYPE_UNDEFINED
+        - 未定义
+        - 普通车道
+        - 入口过渡
+        - 出口过渡
+        - 合流
+        - 分流
   static_lane:
     description: 静态车道表——车道的静态属性
     columns:
@@ -1042,7 +1123,76 @@ tables:
       type: TEXT
       notnull: false
       pk: true
-    enum_columns: {}
+    - name: lane_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_turn_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_trans_type
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: link_id
+      type: INTEGER
+      notnull: false
+      pk: false
+    - name: predecessors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: successors
+      type: TEXT
+      notnull: false
+      pk: false
+    - name: lane_relate_obs_id
+      type: TEXT
+      notnull: false
+      pk: false
+    enum_columns:
+      lane_type:
+        values:
+        - 未知
+        - 机动车道
+        - 非机动车道
+        - 人行道
+        - 公交专用道
+        - 应急车道
+        - 可变车道
+        - 潮汐车道
+        - 匝道
+        - 虚拟车道
+        - 其他
+      lane_turn_type:
+        values:
+        - 直行
+        - 左转
+        - 左前直行
+        - 右转
+        - 右前直行
+        - 掉头
+        - 左右转
+        - 直行左右转
+        - 右掉头
+        - 直行掉头
+        - 直行右掉头
+        - 左转掉头
+        - 右转右掉头
+        - 路口
+        - 主路
+        - 进入
+        - 退出
+        - 未定义
+      lane_trans_type:
+        values:
+        - 未定义
+        - 普通车道
+        - 入口过渡
+        - 出口过渡
+        - 合流
+        - 分流
 tag_semantics:
   AbnormalLaneChange:
     description: 异常变道行为

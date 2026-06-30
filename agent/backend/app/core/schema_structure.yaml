@@ -579,40 +579,77 @@ database_schema:
       type: TEXT
       nullable: true
       enum:
-      - 主干道
+      - 未知
       - 主路
-      - 入口匝道
-      - 匝道
-      - 路口
       - 辅路
+      - 入口匝道
+      - 出口匝道
+      - 匝道
+      - 互通立交
+      - 服务区
+      - 路口
+      - 环岛
+      - 人行道
+      - 平行路
+      - 收费站
+      - 主干道
+      - 右转A
+      - 右转B
+      - 左转A
+      - 左转B
+      - 左右掉头
+      - 其他
     - name: link_turn_type
       type: TEXT
       nullable: true
       enum:
-      - 右转
-      - 左转
-      - 掉头
       - 直行
-      - 直行右转
+      - 左转
+      - 左前直行
+      - 右转
+      - 右前直行
+      - 掉头
+      - 左右转
+      - 直行左右转
+      - 右掉头
+      - 直行掉头
+      - 直行右掉头
+      - 左转掉头
+      - 右转右掉头
       - 路口
+      - 主路
       - 进入
       - 退出
+      - 直行右转
+      - 未定义
     - name: link_class
       type: TEXT
       nullable: true
       enum:
+      - 高速公路
+      - 国道
+      - 省道
+      - 县道
+      - 乡道/多公路
+      - 县乡村村内部道路
       - 主要大街/城市快速道
       - 主要道路
-      - 国道
       - 次要道路
-      - 省道
-      - 高速公路
+      - 普通道路
+      - 非导航道路
+      - 道路等级无效值
     - name: link_attribute
       type: TEXT
       nullable: true
       enum:
       - 无特殊属性
       - 隧道
+      - 桥梁
+      - 高架桥
+      - 收费站
+      - 收费站入口
+      - 收费站出口
+      - 断头路
       - 其他
     - name: link_speed_limit
       type: FLOAT
@@ -625,6 +662,9 @@ database_schema:
       nullable: true
     - name: link_exp_speed_limit
       type: FLOAT
+      nullable: true
+    - name: is_intersection_out
+      type: TEXT
       nullable: true
     primary_key:
     - link_id
@@ -644,18 +684,38 @@ database_schema:
       type: TEXT
       nullable: true
       enum:
-      - 主干道
+      - 未知
       - 主路
-      - 入口匝道
-      - 匝道
-      - 路口
       - 辅路
+      - 入口匝道
+      - 出口匝道
+      - 匝道
+      - 互通立交
+      - 服务区
+      - 路口
+      - 环岛
+      - 人行道
+      - 平行路
+      - 收费站
+      - 主干道
+      - 右转A
+      - 右转B
+      - 左转A
+      - 左转B
+      - 左右掉头
+      - 其他
     - name: link_attribute
       type: TEXT
       nullable: true
       enum:
       - 无特殊属性
       - 隧道
+      - 桥梁
+      - 高架桥
+      - 收费站
+      - 收费站入口
+      - 收费站出口
+      - 断头路
       - 其他
     - name: link_exp_speed_limit
       type: FLOAT
@@ -697,29 +757,49 @@ database_schema:
       type: TEXT
       nullable: true
       enum:
-      - LANE_TYPE_EMERGENCY
       - 未知
+      - 机动车道
+      - 非机动车道
+      - 人行道
+      - 公交专用道
+      - 应急车道
+      - 可变车道
+      - 潮汐车道
+      - 匝道
+      - 虚拟车道
+      - 其他
     - name: lane_turn_type
       type: TEXT
       nullable: true
       enum:
-      - TURN_TYPE_AHEADRIGHT
-      - TURN_TYPE_LEFTLUTURN
-      - 右转
-      - 左转
-      - 掉头
       - 直行
+      - 左转
+      - 左前直行
+      - 右转
+      - 右前直行
+      - 掉头
+      - 左右转
+      - 直行左右转
+      - 右掉头
+      - 直行掉头
+      - 直行右掉头
+      - 左转掉头
+      - 右转右掉头
       - 路口
+      - 主路
+      - 进入
+      - 退出
+      - 未定义
     - name: lane_trans_type
       type: TEXT
       nullable: true
       enum:
-      - TRANS_TYPE_Ending
-      - TRANS_TYPE_FullConnect
-      - TRANS_TYPE_LeftConnect
-      - TRANS_TYPE_OneSplitTwo
-      - TRANS_TYPE_RightConnect
-      - TRANS_TYPE_UNDEFINED
+      - 未定义
+      - 普通车道
+      - 入口过渡
+      - 出口过渡
+      - 合流
+      - 分流
     - name: predecessors
       type: TEXT
       nullable: true
@@ -740,5 +820,64 @@ database_schema:
       type: TEXT
       nullable: true
       pk: true
+    - name: lane_type
+      type: TEXT
+      nullable: true
+      enum:
+      - 未知
+      - 机动车道
+      - 非机动车道
+      - 人行道
+      - 公交专用道
+      - 应急车道
+      - 可变车道
+      - 潮汐车道
+      - 匝道
+      - 虚拟车道
+      - 其他
+    - name: lane_turn_type
+      type: TEXT
+      nullable: true
+      enum:
+      - 直行
+      - 左转
+      - 左前直行
+      - 右转
+      - 右前直行
+      - 掉头
+      - 左右转
+      - 直行左右转
+      - 右掉头
+      - 直行掉头
+      - 直行右掉头
+      - 左转掉头
+      - 右转右掉头
+      - 路口
+      - 主路
+      - 进入
+      - 退出
+      - 未定义
+    - name: lane_trans_type
+      type: TEXT
+      nullable: true
+      enum:
+      - 未定义
+      - 普通车道
+      - 入口过渡
+      - 出口过渡
+      - 合流
+      - 分流
+    - name: link_id
+      type: INTEGER
+      nullable: true
+    - name: predecessors
+      type: TEXT
+      nullable: true
+    - name: successors
+      type: TEXT
+      nullable: true
+    - name: lane_relate_obs_id
+      type: TEXT
+      nullable: true
     primary_key:
     - lane_id
