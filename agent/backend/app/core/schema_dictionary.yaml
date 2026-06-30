@@ -1801,38 +1801,6 @@ tags:
     related_tables:
     - range_tag
     operator_path: L2_Pred/rule_based_mining/semantic_mining/activity_new/op_yield_to_pedestrian.py
-  animal:
-    description: 'TODO: 补充 animal 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  bus:
-    description: 'TODO: 补充 bus 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  car:
-    description: 'TODO: 补充 car 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  cyclist:
-    description: 'TODO: 补充 cyclist 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
   invalid_navi_guide_line_infos_empty:
     description: 'TODO: 补充 invalid_navi_guide_line_infos_empty 的语义描述'
     sub_tags: []
@@ -1887,38 +1855,6 @@ tags:
     related_tables:
     - range_tag
     operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
-  motorcyclist:
-    description: 'TODO: 补充 motorcyclist 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  pedestrian:
-    description: 'TODO: 补充 pedestrian 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  stroller:
-    description: 'TODO: 补充 stroller 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  suv:
-    description: 'TODO: 补充 suv 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
   topology_auxiliary:
     description: 'TODO: 补充 topology_auxiliary 的语义描述'
     sub_tags: []
@@ -2144,22 +2080,6 @@ tags:
     related_tables:
     - range_tag
     operator_path: L2_Pred/rule_based_mining/semantic_mining/feature_op/topology_constraint_feature.py
-  truck:
-    description: 'TODO: 补充 truck 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
-  wheelchair:
-    description: 'TODO: 补充 wheelchair 的语义描述'
-    sub_tags: []
-    source: auto_detected
-    operator: unknown
-    limitations: []
-    related_tables:
-    - range_tag
   dynamic_obj.type.animal:
     description: 动物
     source: vehicle
