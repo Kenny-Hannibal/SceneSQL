@@ -337,11 +337,11 @@ def generate_report(commits: list[dict], impact: dict, old_hash: str, new_hash: 
         "## 建议操作",
         "",
         "1. 查看上方变更文件，确认是否有新的 `add_event()` 调用或 `add_table()` 调用。",
-        "2. 如有新增算子，确认其 `label_id` 值并补充到 schema 的 `range_tag.enum` 中。",
-        "3. 如有新增表结构（`to_sqlite_db.py` 中新增 `CREATE TABLE`），同步更新 `schema_structure.yaml`，并确认 `CORE_TABLES` 已自动同步。",
-        "4. 如有新增车端标签，确认 `tag_map.py` 中的映射并补充。",
-        "5. 更新 `schema_dictionary.yaml` 中对应标签/字段的定义。",
-        "6. 运行本脚本更新 schema 文件中的 `git_version`。",
+        "2. 脚本已自动从算子源码提取 label_id，确认提取结果是否正确。",
+        "3. 新增的标签会自动追加到母表 `schema_master_raw.yaml` 的 `tag_enum` 和 `tag_semantics`，",
+        "   其中 `tag_semantics` 的语义描述为占位符（TODO），需人工补充。",
+        "4. `schema_structure.yaml` 和 `schema_dictionary.yaml` 由 `derive_schemas.py` 从母表自动派生，无需手动编辑。",
+        "5. 如有新增表结构（`to_sqlite_db.py` 中新增 `CREATE TABLE`），需手动更新母表的 `sqlite_database.tables`，再重新派生。",
         "",
     ])
 
@@ -411,29 +411,130 @@ def sync_etl_core_tables() -> dict:
     return {"changed": True, "old": old_tables, "new": schema_tables, "added": added, "removed": removed}
 
 
-def update_schema_git_versions(repo_path: Path, new_hash: str, branch: str):
-    """更新所有 schema 文件中的 git_version 字段。"""
+def extract_label_ids_from_operators(repo_path: Path) -> list[str]:
+    """从算子源码中提取所有可能的 label_id 值。
+    
+    扫描路径:
+    - L2_Pred/rule_based_mining/semantic_mining/activity_new/op_*.py (cloud算子)
+    - user_workspace/*/op_*.py (用户算子)
+    
+    提取策略:
+    1. 固定 label_id: label_id = "xxx" 或 "label_id": "xxx"
+    2. 动态 label_id: 从 *_MAP / *_NAME_MAP 等字典中提取值
+    3. add_event() 调用中的 label_id
+    """
+    base = repo_path
+    if not (base / "UBM_mining" / "ubm_data_mining").exists():
+        # 可能 repo_path 已经是 ubm_data_mining
+        ubm = base
+    else:
+        ubm = base / "UBM_mining" / "ubm_data_mining"
+    
+    label_ids = set()
+    
+    # 扫描 cloud 算子
+    cloud_dir = ubm / "L2_Pred" / "rule_based_mining" / "semantic_mining" / "activity_new"
+    if cloud_dir.exists():
+        for op_file in sorted(cloud_dir.glob("op_*.py")):
+            label_ids.update(_extract_from_file(op_file))
+    
+    # 扫描 user_workspace 算子
+    ws_dir = ubm / "user_workspace"
+    if ws_dir.exists():
+        for author_dir in sorted(ws_dir.iterdir()):
+            if author_dir.is_dir():
+                for op_file in sorted(author_dir.glob("op_*.py")):
+                    label_ids.update(_extract_from_file(op_file))
+    
+    # 排除不可能出现在 range_tag 中的值
+    exclude = {"EgoIntoIntersection", ""}
+    label_ids -= exclude
+    
+    return sorted(label_ids)
+
+
+def _extract_from_file(filepath: Path) -> set[str]:
+    """从单个算子文件中提取 label_id 值。"""
+    content = filepath.read_text(errors="ignore")
+    ids = set()
+    
+    # 策略1: 固定字符串赋值 — label_id = "xxx", "label_id": "xxx"
+    for m in re.finditer(r'label_id["\']?\s*[:=]\s*["\']([A-Za-z_][A-Za-z0-9_]*)["\']', content):
+        ids.add(m.group(1))
+    
+    # 策略2: 字典值映射 — 如 YAW_STATUS_NAME_MAP = {1: 'route_deviation_curb', ...}
+    # 匹配 数字key: 'value' 模式（限 activity_new 目录下的算子）
+    if "activity_new" in str(filepath):
+        for m in re.finditer(r'\d+:\s*["\']([a-z_][a-z0-9_]*)["\']', content):
+            ids.add(m.group(1))
+    
+    # 策略3: tag_name 赋值 — tag_name = "xxx" 或 tag_name = 'xxx'
+    for m in re.finditer(r'tag_name\s*=\s*["\']([A-Za-z_][A-Za-z0-9_]*)["\']', content):
+        val = m.group(1)
+        # 排除 o_type 枚举值（这些不是 label_id，是 obj 表的 type 字段）
+        _OBJ_TYPE_VALUES = {"animal", "bus", "car", "cyclist", "motorcyclist",
+                           "pedestrian", "stroller", "suv", "truck", "wheelchair"}
+        if val.lower() not in _OBJ_TYPE_VALUES:
+            ids.add(val)
+    
+    return ids
+
+
+def update_master_and_derive(repo_path: Path, new_hash: str, branch: str, new_label_ids: list[str] | None = None):
+    """更新母表（schema_master_raw.yaml）的 git_version 和 tag_enum，然后自动派生 structure 和 dictionary。"""
     now = datetime.now(timezone.utc).astimezone().isoformat()
-    for fname in SCHEMA_FILES:
-        fpath = Path(SCHEMA_DIR) / fname
-        if not fpath.exists():
-            print(f"[WARN] 未找到 {fpath}，跳过")
-            continue
-
-        with fpath.open() as f:
-            data = yaml.safe_load(f)
-
-        data["git_version"] = {
-            "data_mining_repo": new_hash,
-            "branch": branch,
-            "synced_at": now,
-            "note": "数据挖掘项目当前 commit hash，schema 以此版本为基准",
-        }
-
-        with fpath.open("w") as f:
-            yaml.dump(data, f, allow_unicode=True, sort_keys=False, width=200)
-
-        print(f"[OK] 已更新 {fpath}")
+    master_path = Path(SCHEMA_DIR) / "schema_master_raw.yaml"
+    
+    with master_path.open() as f:
+        data = yaml.safe_load(f)
+    
+    # 更新 git_version
+    data["git_version"] = {
+        "data_mining_repo": new_hash,
+        "branch": branch,
+        "synced_at": now,
+        "note": "数据挖掘项目当前 commit hash，schema 以此版本为基准",
+    }
+    
+    # 如果有新提取的 label_id，更新 tag_enum
+    if new_label_ids is not None:
+        existing_enum = set(data.get("range_tag", {}).get("tag_enum", []))
+        new_set = set(new_label_ids)
+        added = sorted(new_set - existing_enum)
+        if added:
+            print(f"[INFO] 新增 tag_enum 条目: {added}")
+            data["range_tag"]["tag_enum"] = new_label_ids  # 用完整列表替换
+            # 同时为新增tag在tag_semantics中补占位
+            for tag in added:
+                if tag not in data.get("range_tag", {}).get("tag_semantics", {}):
+                    data.setdefault("range_tag", {}).setdefault("tag_semantics", {})[tag] = {
+                        "description": f"TODO: 补充 {tag} 的语义描述",
+                        "sub_tags": [],
+                        "source": "auto_detected",
+                        "operator": "unknown",
+                        "limitations": [],
+                        "related_tables": ["range_tag"],
+                    }
+                    print(f"[WARN] tag_semantics 中缺少 {tag}，已补占位符")
+    
+    with master_path.open("w") as f:
+        yaml.dump(data, f, allow_unicode=True, sort_keys=False, width=200)
+    print(f"[OK] 已更新母表: {master_path}")
+    
+    # 自动派生 structure 和 dictionary
+    derive_script = Path(__file__).parent / "derive_schemas.py"
+    if derive_script.exists():
+        import subprocess as sp
+        result = sp.run(
+            [sys.executable, str(derive_script)],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"[OK] 已自动派生 structure.yaml 和 dictionary.yaml")
+        else:
+            print(f"[ERROR] 派生脚本失败: {result.stderr}")
+    else:
+        print(f"[WARN] 未找到派生脚本 {derive_script}，请手动运行 derive_schemas.py")
 
 
 def main():
@@ -478,9 +579,23 @@ def main():
             print(f"    移除表: {', '.join(etl_sync['removed'])}")
 
     if old_hash == new_hash:
-        print("[INFO] schema 已与最新代码同步，无需更新")
-        # 仍然更新 synced_at 时间戳
-        update_schema_git_versions(repo_path, new_hash, branch)
+        # git hash 未变，但仍检查是否有新标签（可能上次漏了）
+        all_label_ids = extract_label_ids_from_operators(repo_path)
+        existing_enum = set()
+        master_path = Path(SCHEMA_DIR) / "schema_master_raw.yaml"
+        if master_path.exists():
+            with master_path.open() as f:
+                master_data = yaml.safe_load(f)
+            existing_enum = set(master_data.get("range_tag", {}).get("tag_enum", []))
+        new_tags = sorted(set(all_label_ids) - existing_enum)
+        if new_tags:
+            print(f"[WARN] git hash 未变，但发现新标签: {new_tags}")
+            if os.environ.get("AUTO_UPDATE_SCHEMA", "").lower() in ("1", "true", "yes"):
+                update_master_and_derive(repo_path, new_hash, branch, new_label_ids=all_label_ids)
+            else:
+                print("[INFO] 使用 AUTO_UPDATE_SCHEMA=1 可自动更新")
+        else:
+            print("[INFO] schema 已与最新代码同步，无需更新")
         sys.exit(0)
 
     # 获取相关 commit
@@ -500,14 +615,30 @@ def main():
     print(report)
     print("=" * 60 + "\n")
 
+    # 提取算子中的 label_id
+    print("[INFO] 扫描算子源码提取 label_id...")
+    all_label_ids = extract_label_ids_from_operators(repo_path)
+    print(f"[INFO] 从算子源码提取到 {len(all_label_ids)} 个 label_id")
+
+    # 与母表现有 tag_enum 对比
+    master_path = Path(SCHEMA_DIR) / "schema_master_raw.yaml"
+    with master_path.open() as f:
+        master_data = yaml.safe_load(f)
+    existing_enum = set(master_data.get("range_tag", {}).get("tag_enum", []))
+    new_tags = sorted(set(all_label_ids) - existing_enum)
+    if new_tags:
+        print(f"[WARN] 发现新标签（当前enum中不存在）: {new_tags}")
+    else:
+        print(f"[OK] 所有提取到的 label_id 均已在 tag_enum 中")
+
     # 询问是否更新
     if os.environ.get("AUTO_UPDATE_SCHEMA", "").lower() in ("1", "true", "yes"):
         confirm = "y"
     else:
-        confirm = input("是否更新 schema 文件中的 git_version? [y/N]: ").strip().lower()
+        confirm = input("是否更新母表并自动派生 structure/dictionary? [y/N]: ").strip().lower()
 
     if confirm in ("y", "yes"):
-        update_schema_git_versions(repo_path, new_hash, branch)
+        update_master_and_derive(repo_path, new_hash, branch, new_label_ids=all_label_ids)
         print("[OK] 同步完成")
     else:
         print("[INFO] 已取消更新")

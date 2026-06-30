@@ -1,7 +1,7 @@
-version: 2.0.0
-note: "本文件是 SceneSQL Schema 的唯一权威源（母表），包含：\n  - SQLite 数据库完整表结构（9张表）\n  - range_tag\
-  \ 标签枚举（tag_enum）\n  - 标签语义描述（tag_semantics）\n  - 注入源说明、实际/潜在标签列表、git_version\n\n\
-  schema_structure.yaml 和 schema_dictionary.yaml 由 derive_schemas.py 从本文件自动派生。\n"
+version: 1.2.0
+note: '本文件记录实际进入 SQLite 数据库的表结构和标签信息。 只包含会写入 SQLite 的表、列、标签，其他无关信息已移除。 标签解释、局限性、子标签映射等语义信息请查阅 schema_dictionary.yaml。
+
+  '
 source_files:
   sqlite_writer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/downstream/ubm/to_sqlite_db.py
   tokenizer: /root/data/data_mining/UBM_mining/ubm_data_mining/L2_Pred/rule_based_mining/semantic_mining/tokenizer_processor_new.py
@@ -529,17 +529,16 @@ range_tag:
   - id: cloud_operators_add_event
     description: tokenizer_processor_new.py 中注册的 cloud 端算子通过 add_event() 添加
     path: L2_Pred/rule_based_mining/semantic_mining/activity_new/
-    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list
-      → to_sqlite_db._inject_range_tag_to_virtual_table() → virtual_table → SQLite
+    mechanism: '算子调用 add_event() → events DataFrame → TokenizerResult.activity_list → to_sqlite_db._inject_range_tag_to_virtual_table()
+      → virtual_table → SQLite
 
       '
     note: 标签是否出现取决于算子是否被触发（场景匹配）
   - id: car_end_behavior_tags
     description: 车端 bag 文件中的行为标签
     parser: gsbag_parser/topic_parser/em_behavior_tag_parser.py
-    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经
-      Filter 合并后存入 label_info JSON。 在部分 pipeline 版本中，label_info 会被合并到 TokenizerResult，最终进入
-      SQLite。
+    mechanism: 'bag 文件 beh_tag 消息 → em_behavior_tag_parser → behavior_tag_list → 经 Filter 合并后存入 label_info JSON。 在部分 pipeline
+      版本中，label_info 会被合并到 TokenizerResult，最终进入 SQLite。
 
       '
     note: 车端标签命名规范与 cloud 端不同（如 CRUISE_STRAIGHT, INTERSECTION_RIGHTTURN）
@@ -2030,11 +2029,6 @@ range_tag:
       - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
       related_tables:
       - range_tag
-  notes:
-  - 车端行为标签还可能包含以下前缀类别（取决于 bag 文件中的 beh_tag 消息）： CRUISE_*, STOPANDGO_*, LANECHANGE_*,
-    AVOIDANCE_*, INTERSECTION_*
-  - EgoIntoIntersection 被过滤到 intersection_info 表，不在 range_tag 中
-  - param 列为 JSON 字符串，可用 json_extract() 提取子标签（sub_tag）、障碍物 ID 等
 not_in_sqlite:
   description: 以下标签/结果明确不会回写到 SQLite，只输出到 JSON 文件
   categories:

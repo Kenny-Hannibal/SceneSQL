@@ -1,12 +1,7 @@
-version: 2.0.0
-note: '标签与字段语义字典。按 tag_name / field_name 为 key，支持 O(1) 快速查询。
+version: 1.2.0
+note: '标签与字段语义字典。按 tag_name / field_name 为 key，支持 O(1) 快速查询。 包含标签定义、子标签、局限性、来源、相关表等信息。 本字典只包含实际会进入 SQLite 的标签和字段。
 
-  包含标签定义、子标签、局限性、来源、相关表等信息。
-
-  本字典只包含实际会进入 SQLite 的标签和字段。
-
-
-  本文件由 derive_schemas.py 从 schema_master_raw.yaml 自动派生，请勿手动编辑。'
+  '
 tags:
   AbnormalLaneChange:
     description: 异常变道行为
@@ -1013,3 +1008,366 @@ tags:
     - label_id 直接为子标签名，parent 标签名不会出现在 DB 中
     related_tables:
     - range_tag
+fields:
+  range_tag.start_ts:
+    description: 标签生效开始时间戳（秒级 Unix 时间戳）
+    type: BIGINT
+    unit: seconds
+    example: 1767231833
+    related_tables:
+    - range_tag
+  range_tag.end_ts:
+    description: 标签生效结束时间戳（秒级 Unix 时间戳，≥ start_ts）
+    type: BIGINT
+    unit: seconds
+    example: 1767231856
+    related_tables:
+    - range_tag
+  range_tag.tag_name:
+    description: 标签名称，对应算子 label_id 或车端标签英文名
+    type: TEXT
+    related_tables:
+    - range_tag
+    notes:
+    - 值域范围参见 schema_structure.yaml 中 range_tag.enum
+  range_tag.param:
+    description: 标签参数（JSON 字符串），包含子标签、障碍物信息、状态比例等扩展字段
+    type: TEXT
+    related_tables:
+    - range_tag
+    notes:
+    - 可用 SQLite 函数 json_extract(param, '$.key') 提取字段
+    - '常见 key: sub_tag, object_id, state_ratio, frame_count, duration, en'
+  intersection_info.intersection_id:
+    description: 路口唯一编码
+    type: TEXT
+    related_tables:
+    - intersection_info
+  intersection_info.lane_count:
+    description: 进入路口总车道数
+    type: BIGINT
+    related_tables:
+    - intersection_info
+  intersection_info.ego_lane_index:
+    description: 自车所在车道索引（0-based）
+    type: BIGINT
+    related_tables:
+    - intersection_info
+  intersection_info.lane_info:
+    description: 车道详细信息（JSON 字符串）
+    type: TEXT
+    related_tables:
+    - intersection_info
+  ego.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - ego
+  ego.speed:
+    description: 自车纵向速度
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - ego
+    notes:
+    - 正值为前进，负值为倒车
+    - 1 m/s ≈ 3.6 km/h
+  ego.steering_angle:
+    description: 方向盘转角
+    type: FLOAT
+    unit: degrees
+    related_tables:
+    - ego
+    notes:
+    - 正值通常表示左转，负值表示右转（取决于车辆坐标系定义）
+  ego.acc_magnitude:
+    description: 自车加速度大小（纵向加速度绝对值）
+    type: FLOAT
+    unit: m/s²
+    related_tables:
+    - ego
+  ego.navigation_status:
+    description: 导航状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：navi_keep, navi_enter, navi_turn_left 等
+  ego.wiper_status:
+    description: 雨刮器状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：off, low, high, auto 等
+  ego.indicator_status:
+    description: 转向灯状态
+    type: TEXT
+    related_tables:
+    - ego
+    notes:
+    - 如：off, left, right, hazard 等
+  ego.traffic_light_status:
+    description: 当前交通灯状态编码
+    type: INTEGER
+    related_tables:
+    - ego
+    notes:
+    - 具体编码需参考车端定义
+  ego.utm_x:
+    description: 自车 UTM 坐标 X（东向）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.utm_y:
+    description: 自车 UTM 坐标 Y（北向）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.utm_yaw:
+    description: 自车航向角（UTM 坐标系下）
+    type: FLOAT
+    unit: radians
+    related_tables:
+    - ego
+    notes:
+    - 0 通常指向正北，顺时针增大
+  ego.gl_dis_to_left:
+    description: 自车到左侧guide line距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.gl_dis_to_right:
+    description: 自车到右侧guide line距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.gl_lane_cnt:
+    description: guide line车道数
+    type: INTEGER
+    related_tables:
+    - ego
+  ego.gl_left_cnt:
+    description: guide line左侧车道数
+    type: INTEGER
+    related_tables:
+    - ego
+  ego.gl_right_cnt:
+    description: guide line右侧车道数
+    type: INTEGER
+    related_tables:
+    - ego
+  ego.ego_lane_id:
+    description: 自车当前车道 ID
+    type: INTEGER
+    related_tables:
+    - ego
+    - static_lane
+    - dynamic_lane
+  ego.ego_link_id:
+    description: 自车当前道路 Link ID
+    type: INTEGER
+    related_tables:
+    - ego
+    - static_link
+    - dynamic_link
+  ego.ego_lane_width:
+    description: 自车当前车道宽度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.ego_to_centerline_dist:
+    description: 自车中心到车道中心线的横向距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+    notes:
+    - 正值表示偏向左侧，负值表示偏向右侧（取决于坐标系）
+  ego.cumulative_distance:
+    description: 自车累计行驶距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - ego
+  ego.ego_dr_trajectory:
+    description: "自车 DR（Dead Reckoning）轨迹数据（JSON 字符串）。结构: x/y/theta/speed/exists各5元素(0/0.2/0.4/0.6/0.8s)。漂移值计算用json_extract, 例dx_08=json_extract(ego_dr_trajectory,'$.x[4]')-json_extract(ego_dr_trajectory,'$.x[0]'), dy_08同理用$.y。注意不存在dr_trajectory_drift列"
+    type: TEXT
+    related_tables:
+    - ego
+  dynamic_obj.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obj_id:
+    description: 障碍物唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.type:
+    description: 障碍物类型
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+    notes:
+    - 常见值（全部小写）：car, truck, bus, pedestrian, motorcycle, bicycle, tricycle, cone 等
+  dynamic_obj.is_static:
+    description: 障碍物是否为静态
+    type: BOOLEAN
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.x:
+    description: 障碍物中心 X 坐标（自车坐标系）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.y:
+    description: 障碍物中心 Y 坐标（自车坐标系）
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.heading:
+    description: 障碍物航向角
+    type: FLOAT
+    unit: radians
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.l:
+    description: 障碍物长度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.w:
+    description: 障碍物宽度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.h:
+    description: 障碍物高度
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.absolute_velocity_x:
+    description: 障碍物绝对速度 X 分量
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.absolute_velocity_y:
+    description: 障碍物绝对速度 Y 分量
+    type: FLOAT
+    unit: m/s
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obs_lane_id:
+    description: 障碍物所在车道 ID
+    type: INTEGER
+    related_tables:
+    - dynamic_obj
+    - static_lane
+    - dynamic_lane
+  dynamic_obj.obs_to_centerline_dist:
+    description: 障碍物中心到车道中心线的横向距离
+    type: FLOAT
+    unit: meters
+    related_tables:
+    - dynamic_obj
+  dynamic_obj.obs_dr_trajectory:
+    description: "障碍物 DR 轨迹数据（JSON 字符串）。结构同ego_dr_trajectory: x/y/theta/speed/exists各5元素。漂移值计算用json_extract, 例obs_dx_08=json_extract(obs_dr_trajectory,'$.x[4]')-json_extract(obs_dr_trajectory,'$.x[0]')。注意不存在obs_dr_trajectory_drift列"
+    type: TEXT
+    related_tables:
+    - dynamic_obj
+  static_link.link_id:
+    description: 道路 Link 唯一 ID
+    type: TEXT
+    related_tables:
+    - static_link
+  static_link.link_type:
+    description: 道路类型
+    type: TEXT
+    related_tables:
+    - static_link
+    notes:
+    - 如：main, ramp, roundabout, intersection 等
+  static_link.link_speed_limit:
+    description: 道路限速
+    type: FLOAT
+    unit: km/h
+    related_tables:
+    - static_link
+  static_link.link_turn_type:
+    description: 道路转弯类型
+    type: TEXT
+    related_tables:
+    - static_link
+  static_link.link_class:
+    description: 道路等级
+    type: TEXT
+    related_tables:
+    - static_link
+    notes:
+    - 如：highway, urban_expressway, urban_road 等
+  static_lane.lane_id:
+    description: 车道唯一 ID
+    type: TEXT
+    related_tables:
+    - static_lane
+  dynamic_link.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_link
+  dynamic_link.link_id:
+    description: 道路 Link 唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_link
+  dynamic_link.link_type:
+    description: 道路类型（动态，可能随时间变化）
+    type: TEXT
+    related_tables:
+    - dynamic_link
+  dynamic_lane.ts:
+    description: 时间戳（毫秒级 Unix 时间戳）
+    type: BIGINT
+    unit: milliseconds
+    related_tables:
+    - dynamic_lane
+  dynamic_lane.lane_id:
+    description: 车道唯一 ID
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+  dynamic_lane.lane_type:
+    description: 车道类型
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+    notes:
+    - 如：normal, bus_only, bike_lane, emergency 等
+  dynamic_lane.lane_turn_type:
+    description: 车道转弯类型
+    type: TEXT
+    related_tables:
+    - dynamic_lane
+    notes:
+    - 如：straight, left, right, uturn, left_right 等
+git_version:
+  data_mining_repo: 6db12fafcba9330fb4bb1ba615d9a8ae7cde9341
+  branch: origin/data_mining/master
+  synced_at: '2026-05-26T16:19:45+08:00'
+  note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
