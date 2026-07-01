@@ -43,6 +43,7 @@ class RouteResult:
     matched_tags: List[TagInfo] = field(default_factory=list)
     involved_tables: Set[str] = field(default_factory=set)
     method: str = "keyword"  # keyword / rag / fallback
+    map_enum_hits: List[Dict[str, str]] = field(default_factory=list)  # map表枚举值命中
 
 
 # ──────────────────────────────────────────────
@@ -99,7 +100,7 @@ _MANUAL_KEYWORD_OVERRIDES: Dict[str, List[str]] = {
     "LaneChange": ["变道", "换道", "并线"],
     "AbnormalLaneChange": ["异常变道", "无理由变道"],
     "SolidLaneChange": ["实线变道", "压线变道", "违规变道"],
-    "Cutin": ["切入", "加塞", "插队", "cut-in"],
+    "Cutin": ["切入", "加塞", "插队", "cut-in", "cutin", "Cutin"],
     "CloseFollow": ["跟车太近", "近距离跟车", "贴车", "紧跟"],
     "CrawlingFollow": ["蠕行跟车", "走走停停"],
     "Jerk": ["急刹", "急加速", "猛踩", "急减速"],
@@ -165,9 +166,34 @@ _TABLE_KEYWORDS: Dict[str, List[str]] = {
     "intersection_info": ["路口", "车道数"],
     "dynamic_lane": ["车道线", "车道边界", "车道类型"],
     "dynamic_link": ["link", "道路link", "限速"],
-    "static_link": ["道路类型", "转向类型", "道路等级"],
+    "static_link": ["道路类型", "转向类型", "道路等级", "匝道", "主路", "辅路", "高速公路",
+                    "国道", "省道", "隧道", "桥梁", "收费站", "环岛"],
     "static_lane": ["车道ID"],
 }
+
+# map表枚举值关键词 → (表名, 列名, 枚举值) 映射
+# 当用户说"主路"时，路由应命中static_link，并提示LLM用 link_type='主路'
+_MAP_ENUM_KEYWORDS: List[Dict[str, str]] = [
+    # static_link.link_type
+    {"kw": "主路", "table": "static_link", "column": "link_type", "value": "主路"},
+    {"kw": "辅路", "table": "static_link", "column": "link_type", "value": "辅路"},
+    {"kw": "入口匝道", "table": "static_link", "column": "link_type", "value": "入口匝道"},
+    {"kw": "出口匝道", "table": "static_link", "column": "link_type", "value": "出口匝道"},
+    {"kw": "上匝道", "table": "static_link", "column": "link_type", "value": "入口匝道"},
+    {"kw": "下匝道", "table": "static_link", "column": "link_type", "value": "出口匝道"},
+    {"kw": "进匝道", "table": "static_link", "column": "link_type", "value": "入口匝道"},
+    {"kw": "出匝道", "table": "static_link", "column": "link_type", "value": "出口匝道"},
+    {"kw": "匝道", "table": "static_link", "column": "link_type", "value": "匝道"},
+    {"kw": "高速公路", "table": "static_link", "column": "link_class", "value": "高速公路"},
+    {"kw": "国道", "table": "static_link", "column": "link_class", "value": "国道"},
+    {"kw": "省道", "table": "static_link", "column": "link_class", "value": "省道"},
+    {"kw": "隧道", "table": "static_link", "column": "link_attribute", "value": "隧道"},
+    {"kw": "桥梁", "table": "static_link", "column": "link_attribute", "value": "桥梁"},
+    {"kw": "收费站", "table": "static_link", "column": "link_attribute", "value": "收费站"},
+    # static_lane.lane_type
+    {"kw": "应急车道", "table": "static_lane", "column": "lane_type", "value": "应急车道"},
+    {"kw": "公交专用道", "table": "static_lane", "column": "lane_type", "value": "公交专用道"},
+]
 
 
 def _load_dictionary(path: Path) -> Optional[Dict[str, Any]]:
@@ -279,6 +305,13 @@ class TagRouter:
                     table_hits.add(table_name)
                     break
 
+        # Step 2.5: map表枚举值关键词匹配
+        map_enum_hits: List[Dict[str, str]] = []
+        for entry in _MAP_ENUM_KEYWORDS:
+            if entry["kw"] in query:
+                table_hits.add(entry["table"])
+                map_enum_hits.append(entry)
+
         # Step 3: 从匹配的标签中提取 involved_tables
         involved_tables: Set[str] = set(table_hits)
         for tag_name in matched_tag_names:
@@ -302,6 +335,7 @@ class TagRouter:
             matched_tags=matched_tags,
             involved_tables=involved_tables,
             method=method,
+            map_enum_hits=map_enum_hits,
         )
 
 
@@ -358,13 +392,28 @@ def format_tag_semantics(matched_tags: List[TagInfo]) -> str:
     return "\n".join(lines)
 
 
-def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[TagInfo] = None) -> str:
-    """根据涉及的表和标签，生成跨表 JOIN 提示 + 多标签组合提示。"""
+def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[TagInfo] = None, map_enum_hits: List[Dict[str, str]] = None) -> str:
+    """根据涉及的表和标签，生成跨表 JOIN 提示 + 多标签组合提示 + map表条件提示。"""
     hints = []
 
     has_range_tag = "range_tag" in involved_tables
     has_ego = "ego" in involved_tables
     has_dynamic_obj = "dynamic_obj" in involved_tables
+
+    # ── map表枚举条件提示 ──
+    if map_enum_hits:
+        for hit in map_enum_hits:
+            hints.append(
+                f"用户提到\"{hit['kw']}\"，对应 {hit['table']}.{hit['column']} = '{hit['value']}'"
+            )
+        # 给出range_tag × map表的JOIN示例
+        if has_range_tag and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
+            sample = map_enum_hits[0]
+            hints.append(
+                f"range_tag 与 {sample['table']} JOIN 示例: "
+                f"`SELECT r.* FROM range_tag r JOIN {sample['table']} m ON r.ego_link_id = m.link_id "
+                f"WHERE m.{sample['column']} = '{sample['value']}'`"
+            )
 
     # ── 多标签组合提示（range_tag 自 JOIN） ──
     if matched_tags and len(matched_tags) >= 2:
@@ -550,7 +599,7 @@ def build_prompt(
         (system_prompt, user_prompt)
     """
     tag_semantics = format_tag_semantics(route.matched_tags)
-    join_hints = format_cross_table_join_hint(route.involved_tables, route.matched_tags)
+    join_hints = format_cross_table_join_hint(route.involved_tables, route.matched_tags, route.map_enum_hits)
     few_shot = retrieve_templates(question, route.involved_tables)
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
