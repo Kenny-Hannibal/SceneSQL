@@ -1,0 +1,243 @@
+{
+  "_meta": {
+    "description": "SceneSQL v2.0 组合标签 baseline 测试集 - 评估LLM多标签组合推理能力",
+    "created": "2026-07-02",
+    "purpose": "测试DeepSeek v4在schema增强prompt下的SQL生成能力，识别边界"
+  },
+  "queries": [
+    {
+      "id": "L1-01",
+      "level": "L1-单标签",
+      "query": "找出cutin场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'Cutin'",
+      "notes": "最简单单标签，验证基础路由+SQL"
+    },
+    {
+      "id": "L1-02",
+      "level": "L1-单标签",
+      "query": "找出路口直行场景",
+      "expected_tags": ["INTERSECTION_STRAIGHT"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'INTERSECTION_STRAIGHT'",
+      "notes": "单标签但名称非直白"
+    },
+    {
+      "id": "L1-03",
+      "level": "L1-单标签",
+      "query": "找出超速场景",
+      "expected_tags": ["OverSpeedLimit"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'OverSpeedLimit'",
+      "notes": "口语→tag映射"
+    },
+    {
+      "id": "L1-04",
+      "level": "L1-单标签",
+      "query": "找出前车切出的场景",
+      "expected_tags": ["CRUISE_CARORTRUCKCUTOUT"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'CRUISE_CARORTRUCKCUTOUT'",
+      "notes": "口语'前车切出'→CutOut"
+    },
+    {
+      "id": "L2-01",
+      "level": "L2-同表双标签",
+      "query": "找出路口且有红绿灯的场景",
+      "expected_tags": ["Intersection", "TrafficLightAbnormal"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ON ... r1.tag_name='Intersection' AND r2.tag_name='TrafficLightAbnormal'",
+      "notes": "核心组合：range_tag自JOIN时间交叉"
+    },
+    {
+      "id": "L2-02",
+      "level": "L2-同表双标签",
+      "query": "找出绿灯亮但车辆没走的场景",
+      "expected_tags": ["GreenLightNotProceeding"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'GreenLightNotProceeding'",
+      "notes": "单标签语义理解测试——用户以为需要两个标签，实际只需一个"
+    },
+    {
+      "id": "L2-03",
+      "level": "L2-同表双标签",
+      "query": "找出先急刹又起步的场景",
+      "expected_tags": ["hard_braking", "STOPANDGO_STARTFOLLOWOBSTACLE"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ON ... r1.tag_name='hard_braking' AND r2.tag_name='STOPANDGO_STARTFOLLOWOBSTACLE' AND r2.start_ts > r1.start_ts",
+      "notes": "时序约束：标签A发生在标签B之前"
+    },
+    {
+      "id": "L2-04",
+      "level": "L2-同表双标签",
+      "query": "找出变道和cutin同时发生的场景",
+      "expected_tags": ["LaneChange", "Cutin"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ON ... AND r1.start_ts < r2.end_ts AND r1.end_ts > r2.start_ts",
+      "notes": "两个标签时间交叉"
+    },
+    {
+      "id": "L3-01",
+      "level": "L3-跨表标签+map条件",
+      "query": "找出主路上有cutin的场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r JOIN static_link m ON r.ego_link_id = m.link_id WHERE r.tag_name='Cutin' AND m.link_type='主路'",
+      "notes": "range_tag × static_link JOIN + map枚举条件"
+    },
+    {
+      "id": "L3-02",
+      "level": "L3-跨表标签+map条件",
+      "query": "找出匝道上的cutin场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r JOIN static_link m ON r.ego_link_id = m.link_id WHERE r.tag_name='Cutin' AND m.link_type LIKE '%匝道%'",
+      "notes": "map枚举：入口匝道/出口匝道"
+    },
+    {
+      "id": "L3-03",
+      "level": "L3-跨表标签+map条件",
+      "query": "找出高速公路上跟车太近的场景",
+      "expected_tags": ["CloseFollow"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r JOIN static_link m ON ... WHERE r.tag_name='CloseFollow' AND m.link_class='高速公路'",
+      "notes": "range_tag × static_link + link_class条件"
+    },
+    {
+      "id": "L3-04",
+      "level": "L3-跨表标签+数值条件",
+      "query": "找出速度超过120的cutin场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag", "ego"],
+      "expected_sql_pattern": "range_tag r JOIN ego e ON ... WHERE r.tag_name='Cutin' AND e.speed > 120",
+      "notes": "range_tag × ego数值过滤"
+    },
+    {
+      "id": "L3-05",
+      "level": "L3-跨表标签+动态目标",
+      "query": "找出有行人横穿的同时有cutin的场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag", "dynamic_obj"],
+      "expected_sql_pattern": "range_tag r JOIN dynamic_obj d ON ... WHERE r.tag_name='Cutin' AND d.obj_type='pedestrian' AND d.lateral_dist < ...",
+      "notes": "range_tag × dynamic_obj，行人横穿无专属标签需用dynamic_obj判断"
+    },
+    {
+      "id": "L4-01",
+      "level": "L4-三标签+跨表",
+      "query": "找出路口有红绿灯且前车cutin的场景",
+      "expected_tags": ["Intersection", "TrafficLightAbnormal", "Cutin"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag三路自JOIN: r1.tag_name='Intersection' AND r2.tag_name='TrafficLightAbnormal' AND r3.tag_name='Cutin'",
+      "notes": "三标签range_tag自JOIN——测试LLM能否正确组合3路JOIN"
+    },
+    {
+      "id": "L4-02",
+      "level": "L4-双标签+map+时序",
+      "query": "找出国道上先急刹再变道的场景",
+      "expected_tags": ["hard_braking", "LaneChange"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ... JOIN static_link m ... WHERE r1.tag_name='hard_braking' AND r2.tag_name='LaneChange' AND r2.start_ts > r1.end_ts AND m.link_class='国道'",
+      "notes": "双标签时序 + map条件——最复杂组合"
+    },
+    {
+      "id": "L4-03",
+      "level": "L4-模糊语义",
+      "query": "找出开车不稳的场景",
+      "expected_tags": ["SteeringSmallSwing", "Jerk", "HighSteeringWheelTorque"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag WHERE tag_name IN ('SteeringSmallSwing', 'Jerk', 'HighSteeringWheelTorque')",
+      "notes": "模糊口语映射到多个相关标签——LLM能否用IN替代多路JOIN"
+    },
+    {
+      "id": "L4-04",
+      "level": "L4-反义/排除",
+      "query": "找出没有cutin的变道场景",
+      "expected_tags": ["LaneChange"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT r1.bag_id FROM range_tag r1 WHERE r1.tag_name='LaneChange' AND r1.bag_id NOT IN (SELECT bag_id FROM range_tag WHERE tag_name='Cutin')",
+      "notes": "排除逻辑——NOT IN/NOT EXISTS，LLM边界测试"
+    },
+    {
+      "id": "L4-05",
+      "level": "L4-标签+聚合统计",
+      "query": "找出有多次cutin的场景",
+      "expected_tags": ["Cutin"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT bag_id FROM range_tag WHERE tag_name='Cutin' GROUP BY bag_id HAVING COUNT(*) > 1",
+      "notes": "聚合+HAVING——超出简单标签过滤"
+    },
+    {
+      "id": "L4-06",
+      "level": "L4-跨表双标签+map",
+      "query": "找出主路上先跟车太近再变道的场景",
+      "expected_tags": ["CloseFollow", "LaneChange"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ... JOIN static_link m ... WHERE r1.tag_name='CloseFollow' AND r2.tag_name='LaneChange' AND r2.start_ts > r1.end_ts AND m.link_type='主路'",
+      "notes": "双标签时序 + map条件——和L4-02类似但不同标签组合"
+    },
+    {
+      "id": "X-01",
+      "level": "负面-无法实现",
+      "query": "找出雨天场景",
+      "expected_tags": [],
+      "expected_tables": [],
+      "expected_sql_pattern": "无法实现——DB无天气字段",
+      "notes": "预期LLM应拒绝或说明无此数据"
+    },
+    {
+      "id": "X-02",
+      "level": "负面-无法实现",
+      "query": "找出夜间场景",
+      "expected_tags": [],
+      "expected_tables": [],
+      "expected_sql_pattern": "无法实现——DB无光照/时间字段",
+      "notes": "预期LLM应拒绝或说明无此数据"
+    },
+    {
+      "id": "L3-06",
+      "level": "L3-跨表map条件",
+      "query": "找出隧道里的急刹场景",
+      "expected_tags": ["hard_braking"],
+      "expected_tables": ["range_tag", "static_link"],
+      "expected_sql_pattern": "range_tag r JOIN static_link m ON ... WHERE r.tag_name='hard_braking' AND m.link_attribute='隧道'",
+      "notes": "link_attribute条件"
+    },
+    {
+      "id": "L2-05",
+      "level": "L2-同表双标签",
+      "query": "找出拥堵路段跟车场景",
+      "expected_tags": ["CRUISE_CONGESTION", "CongestedFollow"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ... WHERE r1.tag_name='CRUISE_CONGESTION' AND r2.tag_name='CongestedFollow'",
+      "notes": "两个拥堵相关标签交叉"
+    },
+    {
+      "id": "L3-07",
+      "level": "L3-跨表数值条件",
+      "query": "找出弯道速度超过80的场景",
+      "expected_tags": ["CRUISE_CURVE"],
+      "expected_tables": ["range_tag", "ego"],
+      "expected_sql_pattern": "range_tag r JOIN ego e ON ... WHERE r.tag_name='CRUISE_CURVE' AND e.speed > 80",
+      "notes": "range_tag × ego速度过滤"
+    },
+    {
+      "id": "L1-05",
+      "level": "L1-单标签",
+      "query": "找出低时距场景",
+      "expected_tags": ["LowTTC"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "SELECT DISTINCT bag_id FROM range_tag WHERE tag_name = 'LowTTC'",
+      "notes": "'低时距'→LowTTC映射"
+    },
+    {
+      "id": "L2-06",
+      "level": "L2-同表双标签",
+      "query": "找出直行时被cutin的场景",
+      "expected_tags": ["StraightDriving", "Cutin"],
+      "expected_tables": ["range_tag"],
+      "expected_sql_pattern": "range_tag r1 JOIN range_tag r2 ... WHERE r1.tag_name='StraightDriving' AND r2.tag_name='Cutin'",
+      "notes": "直行+cutin时间交叉"
+    }
+  ]
+}
