@@ -329,7 +329,10 @@ def format_schema_card() -> str:
 
 
 def format_tag_semantics(matched_tags: List[TagInfo]) -> str:
-    """生成 Layer 2 标签语义描述（仅命中标签）。"""
+    """生成 Layer 2 标签语义描述（仅命中标签）。
+    
+    包含：描述 + 关联表 + 查询方式提示。
+    """
     if not matched_tags:
         return ""
 
@@ -342,6 +345,12 @@ def format_tag_semantics(matched_tags: List[TagInfo]) -> str:
             lines.append(f"- 查询子标签: `json_extract(param, '$.sub_tag')`")
         if tag.related_tables:
             lines.append(f"- 关联表: {', '.join(tag.related_tables)}")
+            # 查询方式提示：告诉LLM该标签在哪个表、怎么查
+            primary_table = tag.related_tables[0] if tag.related_tables else "range_tag"
+            if primary_table == "range_tag":
+                lines.append(f"- 查询方式: `SELECT * FROM range_tag WHERE tag_name = '{tag.tag_name}'`")
+                if tag.sub_tags:
+                    lines.append(f"- 含子标签时: `SELECT * FROM range_tag WHERE tag_name = '{tag.tag_name}' AND json_extract(param, '$.sub_tag') = '<子标签值>'`")
         if tag.limitations:
             lines.append(f"- 注意: {'; '.join(tag.limitations[:2])}")
         lines.append("")
@@ -349,14 +358,47 @@ def format_tag_semantics(matched_tags: List[TagInfo]) -> str:
     return "\n".join(lines)
 
 
-def format_cross_table_join_hint(involved_tables: Set[str]) -> str:
-    """根据涉及的表，生成跨表 JOIN 提示。"""
+def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[TagInfo] = None) -> str:
+    """根据涉及的表和标签，生成跨表 JOIN 提示 + 多标签组合提示。"""
     hints = []
 
     has_range_tag = "range_tag" in involved_tables
     has_ego = "ego" in involved_tables
     has_dynamic_obj = "dynamic_obj" in involved_tables
 
+    # ── 多标签组合提示（range_tag 自 JOIN） ──
+    if matched_tags and len(matched_tags) >= 2:
+        # 只取 primary 相关的标签（排除 fallback 命中的无关标签如 navi_other）
+        range_tag_names = [t for t in matched_tags
+                          if "range_tag" in t.related_tables
+                          and t.tag_name not in ("navi_other",)]
+        if len(range_tag_names) >= 2:
+            tag_names = [t.tag_name for t in range_tag_names]
+            aliases = [f"r{i+1}" for i in range(len(tag_names))]
+            # 生成示例SQL
+            join_clauses = []
+            for i in range(1, len(tag_names)):
+                join_clauses.append(
+                    f"JOIN range_tag {aliases[i]} ON {aliases[0]}.start_ts < {aliases[i]}.end_ts "
+                    f"AND {aliases[0]}.end_ts > {aliases[i]}.start_ts"
+                )
+            where_clauses = [
+                f"{aliases[i]}.tag_name = '{tag_names[i]}'" for i in range(len(tag_names))
+            ]
+            example_sql = (
+                f"SELECT DISTINCT {aliases[0]}.start_ts, {aliases[0]}.end_ts "
+                f"FROM range_tag {aliases[0]} "
+                + " ".join(join_clauses)
+                + " WHERE " + " AND ".join(where_clauses)
+            )
+            hints.append(
+                f"多标签时间交叉查询：用户需要同时满足 {len(tag_names)} 个标签，"
+                f"使用 range_tag 自 JOIN（时间窗口交叉）: "
+                f"r1.start_ts < r2.end_ts AND r1.end_ts > r2.start_ts"
+            )
+            hints.append(f"示例: `{example_sql}`")
+
+    # ── range_tag × 时序表 JOIN ──
     if has_range_tag and (has_ego or has_dynamic_obj):
         target = "ego" if has_ego else "dynamic_obj"
         hints.append(
@@ -508,7 +550,7 @@ def build_prompt(
         (system_prompt, user_prompt)
     """
     tag_semantics = format_tag_semantics(route.matched_tags)
-    join_hints = format_cross_table_join_hint(route.involved_tables)
+    join_hints = format_cross_table_join_hint(route.involved_tables, route.matched_tags)
     few_shot = retrieve_templates(question, route.involved_tables)
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(

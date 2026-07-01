@@ -21,6 +21,7 @@ class ColumnInfo:
     name: str
     dtype: str
     description: str = ""
+    enum: Optional[List[str]] = None  # 列级枚举值（如 link_type 的 20 个可选值）
 
 
 @dataclass
@@ -28,7 +29,7 @@ class TableInfo:
     name: str
     description: str
     columns: List[ColumnInfo]
-    enum: Optional[List[str]] = None  # 仅用于 range_tag 等需要枚举值的列
+    enum: Optional[List[str]] = None  # 兼容旧逻辑：range_tag.tag_name 的枚举值列表
 
 
 # ------------------------------------------------------------------
@@ -256,17 +257,38 @@ def read_schema(db_path: str, conn: Optional[Any] = None) -> List[TableInfo]:
     field_desc_map = _get_field_descriptions(dictionary)
     tag_desc_map = _get_tag_descriptions(dictionary)
     range_tag_enum = _get_range_tag_enum(structure)
+    col_enum_map = _get_column_enums(structure)
 
     # 判断模式：如果传入了 conn（DuckDB），或 db_path 以 .parquet 结尾
     is_parquet = conn is not None or str(db_path).endswith(".parquet")
 
     if is_parquet:
-        return _read_schema_from_parquet(conn, db_path, field_desc_map, range_tag_enum)
+        return _read_schema_from_parquet(conn, db_path, field_desc_map, range_tag_enum, col_enum_map)
     else:
-        return _read_schema_from_sqlite(db_path, field_desc_map, range_tag_enum)
+        return _read_schema_from_sqlite(db_path, field_desc_map, range_tag_enum, col_enum_map)
 
 
-def _read_schema_from_sqlite(db_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str]) -> List[TableInfo]:
+def _get_column_enums(structure: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, List[str]]]:
+    """从 schema_structure.yaml 提取所有表所有列的枚举值。
+    
+    Returns:
+        Dict[table_name, Dict[col_name, List[enum_value]]]
+    """
+    if not structure:
+        return {}
+    result: Dict[str, Dict[str, List[str]]] = {}
+    for t in structure.get("database_schema", {}).get("tables", []):
+        table_name = t.get("name", "")
+        col_enums: Dict[str, List[str]] = {}
+        for col in t.get("columns", []):
+            if "enum" in col and col["enum"]:
+                col_enums[col["name"]] = col["enum"]
+        if col_enums:
+            result[table_name] = col_enums
+    return result
+
+
+def _read_schema_from_sqlite(db_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str], col_enum_map: Optional[Dict[str, Dict[str, List[str]]]] = None) -> List[TableInfo]:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -279,12 +301,15 @@ def _read_schema_from_sqlite(db_path: str, field_desc_map: Dict[str, str], range
         semantics = FIELD_SEMANTICS.get(t, {})
         table_desc = semantics.get("_desc", f"表 {t}")
         col_infos = []
+        # 该表的列级枚举（从 schema_structure.yaml）
+        table_col_enums = (col_enum_map or {}).get(t, {})
         for col in cols:
             col_name = col[1]
             col_type = col[2]
             dict_key = f"{t}.{col_name}"
             col_desc = field_desc_map.get(dict_key, semantics.get(col_name, ""))
-            col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc))
+            col_enum = table_col_enums.get(col_name)
+            col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc, enum=col_enum))
 
         enum = range_tag_enum if t == "range_tag" and range_tag_enum else None
         result.append(TableInfo(name=t, description=table_desc, columns=col_infos, enum=enum))
@@ -293,7 +318,7 @@ def _read_schema_from_sqlite(db_path: str, field_desc_map: Dict[str, str], range
     return result
 
 
-def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str]) -> List[TableInfo]:
+def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc_map: Dict[str, str], range_tag_enum: List[str], col_enum_map: Optional[Dict[str, Dict[str, List[str]]]] = None) -> List[TableInfo]:
     """从 Parquet 文件读取 schema（通过 DuckDB）。"""
     import duckdb
     close_conn = False
@@ -318,12 +343,15 @@ def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc
             semantics = FIELD_SEMANTICS.get(t, {})
             table_desc = semantics.get("_desc", f"表 {t}")
             col_infos = []
+            # 该表的列级枚举
+            table_col_enums = (col_enum_map or {}).get(t, {})
             for col in cols:
                 col_name = col[0]
                 col_type = col[1]
                 dict_key = f"{t}.{col_name}"
                 col_desc = field_desc_map.get(dict_key, semantics.get(col_name, ""))
-                col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc))
+                col_enum = table_col_enums.get(col_name)
+                col_infos.append(ColumnInfo(name=col_name, dtype=col_type, description=col_desc, enum=col_enum))
 
             enum = range_tag_enum if t == "range_tag" and range_tag_enum else None
             result.append(TableInfo(name=t, description=table_desc, columns=col_infos, enum=enum))
@@ -353,7 +381,7 @@ def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int
         lines.append(f"{t.description}")
         lines.append("")
 
-        # 注入 enum 信息（主要用于 range_tag）
+        # 注入 range_tag 表级 enum（兼容旧逻辑：tag_name 可选值列表）
         if t.enum:
             lines.append(f"> **tag_name 可选值**（共 {len(t.enum)} 个）：")
             # 将 enum 分组显示，每行 8 个，避免单行过长
@@ -369,9 +397,27 @@ def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int
             # 对 range_tag.tag_name 额外提示可用 enum
             if t.name == "range_tag" and c.name == "tag_name" and t.enum:
                 desc += f" （见上方可选值，共 {len(t.enum)} 个）"
+            # 列级枚举值注入（如 static_link.link_type 的 20 个值）
+            if c.enum:
+                # 短列表直接内联，长列表分行
+                if len(c.enum) <= 8:
+                    desc += f" | 可选值: {', '.join(f'`{v}`' for v in c.enum)}"
+                else:
+                    # 在表格行中提示，在表格下方展开
+                    desc += f" （共 {len(c.enum)} 个可选值，见下方）"
             lines.append(f"| {c.name} | {c.dtype} | {desc} |")
         if len(t.columns) > max_columns_per_table:
             lines.append(f"| ... | ... | 共 {len(t.columns)} 个字段，已截断 |")
+        
+        # 在表格下方展开长枚举列表
+        for c in t.columns[:max_columns_per_table]:
+            if c.enum and len(c.enum) > 8:
+                lines.append(f"> **{c.name} 可选值**（共 {len(c.enum)} 个）：")
+                enum_chunks = [c.enum[i:i + 6] for i in range(0, len(c.enum), 6)]
+                for chunk in enum_chunks:
+                    lines.append("> " + ", ".join(f"`{v}`" for v in chunk))
+                lines.append("")
+        
         lines.append("")
     return "\n".join(lines)
 
