@@ -92,7 +92,7 @@ FIELD_SEMANTICS = {
     # ego 表（自车状态，10Hz）
     "ego": {
         "_desc": "自车状态表，记录主车（ego）的实时运动状态和感知信息，10Hz采样",
-        "ts": "时间戳，单位：纳秒",
+        "ts": "时间戳，单位：秒（与 range_tag.start_ts/end_ts 同单位）",
         "ts_ms": "时间戳，单位：毫秒",
         "speed": "自车速度，单位：m/s（米/秒），不是km/h！例: speed>5 即超过5m/s(≈18km/h)",
         "steering_angle": "方向盘转角",
@@ -133,7 +133,7 @@ FIELD_SEMANTICS = {
     # dynamic_obj 表（动态目标，10Hz）
     "dynamic_obj": {
         "_desc": "动态目标表，记录感知系统检测到的移动物体（车辆、行人、骑行者等），坐标系以自车为原点，X向前、Y向左",
-        "ts": "时间戳，单位：纳秒",
+        "ts": "时间戳，单位：秒（与 ego.ts / range_tag.start_ts 同单位）",
         "obj_id": "目标唯一ID",
         "x": "相对自车的纵向距离（米），正前方为正",
         "y": "相对自车的横向距离（米），左侧为正",

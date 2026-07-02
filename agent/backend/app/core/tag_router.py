@@ -423,7 +423,7 @@ def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[T
             hints.append(
                 f"range_tag → ego → {sample['table']} 三表桥接（range_tag 无 ego_link_id，必须经 ego 中转）: "
                 f"`SELECT r.* FROM range_tag r "
-                f"JOIN ego e ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9 "
+                f"JOIN ego e ON e.ts BETWEEN r.start_ts AND r.end_ts "
                 f"JOIN {sample['table']} m ON e.ego_link_id = m.link_id "
                 f"WHERE m.{sample['column']} = '{sample['value']}'`"
             )
@@ -471,15 +471,14 @@ def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[T
     if has_range_tag and (has_ego or has_dynamic_obj):
         target = "ego" if has_ego else "dynamic_obj"
         hints.append(
-            f"跨表 JOIN 条件: range_tag 的时间是秒(start_ts/end_ts)，"
-            f"{target} 的时间是纳秒(ts)。"
-            f"JOIN 条件: `{target}.ts BETWEEN range_tag.start_ts * 1000000000 AND range_tag.end_ts * 1000000000`"
+            f"跨表 JOIN 条件: range_tag.start_ts/end_ts 与 {target}.ts 都是秒级时间戳，"
+            f"直接比较即可：`{target}.ts BETWEEN range_tag.start_ts AND range_tag.end_ts`"
         )
 
     if has_ego and has_dynamic_obj:
         hints.append(
             "ego 和 dynamic_obj 的时间对齐: "
-            "使用 ts_ms（毫秒）桥接，或直接比较 ts（纳秒）"
+            "直接比较 ts（秒级时间戳），或使用 ts_ms（毫秒）对齐"
         )
 
     if not hints:
@@ -587,8 +586,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个 ROS Bag 数据查询助手。根据用�
 
 ### 重要规则
 1. 只使用上方 Schema 中存在的表和字段
-2. range_tag 的时间字段(start_ts/end_ts)单位是秒(BIGINT)，ego/dynamic_obj 的时间字段(ts)单位是纳秒(BIGINT)
-3. 跨表 JOIN 时: `ego.ts BETWEEN range_tag.start_ts * 1000000000 AND range_tag.end_ts * 1000000000`
+2. range_tag.start_ts/end_ts 与 ego.ts/dynamic_obj.ts 都是秒级时间戳(BIGINT)，直接比较即可
+3. 跨表 JOIN 时: `ego.ts BETWEEN range_tag.start_ts AND range_tag.end_ts`
 4. range_tag.param 是 JSON 字符串，提取子标签用: `json_extract(param, '$.sub_tag')`
 5. 输出必须是纯 SQL，不要包含 markdown 代码块标记，不要包含任何解释文字
 6. SQL 必须完整，必须包含 SELECT、FROM，必要时包含 WHERE
