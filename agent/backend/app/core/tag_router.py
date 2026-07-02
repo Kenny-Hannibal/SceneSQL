@@ -181,10 +181,10 @@ _TABLE_KEYWORDS: Dict[str, List[str]] = {
 }
 
 # map表枚举值关键词 → (表名, 列名, 枚举值) 映射
-# 当用户说"主路"时，路由应命中static_link，并提示LLM用 link_type='主路'
+# 当用户说"主路"时，路由应命中static_link，并提示LLM用 link_type='主干道'（数据中"主路"的枚举值是"主干道"）
 _MAP_ENUM_KEYWORDS: List[Dict[str, str]] = [
     # static_link.link_type
-    {"kw": "主路", "table": "static_link", "column": "link_type", "value": "主路"},
+    {"kw": "主路", "table": "static_link", "column": "link_type", "value": "主干道"},
     {"kw": "辅路", "table": "static_link", "column": "link_type", "value": "辅路"},
     {"kw": "入口匝道", "table": "static_link", "column": "link_type", "value": "入口匝道"},
     {"kw": "出口匝道", "table": "static_link", "column": "link_type", "value": "出口匝道"},
@@ -417,22 +417,25 @@ def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[T
             )
         # 给出range_tag × map表的JOIN示例
         # 注意：range_tag 没有 ego_link_id 列！桥接方式是通过 ego 表中转：
-        # range_tag(start_ts/end_ts) ←时间JOIN→ ego(ts, ego_link_id) ←link_id→ static_link(link_id)
+        # range_tag(start_ts/end_ts) ←时间JOIN→ ego(ts, ego_static_map_link_id) ←CAST→ static_link(link_id)
+        # ⚠ ego.ego_link_id 是另一种编码（小整数），不是 static_link.link_id！
+        #   JOIN static_link 必须用 ego.ego_static_map_link_id（大整数，需CAST为TEXT匹配link_id）
+        #   且 ego_static_map_link_id = -1 表示无匹配link，需过滤
         if has_range_tag and has_ego and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
             sample = map_enum_hits[0]
             hints.append(
-                f"range_tag → ego → {sample['table']} 三表桥接（range_tag 无 ego_link_id，必须经 ego 中转）: "
+                f"range_tag → ego → {sample['table']} 三表桥接: "
                 f"`SELECT r.* FROM range_tag r "
                 f"JOIN ego e ON e.ts BETWEEN r.start_ts AND r.end_ts "
-                f"JOIN {sample['table']} m ON e.ego_link_id = m.link_id "
-                f"WHERE m.{sample['column']} = '{sample['value']}'`"
+                f"JOIN {sample['table']} m ON CAST(e.ego_static_map_link_id AS TEXT) = m.link_id "
+                f"WHERE e.ego_static_map_link_id != -1 AND m.{sample['column']} = '{sample['value']}'`"
             )
         elif has_range_tag and not has_ego and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
             # 仅range_tag + map，无ego → 需要提醒LLM必须引入ego做中转
             sample = map_enum_hits[0]
             hints.append(
                 f"⚠ range_tag 与 {sample['table']} 不能直接JOIN！range_tag 没有 ego_link_id。"
-                f"必须通过 ego 表中转: range_tag(时间) → ego(ego_link_id) → {sample['table']}(link_id)"
+                f"必须通过 ego 表中转: range_tag(时间) → ego(ego_static_map_link_id) → {sample['table']}(link_id)"
             )
 
     # ── 多标签组合提示（range_tag 自 JOIN） ──
@@ -593,7 +596,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个 ROS Bag 数据查询助手。根据用�
 6. SQL 必须完整，必须包含 SELECT、FROM，必要时包含 WHERE
 7. 不要生成 LIMIT 子句，LIMIT 由系统自动注入
 8. 涉及 dynamic_obj 时，X 轴向前为正，Y 轴向左为正
-9. ⚠ range_tag 表只有 start_ts, end_ts, tag_name, param 四个列，没有 ego_link_id！range_tag 与 map 表(static_link/static_lane)的 JOIN 必须通过 ego 表中转: range_tag(时间) → ego(ego_link_id) → map表(link_id)
+9. ⚠ range_tag 表只有 start_ts, end_ts, tag_name, param 四个列，没有 ego_link_id！range_tag 与 map 表(static_link/static_lane)的 JOIN 必须通过 ego 表中转: range_tag(时间) → ego(ego_static_map_link_id) → map表(link_id)。⚠ ego.ego_link_id 是另一种编码（小整数1,2,3...），不是 static_link.link_id！JOIN static_link 必须用 ego.ego_static_map_link_id，且 ego_static_map_link_id = -1 表示无匹配link需过滤。ego_static_map_link_id 是int，static_link.link_id 是text，需要 CAST(e.ego_static_map_link_id AS TEXT) = static_link.link_id
 10. ⚠ ego.speed 单位是 m/s（米/秒），不是 km/h！例如 speed > 5 表示超过 5m/s（约18km/h）
 11. ⚠ SQLite 兼容性约束：不要使用 GREATEST()/LEAST()（用 MAX/MIN 子查询或 CASE WHEN 替代）；不要使用 ->> 运算符（用 json_extract() 替代）；不支持 FULL OUTER JOIN；不支持窗口函数 FILTER 子句
 """
