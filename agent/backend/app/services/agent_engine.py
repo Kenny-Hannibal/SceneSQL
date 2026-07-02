@@ -293,8 +293,14 @@ class AgentEngine:
             conn.close()
             return result
         except Exception as exc:
+            err_msg = str(exc)
+            # 结构性错误（缺表/缺列）是正常现象：batch目录下部分.db不是场景DB，没有range_tag等表
+            # 静默跳过，不报给用户
+            if "no such table" in err_msg or "no such column" in err_msg:
+                logger.debug("Skipping non-scene DB %s: %s", db_file, err_msg)
+                return []  # 静默跳过
             logger.warning("SQL execution failed on %s: %s", db_file, exc)
-            return [{"_error": str(exc), "db_file": db_file}]
+            return [{"_error": err_msg, "db_file": db_file}]
 
     def _execute_parquet(self, sql: str, result_limit: int) -> List[Dict[str, Any]]:
         """在 Parquet 聚合数据上执行 SQL（DuckDB），返回原始行。"""
