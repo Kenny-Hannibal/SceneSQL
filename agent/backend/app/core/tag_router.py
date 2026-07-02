@@ -181,10 +181,12 @@ _TABLE_KEYWORDS: Dict[str, List[str]] = {
 }
 
 # map表枚举值关键词 → (表名, 列名, 枚举值) 映射
-# 当用户说"主路"时，路由应命中static_link，并提示LLM用 link_type='主干道'（数据中"主路"的枚举值是"主干道"）
+# map表枚举值关键词 → (表名, 列名, 枚举值) 映射
+# link_type枚举值包含："主路"(167 DBs)和"主干道"(459 DBs)，两者不同
 _MAP_ENUM_KEYWORDS: List[Dict[str, str]] = [
     # static_link.link_type
-    {"kw": "主路", "table": "static_link", "column": "link_type", "value": "主干道"},
+    {"kw": "主路", "table": "static_link", "column": "link_type", "value": "主路"},
+    {"kw": "主干道", "table": "static_link", "column": "link_type", "value": "主干道"},
     {"kw": "辅路", "table": "static_link", "column": "link_type", "value": "辅路"},
     {"kw": "入口匝道", "table": "static_link", "column": "link_type", "value": "入口匝道"},
     {"kw": "出口匝道", "table": "static_link", "column": "link_type", "value": "出口匝道"},
