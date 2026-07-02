@@ -416,12 +416,23 @@ def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[T
                 f"用户提到\"{hit['kw']}\"，对应 {hit['table']}.{hit['column']} = '{hit['value']}'"
             )
         # 给出range_tag × map表的JOIN示例
-        if has_range_tag and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
+        # 注意：range_tag 没有 ego_link_id 列！桥接方式是通过 ego 表中转：
+        # range_tag(start_ts/end_ts) ←时间JOIN→ ego(ts, ego_link_id) ←link_id→ static_link(link_id)
+        if has_range_tag and has_ego and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
             sample = map_enum_hits[0]
             hints.append(
-                f"range_tag 与 {sample['table']} JOIN 示例: "
-                f"`SELECT r.* FROM range_tag r JOIN {sample['table']} m ON r.ego_link_id = m.link_id "
+                f"range_tag → ego → {sample['table']} 三表桥接（range_tag 无 ego_link_id，必须经 ego 中转）: "
+                f"`SELECT r.* FROM range_tag r "
+                f"JOIN ego e ON e.ts BETWEEN r.start_ts * 1e9 AND r.end_ts * 1e9 "
+                f"JOIN {sample['table']} m ON e.ego_link_id = m.link_id "
                 f"WHERE m.{sample['column']} = '{sample['value']}'`"
+            )
+        elif has_range_tag and not has_ego and any(h["table"] in ("static_link", "static_lane") for h in map_enum_hits):
+            # 仅range_tag + map，无ego → 需要提醒LLM必须引入ego做中转
+            sample = map_enum_hits[0]
+            hints.append(
+                f"⚠ range_tag 与 {sample['table']} 不能直接JOIN！range_tag 没有 ego_link_id。"
+                f"必须通过 ego 表中转: range_tag(时间) → ego(ego_link_id) → {sample['table']}(link_id)"
             )
 
     # ── 多标签组合提示（range_tag 自 JOIN） ──
@@ -462,7 +473,7 @@ def format_cross_table_join_hint(involved_tables: Set[str], matched_tags: List[T
         hints.append(
             f"跨表 JOIN 条件: range_tag 的时间是秒(start_ts/end_ts)，"
             f"{target} 的时间是纳秒(ts)。"
-            f"JOIN 条件: `{target}.ts BETWEEN range_tag.start_ts * 1e9 AND range_tag.end_ts * 1e9`"
+            f"JOIN 条件: `{target}.ts BETWEEN range_tag.start_ts * 1000000000 AND range_tag.end_ts * 1000000000`"
         )
 
     if has_ego and has_dynamic_obj:
@@ -577,12 +588,15 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个 ROS Bag 数据查询助手。根据用�
 ### 重要规则
 1. 只使用上方 Schema 中存在的表和字段
 2. range_tag 的时间字段(start_ts/end_ts)单位是秒(BIGINT)，ego/dynamic_obj 的时间字段(ts)单位是纳秒(BIGINT)
-3. 跨表 JOIN 时: `ego.ts BETWEEN range_tag.start_ts * 1e9 AND range_tag.end_ts * 1e9`
+3. 跨表 JOIN 时: `ego.ts BETWEEN range_tag.start_ts * 1000000000 AND range_tag.end_ts * 1000000000`
 4. range_tag.param 是 JSON 字符串，提取子标签用: `json_extract(param, '$.sub_tag')`
 5. 输出必须是纯 SQL，不要包含 markdown 代码块标记，不要包含任何解释文字
 6. SQL 必须完整，必须包含 SELECT、FROM，必要时包含 WHERE
 7. 不要生成 LIMIT 子句，LIMIT 由系统自动注入
 8. 涉及 dynamic_obj 时，X 轴向前为正，Y 轴向左为正
+9. ⚠ range_tag 表只有 start_ts, end_ts, tag_name, param 四个列，没有 ego_link_id！range_tag 与 map 表(static_link/static_lane)的 JOIN 必须通过 ego 表中转: range_tag(时间) → ego(ego_link_id) → map表(link_id)
+10. ⚠ ego.speed 单位是 m/s（米/秒），不是 km/h！例如 speed > 5 表示超过 5m/s（约18km/h）
+11. ⚠ SQLite 兼容性约束：不要使用 GREATEST()/LEAST()（用 MAX/MIN 子查询或 CASE WHEN 替代）；不要使用 ->> 运算符（用 json_extract() 替代）；不支持 FULL OUTER JOIN；不支持窗口函数 FILTER 子句
 """
 
 USER_PROMPT_TEMPLATE = """{few_shot}

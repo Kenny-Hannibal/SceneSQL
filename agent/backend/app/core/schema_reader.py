@@ -94,7 +94,7 @@ FIELD_SEMANTICS = {
         "_desc": "自车状态表，记录主车（ego）的实时运动状态和感知信息，10Hz采样",
         "ts": "时间戳，单位：纳秒",
         "ts_ms": "时间戳，单位：毫秒",
-        "speed": "自车速度，单位：km/h（1Hz降采样）",
+        "speed": "自车速度，单位：m/s（米/秒），不是km/h！例: speed>5 即超过5m/s(≈18km/h)",
         "steering_angle": "方向盘转角",
         "acc_magnitude": "加速度大小",
         "ego_lane_id": "自车所在车道ID",

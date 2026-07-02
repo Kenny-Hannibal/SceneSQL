@@ -14,11 +14,12 @@ version: 1.0
 
 ## 1. 核心原则
 
-1. **前端才是交付产品** — 只有在前端页面端到端跑通才算真正通过，禁止写脚本绕过前端直接调 API 测试
-2. **Git 是唯一代码同步方式** — 禁止 SCP/SSH 传文件同步代码，统一使用 git push/pull
-3. **每改必测** — 每次代码修改都必须进行端到端测试，不仅看"是否报错"
-4. **每改必报** — 每次代码修改都必须写测试报告 + 更新 CHANGELOG.md
-5. **SQL 质量校验** — 测试不仅要看执行是否报错，还要检验生成的 SQL 语句是否正确
+1. **前端才是交付产品** — 只有在前端页面端到端跑通才算真正通过
+2. **E2E测试通过API模拟用户操作** — 不写外部脚本直接操作DB/文件系统，而是调平台API模拟用户流程（选batch→输入NL→生成SQL→执行查询→验证结果），等同于用户在前端点击按钮
+3. **Git 是唯一代码同步方式** — 禁止 SCP/SSH 传文件同步代码，统一使用 git push/pull
+4. **每改必测** — 每次代码修改都必须进行端到端测试，不仅看"是否报错"
+5. **每改必报** — 每次代码修改都必须写测试报告 + 更新 CHANGELOG.md
+6. **SQL 质量校验** — 测试不仅要看执行是否报错，还要检验生成的 SQL 语句是否正确
 
 ## 2. 代码修改流程（强制执行）
 
@@ -73,24 +74,149 @@ ssh -o ConnectTimeout=15 dsw "cd /root/data/text2sql && git pull origin master &
 
 ### Step 5: 端到端测试（强制）
 
-**必须通过前端页面测试，禁止写脚本绕过。**
+**核心逻辑：通过API模拟用户操作流程，不写外挂脚本直接操作DB/文件系统。**
 
-测试检查项：
+用户在前端点击按钮的本质就是调API。E2E测试就是通过API走完用户完整操作链路：
+1. 指定batch_id → 2. 输入NL问题 → 3. LLM生成SQL → 4. 执行SQL查询 → 5. 验证结果
+
+#### 5.1 平台连接信息
+
+| 项 | 值 |
+|-----|-----|
+| 平台地址 | `http://8.130.175.37:30001`（DSW公网） |
+| 本机连接 | **无需SSH到DSW**，本机通过HTTP代理直连平台 |
+| HTTP代理 | `http://127.0.0.1:18888`（sing-box，已配置DSW 30001端口走domestic-proxy） |
+| 健康检查 | `curl -x http://127.0.0.1:18888 http://8.130.175.37:30001/health` |
+| 前端页面 | `http://8.130.175.37:30001`（浏览器直接访问，已配sing-box路由，无需手动指定18888代理） |
+
+#### 5.2 E2E测试API端点
+
+**所有请求从本机发出，经HTTP代理`http://127.0.0.1:18888`到达DSW平台。**
+
+##### A. 生成SQL（不执行）
+
+```
+POST /api/agent/generate-sql
+```
+
+请求体：
+```json
+{
+  "question": "找出cutin场景",
+  "batch_id": "20260616_T68_2434_c5afa57_1.5w",
+  "query_mode": "sqlite"
+}
+```
+
+返回：
+```json
+{
+  "sql": "SELECT ...",
+  "validation_error": null,
+  "route_method": "keyword",
+  "matched_tags": ["Cutin", "navi_other"],
+  "involved_tables": ["dynamic_obj", "range_tag"]
+}
+```
+
+##### B. 完整查询流程（生成SQL + 执行 + 返回结果）
+
+```
+POST /api/agent/query
+```
+
+请求体：
+```json
+{
+  "question": "找出cutin场景",
+  "batch_id": "20260616_T68_2434_c5afa57_1.5w",
+  "query_mode": "sqlite",
+  "db_limit": 30,
+  "result_limit": 50,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+**`result_limit` 的含义**：查询到设定数量的场景就返回，而非在设定数量的DB下搜索。例如`result_limit=50`意味着查够50条结果就停止，而不是只搜50个DB文件。这是验证SQL正确性的关键参数——设定合理数量即可快速验证。
+
+返回：
+```json
+{
+  "sql": "SELECT ...",
+  "explanation": "...",
+  "columns": ["bag_id", "start_ts", "end_ts", "tag_name", ...],
+  "rows": [...],
+  "error": null,
+  "scanned_dbs": 150,
+  "matched_dbs": 5,
+  "total_rows": 50,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+##### C. 直接执行SQL（不经过LLM）
+
+```
+POST /api/agent/execute-sql
+```
+
+请求体：
+```json
+{
+  "sql": "SELECT * FROM range_tag WHERE tag_name = 'Cutin' LIMIT 10",
+  "batch_id": "20260616_T68_2434_c5afa57_1.5w",
+  "query_mode": "sqlite",
+  "db_limit": 30,
+  "result_limit": 50
+}
+```
+
+用于验证/修正LLM生成的SQL。
+
+#### 5.3 curl调用方式（从本机）
+
+```bash
+# 生成SQL（不执行）
+curl -s -x http://127.0.0.1:18888 -X POST \
+  http://8.130.175.37:30001/api/agent/generate-sql \
+  -H "Content-Type: application/json" \
+  -d '{"question":"找出cutin场景","batch_id":"20260616_T68_2434_c5afa57_1.5w","query_mode":"sqlite"}'
+
+# 完整查询（生成+执行+结果）
+curl -s -x http://127.0.0.1:18888 -X POST \
+  http://8.130.175.37:30001/api/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"question":"找出cutin场景","batch_id":"20260616_T68_2434_c5afa57_1.5w","query_mode":"sqlite","db_limit":30,"result_limit":50}'
+
+# 直接执行SQL
+curl -s -x http://127.0.0.1:18888 -X POST \
+  http://8.130.175.37:30001/api/agent/execute-sql \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT * FROM range_tag WHERE tag_name = '"'"'Cutin'"'"'","batch_id":"20260616_T68_2434_c5afa57_1.5w","query_mode":"sqlite","db_limit":30,"result_limit":10}'
+```
+
+#### 5.4 E2E测试检查项
 
 | 检查项 | 要求 | 如何验证 |
 |--------|------|---------|
-| SQL 生成 | 前端输入 NL → 生成 SQL 无报错 | 前端 SQL 编辑区显示 SQL |
-| SQL 执行 | 执行无报错，返回结果 | 前端表格显示数据 |
-| sql_source | Recipe 命中应显示 `recipe`，LLM 生成显示 `llm` | 前端 badge 显示 |
-| start_ts + end_ts | 返回结果必须包含 start_ts 和 end_ts 列 | 表格列头检查 |
-| SQL 逻辑 | SQL 语句逻辑是否正确（非仅"无报错"） | 人工审查 SQL 内容 |
-| 数据合理性 | 返回行数是否在合理范围（0 或 100 可能异常） | 检查行数 |
+| SQL 生成 | API返回sql字段非空 | 检查`generate-sql`返回的sql |
+| SQL 执行 | API返回无error | 检查`query`返回的error字段 |
+| 结果行数 | total_rows > 0 | 检查`query`返回的total_rows |
+| start_ts + end_ts | columns中必须包含 | 检查`query`返回的columns |
+| SQL 逻辑 | SQL语句逻辑正确 | 审查SQL内容 |
+| sql_source | recipe命中应为recipe,LLM为llm | 检查route_method和matched_tags |
+| 数据合理性 | 行数在合理范围（0或超大可能异常） | 检查matched_dbs和total_rows |
 
 **SQL 逻辑审查要点**：
 - 表名是否正确（不是 LLM 编造的）
 - JOIN 条件是否正确（时间戳单位是否一致，禁止 `*1e9`）
 - WHERE 条件是否完整（没有遗漏用户要求的过滤条件）
 - SELECT 字段是否包含 start_ts、end_ts
+- range_tag无ego_link_id列，跨表查询须通过ego.ts桥接
+- speed单位是m/s，120km/h = 33.3m/s
+- SQLite不兼容：无GREATEST/LEAST/->>/EXTRACT/ILIKE
 
 ### Step 6: 写测试报告
 
@@ -167,7 +293,8 @@ ssh -o ConnectTimeout=15 dsw "cd /root/data/text2sql && git pull origin master &
 | 只看 API 返回 200 就算通过 | 检查返回的 SQL 语句内容 |
 | 只看"无报错"就当通过 | 检查 SQL 的 WHERE/JOIN 逻辑 |
 | 只看返回行数 > 0 | 检查 start_ts/end_ts 列是否存在 |
-| 写 Python 脚本调 API | 通过前端页面端到端验证 |
+| 写Python脚本直接连SQLite查DB | 通过平台API（generate-sql / query / execute-sql）走完整用户流程 |
+| SSH到DSW上写脚本跑SQL | 本机curl调API即可，无需SSH |
 
 ### 4.2 SQL 质量校验清单
 
@@ -257,23 +384,44 @@ ssh -o ConnectTimeout=15 dsw "cd /root/data/text2sql && git pull origin master &
 | # | 禁止 | 原因 |
 |---|------|------|
 | 1 | SCP/SSH 传文件同步代码 | Git 是唯一代码同步方式 |
-| 2 | 写脚本绕过前端直接调 API 测试 | 前端才是交付产品 |
-| 3 | 只看"无报错"就当测试通过 | 必须检验 SQL 逻辑 |
-| 4 | 修改代码后不写测试报告 | 每改必报 |
-| 5 | 修改代码后不更新 CHANGELOG | 每改必记录 |
-| 6 | DSW 执行 reboot | DSW 是工业机，永不重启 |
-| 7 | 为每个标签组合写死模板 | 不可扩展，应使用通用可组合模板 |
-| 8 | 在 LLM SQL 中使用 `*1e9` | 所有时间字段都是秒级，无需转换 |
+| 2 | 写Python脚本直接连SQLite查DB做测试 | E2E测试必须通过平台API走完整用户流程 |
+| 3 | SSH到DSW写脚本跑SQL验证 | 本机curl调API即可，无需SSH |
+| 4 | 只看"无报错"就当测试通过 | 必须检验 SQL 逻辑 + 结果列 + 行数合理性 |
+| 5 | 修改代码后不写测试报告 | 每改必报 |
+| 6 | 修改代码后不更新 CHANGELOG | 每改必记录 |
+| 7 | DSW 执行 reboot | DSW 是工业机，永不重启 |
+| 8 | 为每个标签组合写死模板 | 不可扩展，应使用通用可组合模板 |
+| 9 | 在 LLM SQL 中使用 `*1e9` | 所有时间字段都是秒级，无需转换 |
+| 10 | 使用`/mnt/gacrnd-oss/`路径查询 | OSS慢，必须用`/mnt/ubm_code_nas/`(NAS) |
 
 ## 9. 关键环境信息
 
 | 项 | 值 |
 |-----|-----|
 | DSW SSH | `ssh dsw`（Host: 8.130.175.37, Port: 1021, User: root） |
-| DSW 部署 | `cd /root/data/text2sql && bash visualizer/deploy.sh -f` |
-| DSW API | `http://127.0.0.1:30001`（SSH: `ssh dsw "curl http://127.0.0.1:30001/health"`） |
-| SQLite DB | `/mnt/ubm_code_nas/gac_huangzijian/common_data/sqlite_dbs/` |
+| DSW 部署 | `cd /root/data/text2sql && git pull origin master && bash visualizer/deploy.sh -f` |
+| 平台API | `http://8.130.175.37:30001`（本机经HTTP代理`http://127.0.0.1:18888`访问） |
+| 前端页面 | `http://8.130.175.37:30001`（浏览器直连，已配sing-box路由） |
+| 健康检查 | `curl -x http://127.0.0.1:18888 http://8.130.175.37:30001/health` |
+| SQLite DB路径 | `/mnt/ubm_code_nas/gac_huangzijian/common_data/sqlite_dbs/` **（NAS，速度快，优先使用）** |
+| OSS DB路径 | `/mnt/gacrnd-oss/gac_huangzijian/common_data/sqlite_dbs/` **（OSS，速度慢，避免使用）** |
 | SQLite 版本 | 3.37.2（不支持 `->>` 运算符） |
 | GitHub | `git@github.com:Kenny-Hannibur/SceneSQL.git` |
 | 测试报告 | `/data/var/workspace/projects/projects/SceneSQL/test_reports/` |
 | CHANGELOG | `/data/var/workspace/projects/projects/SceneSQL/CHANGELOG.md` |
+
+### 9.1 SQLite DB路径说明
+
+- **`/mnt/ubm_code_nas/`** = NAS挂载，传输速度快，**SQL查询和E2E测试应使用此路径**
+- **`/mnt/gacrnd-oss/`** = OSS对象存储挂载，传输速度慢，**避免用于查询**
+- DSW `.env` 中 `SQLITE_DB_PATH` 应设为 `/mnt/ubm_code_nas/gac_huangzijian/common_data`
+- API的`batch_id`参数会自动拼接 `SQLITE_DB_PATH/sqlite_dbs/{batch_id}`
+
+### 9.2 E2E测试API速查
+
+| 操作 | 端点 | 说明 |
+|------|------|------|
+| 生成SQL | `POST /api/agent/generate-sql` | 仅生成SQL，不执行 |
+| 完整查询 | `POST /api/agent/query` | 生成SQL + 执行 + 返回结果（**E2E测试主力**） |
+| 执行SQL | `POST /api/agent/execute-sql` | 直接执行SQL，不经过LLM（用于验证/修正） |
+| 流式查询 | `POST /api/agent/query-stream` | SSE流式（前端默认用这个，测试可用非流式query） |
