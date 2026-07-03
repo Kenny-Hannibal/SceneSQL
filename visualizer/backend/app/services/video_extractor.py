@@ -221,11 +221,14 @@ def extract_topic_hevc_stream(
     start_ts: Optional[int] = None,
     end_ts: Optional[int] = None,
     fps: Optional[float] = None,
-):
-    """Extract HEVC frames from a bag topic and remux to fMP4 stream (no disk write, no decode).
+) -> tuple:
+    """创建 HEVC 流式提取的 generator 和 stop_event。
 
-    Yields fMP4 chunks suitable for Media Source Extensions (MSE) playback.
+    Returns:
+        (generator, stop_event) 元组。
+        generator yield fMP4 chunks；stop_event 可由调用方 set 以立即终止流。
     """
+    # 所有上下文变量在此函数中创建，被内部 generator 闭包捕获
     bag_path = _resolve_bag_path(bag_path, "stream")
     if not bag_path:
         raise RuntimeError("Failed to resolve bag path")
@@ -341,71 +344,97 @@ def extract_topic_hevc_stream(
     feeder.start()
     writer.start()
 
-    try:
-        while True:
-            chunk = process.stdout.read(262144)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        # 客户端可能已断开。全局锁会等这个 finally 结束才释放，
-        # 因此必须确保 feed/writer 线程和 ffmpeg 进程都已清理。
-        logger.info("[stream] Client disconnected or stream ended, cleaning up...")
-        stop_event.set()
-        # 清空队列，避免 producer 卡在 frame_queue.put 上
-        while not frame_queue.empty():
+    def _stream_generator():
+        """内部 generator：yield fMP4 chunks。stop_event 被 set 后最多 0.5 秒退出。"""
+        # ── 非阻塞 read 循环 ──
+        # 核心修复：原 process.stdout.read(262144) 是阻塞调用，
+        # 客户端断开后 read 不会返回 → finally 执行不到 → gsbag reader 全局锁不释放 → 新请求卡死。
+        # 改为 selectors 轮询 + stop_event 检测，确保客户端断开后最多 0.5 秒退出 read 循环。
+        import selectors as _sel
+        _read_sel = _sel.DefaultSelector()
+        _read_sel.register(process.stdout, _sel.EVENT_READ)
+
+        try:
+            while not stop_event.is_set():
+                # 轮询 stdout，每 0.5 秒检查一次 stop_event
+                ready = _read_sel.select(timeout=0.5)
+                if ready:
+                    chunk = process.stdout.read(262144)
+                    if not chunk:
+                        break
+                    yield chunk
+                # 如果 stop_event 被 set（客户端断开），立即退出
+            logger.info("[stream] Read loop exited (stop_event=%s)", stop_event.is_set())
+        finally:
+            _read_sel.close()
+            # 客户端可能已断开。全局锁会等这个 finally 结束才释放，
+            # 因此必须确保 feed/writer 线程和 ffmpeg 进程都已清理。
+            logger.info("[stream] Client disconnected or stream ended, cleaning up...")
+            stop_event.set()
+            # 清空队列，避免 producer 卡在 frame_queue.put 上
+            while not frame_queue.empty():
+                try:
+                    frame_queue.get_nowait()
+                except queue.Empty:
+                    break
+            # 关闭 stdin，consumer 会退出
             try:
-                frame_queue.get_nowait()
-            except queue.Empty:
-                break
-        # 关闭 stdin，consumer 会退出
-        try:
-            process.stdin.close()
-        except Exception:
-            pass
-        feeder.join(timeout=1)
-        writer.join(timeout=1)
-        # 尝试关闭 bag reader，强制 feed 线程退出 read_messages() 循环
-        try:
-            if hasattr(reader, 'close'):
-                reader.close()
-        except Exception as exc:
-            logger.debug("[stream] reader.close() failed: %s", exc)
-        # 给 reader.close() 生效留一点时间
-        feeder.join(timeout=1)
-        writer.join(timeout=1)
-        try:
-            process.kill()
-        except Exception:
-            pass
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            # 非阻塞读取 stderr，2秒超时防止卡死
-            import selectors
-            sel = selectors.DefaultSelector()
-            sel.register(process.stderr, selectors.EVENT_READ)
-            stderr_data = b''
-            ready = sel.select(timeout=2)
-            if ready:
-                stderr_data = process.stderr.read(65536)  # 最多读 64KB
-            sel.close()
-            stderr_text = stderr_data.decode("utf-8", errors="ignore")
-            if stderr_text:
-                logger.warning("[stream] ffmpeg stderr: %s", stderr_text[:2000])
-        except Exception as exc:
-            logger.debug("[stream] stderr read failed: %s", exc)
-        # 尝试释放 bag reader 资源并强制 GC
-        try:
-            del reader
-        except Exception:
-            pass
-        try:
-            gc.collect()
-        except Exception:
-            pass
+                process.stdin.close()
+            except Exception:
+                pass
+            # 先 kill ffmpeg 进程——这是让 stdout.read 退出的最可靠方式
+            try:
+                process.kill()
+            except Exception:
+                pass
+            # 等待线程退出，给予更长时间（feeder 中 read_messages 可能还在阻塞）
+            feeder.join(timeout=3)
+            writer.join(timeout=3)
+            # 尝试关闭 bag reader，强制 feed 线程退出 read_messages() 循环
+            try:
+                if hasattr(reader, 'close'):
+                    reader.close()
+            except Exception as exc:
+                logger.debug("[stream] reader.close() failed: %s", exc)
+            # 再等一次，reader.close() 后 feeder 需要时间退出
+            feeder.join(timeout=3)
+            writer.join(timeout=3)
+            # 如果线程仍然活着，记录警告
+            if feeder.is_alive() or writer.is_alive():
+                logger.warning(
+                    "[stream] Threads still alive after cleanup: feeder=%s writer=%s — "
+                    "gsbag lock may not be released. Next stream may be blocked.",
+                    feeder.is_alive(), writer.is_alive(),
+                )
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                logger.warning("[stream] ffmpeg process did not exit after kill")
+            try:
+                # 非阻塞读取 stderr
+                _err_sel = _sel.DefaultSelector()
+                _err_sel.register(process.stderr, _sel.EVENT_READ)
+                stderr_data = b''
+                ready = _err_sel.select(timeout=1)
+                if ready:
+                    stderr_data = process.stderr.read(65536)
+                _err_sel.close()
+                stderr_text = stderr_data.decode("utf-8", errors="ignore")
+                if stderr_text:
+                    logger.warning("[stream] ffmpeg stderr: %s", stderr_text[:2000])
+            except Exception as exc:
+                logger.debug("[stream] stderr read failed: %s", exc)
+            # 尝试释放 bag reader 资源并强制 GC
+            try:
+                del reader
+            except Exception:
+                pass
+            try:
+                gc.collect()
+            except Exception:
+                pass
+
+    return _stream_generator(), stop_event
 
 
 def extract_topic_to_mp4(

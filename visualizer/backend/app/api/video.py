@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, Query, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Query, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from app.models.schemas import (
     ExtractRequest, ExtractResponse, VideoStatus,
@@ -73,26 +73,51 @@ def video_file(task_id: str):
 
 
 @router.get("/stream-hevc")
-def stream_hevc(
+async def stream_hevc(
+    request: Request,
     bag_path: str = Query(..., description="Bag path"),
     topic: str = Query(..., description="Camera topic"),
     start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
     end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
     fps: Optional[float] = Query(None, description="Override FPS"),
 ):
-    """Stream HEVC remuxed to fMP4 for MSE playback. No local file is created."""
+    """Stream HEVC remuxed to fMP4 for MSE playback. No local file is created.
+    
+    修复：通过 Request.is_disconnected() 检测客户端断开，
+    将 stop_event 传入 generator，确保客户端关闭页面后后端资源立即释放，
+    避免新旧 stream 冲突导致卡死。
+    """
     logger.info(
         "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
         bag_path, topic, start_ts, end_ts,
     )
     try:
-        return StreamingResponse(
-            extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps),
+        stream_gen, stop_event = extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps)
+        # 启动后台任务：轮询客户端断开状态，一旦断开立即 set stop_event
+        async def _watch_disconnect():
+            while not stop_event.is_set():
+                if await request.is_disconnected():
+                    logger.info("[stream] Client disconnected, signaling stop_event")
+                    stop_event.set()
+                    return
+                await asyncio.sleep(0.5)
+        import asyncio
+        # 把 watch 任务挂到 FastAPI 的 background（不阻塞响应）
+        # 注意：不能用 BackgroundTasks，因为它在响应完成后才执行；
+        # 我们需要在响应发送期间就监控断开。
+        # 使用 asyncio.ensure_future 在当前 event loop 中启动监控协程。
+        _watch_task = asyncio.ensure_future(_watch_disconnect())
+        
+        response = StreamingResponse(
+            stream_gen,
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="stream.mp4"',
             },
         )
+        # 在响应发送完成后取消监控任务
+        response.background = _watch_task.cancel
+        return response
     except Exception as exc:
         logger.exception("HEVC stream failed")
         from app.core.exceptions import AppException
