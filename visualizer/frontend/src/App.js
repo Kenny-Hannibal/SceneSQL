@@ -1,10 +1,96 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import AgentPanel from './components/AgentPanel';
+import LoginPage from './components/LoginPage';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+// ── 带认证的 fetch wrapper ──
+function authFetch(url, options = {}) {
+  const token = localStorage.getItem('token');
+  const headers = { ...options.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 function App() {
+  const [authed, setAuthed] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+
+  // ── 启动时检查 localStorage 中是否有有效 token ──
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setAuthChecking(false);
+      return;
+    }
+    // 验证 token 是否还有效
+    fetch(`${API_BASE}/api/auth/verify`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => {
+        if (res.ok) {
+          setAuthed(true);
+        } else {
+          // token 过期或无效，清除
+          localStorage.removeItem('token');
+          setAuthed(false);
+        }
+      })
+      .catch(() => {
+        // 网络错误 — 仍然尝试用现有 token（可能是临时断网）
+        setAuthed(true);
+      })
+      .finally(() => setAuthChecking(false));
+  }, []);
+
+  const handleLogin = useCallback((token) => {
+    setAuthed(true);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('token');
+    setAuthed(false);
+  }, []);
+
+  // ── 全局 401 拦截：token 过期自动跳回登录 ──
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+      return originalFetch.apply(this, args).then(response => {
+        if (response.status === 401 && authed) {
+          // token 过期，登出
+          localStorage.removeItem('token');
+          setAuthed(false);
+        }
+        return response;
+      });
+    };
+    return () => { window.fetch = originalFetch; };
+  }, [authed]);
+
+  // ── 加载中 ──
+  if (authChecking) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'system-ui' }}>
+        <div style={{ color: '#888', fontSize: 16 }}>加载中...</div>
+      </div>
+    );
+  }
+
+  // ── 未登录 → 登录页 ──
+  if (!authed) {
+    return <LoginPage onLoginSuccess={handleLogin} />;
+  }
+
+  // ── 已登录 → 原有内容 ──
+  return <MainApp onLogout={handleLogout} />;
+}
+
+
+function MainApp({ onLogout }) {
   const [topics, setTopics] = useState([]);
   const [bagPath, setBagPath] = useState('/root/data/bags/20260124_085515');
   const [loading, setLoading] = useState(false);
@@ -21,13 +107,6 @@ function App() {
   const intervalRef = useRef(null);
   const videoRef = useRef(null);
 
-  // Agent states
-  const [agentQuestion, setAgentQuestion] = useState('');
-  const [agentDbPath, setAgentDbPath] = useState('');
-  const [agentLoading, setAgentLoading] = useState(false);
-  const [agentResult, setAgentResult] = useState(null);
-  const [agentError, setAgentError] = useState('');
-
   const loadBag = async () => {
     setLoading(true);
     setError('');
@@ -36,7 +115,7 @@ function App() {
     setTaskId('');
     setTaskStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, {
+      const res = await authFetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, {
         method: 'POST',
       });
       if (!res.ok) {
@@ -58,7 +137,7 @@ function App() {
 
   const startH264Extraction = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/video/extract`, {
+      const res = await authFetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bag_path: bagPath, topic: selectedTopic }),
@@ -107,6 +186,9 @@ function App() {
         bag_path: bagPath,
         topic: selectedTopic,
       });
+      // 流式播放 URL 需要带 token 作为查询参数（因为 MSE fetch 不支持自定义 header）
+      const token = localStorage.getItem('token');
+      params.set('token', token || '');
       setStreamPlayerData({
         stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
         durationSec: topicDuration,
@@ -125,7 +207,7 @@ function App() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/video/status/${taskId}`);
+        const res = await authFetch(`${API_BASE}/api/video/status/${taskId}`);
         if (!res.ok) return;
         const data = await res.json();
         setTaskStatus(data);
@@ -280,7 +362,23 @@ function App() {
 
   return (
     <div className="App" style={{ maxWidth: 1200, margin: '0 auto', padding: 20, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h1>🎥 Rosbag Visualizer</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h1 style={{ margin: 0 }}>🎥 Rosbag Visualizer</h1>
+        <button
+          onClick={onLogout}
+          style={{
+            padding: '6px 16px',
+            fontSize: 13,
+            borderRadius: 4,
+            border: '1px solid #d9d9d9',
+            background: '#fff',
+            color: '#555',
+            cursor: 'pointer',
+          }}
+        >
+          退出登录
+        </button>
+      </div>
 
       <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <h2>📁 Bag Loader</h2>
@@ -406,7 +504,7 @@ function App() {
         </div>
       )}
 
-      <AgentPanel />
+      <AgentPanel authFetch={authFetch} />
     </div>
   );
 }

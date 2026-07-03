@@ -12,11 +12,12 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from app.api import bag, video, agent
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.exceptions import setup_exception_handlers
+from app.core.auth import auth_middleware, authenticate
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -30,6 +31,9 @@ app = FastAPI(
 )
 
 setup_exception_handlers(app)
+
+# ── 认证中间件（必须在 CORS 之前，这样 401 响应也有正确的 CORS 头） ──
+app.middleware("http")(auth_middleware)
 
 
 @app.middleware("http")
@@ -61,6 +65,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 登录接口 ──
+@app.post("/api/auth/login", tags=["auth"])
+async def login(request: Request):
+    """用户名密码登录，返回 JWT token。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    token = authenticate(username, password)
+    if token is None:
+        return JSONResponse(status_code=401, content={"detail": "Invalid username or password"})
+
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ── 验证 token 是否有效（前端启动时调用） ──
+@app.get("/api/auth/verify", tags=["auth"])
+async def verify_auth(request: Request):
+    """验证当前 token 是否有效。auth_middleware 已验证通过，直接返回 200。"""
+    user = getattr(request.state, "user", "unknown")
+    return {"valid": True, "user": user}
+
 
 app.include_router(bag.router)
 app.include_router(video.router)

@@ -3,6 +3,16 @@ import SqlEditor from './SqlEditor';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+// ── 带认证的 fetch wrapper ──
+function authFetch(url, options = {}) {
+  const token = localStorage.getItem('token');
+  const headers = { ...options.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 // ============================================
 // 分页控件组件
 // ============================================
@@ -287,7 +297,7 @@ export default function AgentPanel() {
 
   // 组件挂载时获取 batch 列表
   useEffect(() => {
-    fetch(`${API_BASE}/api/agent/batches`)
+    authFetch(`${API_BASE}/api/agent/batches`)
       .then(async (res) => {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -390,7 +400,7 @@ export default function AgentPanel() {
         payload.query_mode = queryMode;
       }
 
-      const res = await fetch(`${API_BASE}/api/agent/execute-sql`, {
+      const res = await authFetch(`${API_BASE}/api/agent/execute-sql`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -445,7 +455,7 @@ export default function AgentPanel() {
     if (sqlEditMode === 'preview') {
       // 仅生成 SQL，填入编辑器
       try {
-        const res = await fetch(`${API_BASE}/api/agent/generate-sql`, {
+        const res = await authFetch(`${API_BASE}/api/agent/generate-sql`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildPayload()),
@@ -474,7 +484,7 @@ export default function AgentPanel() {
 
     // auto 模式：直接执行（原有逻辑）
     try {
-      const res = await fetch(`${API_BASE}/api/agent/query`, {
+      const res = await authFetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildPayload()),
@@ -519,7 +529,7 @@ export default function AgentPanel() {
     if (sqlEditMode === 'preview') {
       // Stream 模式下 preview 也走 generate-sql
       try {
-        const res = await fetch(`${API_BASE}/api/agent/generate-sql`, {
+        const res = await authFetch(`${API_BASE}/api/agent/generate-sql`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildPayload()),
@@ -547,7 +557,7 @@ export default function AgentPanel() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/agent/query-stream`, {
+      const response = await authFetch(`${API_BASE}/api/agent/query-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildPayload()),
@@ -641,7 +651,7 @@ export default function AgentPanel() {
     if (!bagPath) {
       if (row.bag_id) {
         try {
-          const resolveRes = await fetch(`${API_BASE}/api/agent/resolve-bag-path?bag_id=${encodeURIComponent(row.bag_id)}`);
+          const resolveRes = await authFetch(`${API_BASE}/api/agent/resolve-bag-path?bag_id=${encodeURIComponent(row.bag_id)}`);
           if (resolveRes.ok) {
             const resolveData = await resolveRes.json();
             if (resolveData.bag_path) {
@@ -675,7 +685,7 @@ export default function AgentPanel() {
     let cameraTopics = [];
 
     try {
-      const response = await fetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST', signal: controller.signal });
+      const response = await authFetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST', signal: controller.signal });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -710,7 +720,7 @@ export default function AgentPanel() {
     } catch (e) {
       // 降级到非流式 API
       try {
-        const bagInfoRes = await fetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
+        const bagInfoRes = await authFetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST' });
         if (bagInfoRes.ok) {
           const bagInfo = await bagInfoRes.json();
           bagStartNs = bagInfo.start_time_ns;
@@ -744,7 +754,7 @@ export default function AgentPanel() {
 
   const startH264Extraction = async (bagPath, row, startTs, endTs) => {
     try {
-      const res = await fetch(`${API_BASE}/api/video/extract`, {
+      const res = await authFetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bag_path: bagPath, topic: selectedTopic, start_ts: startTs, end_ts: endTs }),
@@ -807,6 +817,10 @@ export default function AgentPanel() {
 
       const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
 
+      // 带 token 参数（MSE fetch 不支持自定义 header）
+      const streamToken = localStorage.getItem('token');
+      if (streamToken) params.append('token', streamToken);
+
       setPlayerData({
         stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
         row,
@@ -854,7 +868,7 @@ export default function AgentPanel() {
           continue;
         }
         try {
-          const res = await fetch(`${API_BASE}/api/video/status/${v.task_id}`);
+          const res = await authFetch(`${API_BASE}/api/video/status/${v.task_id}`);
           if (pollCancelledRef.current) return;
           if (!res.ok) {
             currentRows.push({ ...v, status: 'failed', message: 'Status fetch failed' });
@@ -985,7 +999,7 @@ export default function AgentPanel() {
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
         sourceBuffer.addEventListener('error', onSourceBufferError);
 
-        const response = await fetch(playerData.stream_url, { signal: streamController.signal });
+        const response = await authFetch(playerData.stream_url, { signal: streamController.signal });
         if (!response.ok) {
           throw new Error(`Stream HTTP ${response.status}`);
         }
@@ -1104,7 +1118,7 @@ export default function AgentPanel() {
         query_mode: queryMode || undefined,
         result_limit: getResultLimit(),
       };
-      const res = await fetch(`${API_BASE}/api/agent/execute-sql-arrow`, {
+      const res = await authFetch(`${API_BASE}/api/agent/execute-sql-arrow`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
