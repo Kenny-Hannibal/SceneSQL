@@ -8,7 +8,7 @@ from app.models.schemas import (
     ExtractRequest, ExtractResponse, VideoStatus,
     ExtractBatchRequest, ExtractBatchResponse, ClipTaskResult, FrameTaskStatus,
 )
-from app.services.video_extractor import extract_topic_to_mp4, extract_topic_hevc_stream, get_task
+from app.services.video_extractor import extract_topic_to_mp4, extract_topic_hevc_stream, extract_topic_h264_stream, get_task
 from app.services.frame_extractor import (
     extract_frames_from_bag,
     _resolve_bag_path_via_dm, _resolve_bag_path_local,
@@ -120,6 +120,54 @@ async def stream_hevc(
         return response
     except Exception as exc:
         logger.exception("HEVC stream failed")
+        from app.core.exceptions import AppException
+        raise AppException(str(exc), 500)
+
+
+@router.get("/stream-h264")
+async def stream_h264(
+    request: Request,
+    bag_path: str = Query(..., description="Bag path"),
+    topic: str = Query(..., description="Camera topic"),
+    start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
+    end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
+    fps: Optional[float] = Query(None, description="Override FPS"),
+):
+    """Stream H.264 transcoded fMP4 for MSE playback. No local file is created.
+    
+    与 /stream-hevc 架构相同，但输出H.264编码的fMP4。
+    用于不支持HEVC的浏览器，MSE边转码边播放，无需等全片转完。
+    
+    修复：通过 Request.is_disconnected() 检测客户端断开，
+    将 stop_event 传入 generator，确保客户端关闭页面后后端资源立即释放。
+    """
+    logger.info(
+        "Starting H.264 stream: bag=%s topic=%s range=[%s, %s]",
+        bag_path, topic, start_ts, end_ts,
+    )
+    try:
+        stream_gen, stop_event = extract_topic_h264_stream(bag_path, topic, start_ts, end_ts, fps)
+        async def _watch_disconnect():
+            while not stop_event.is_set():
+                if await request.is_disconnected():
+                    logger.info("[h264-stream] Client disconnected, signaling stop_event")
+                    stop_event.set()
+                    return
+                await asyncio.sleep(0.5)
+        import asyncio
+        _watch_task = asyncio.ensure_future(_watch_disconnect())
+        
+        response = StreamingResponse(
+            stream_gen,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": 'inline; filename="stream_h264.mp4"',
+            },
+        )
+        response.background = _watch_task.cancel
+        return response
+    except Exception as exc:
+        logger.exception("H.264 stream failed")
         from app.core.exceptions import AppException
         raise AppException(str(exc), 500)
 

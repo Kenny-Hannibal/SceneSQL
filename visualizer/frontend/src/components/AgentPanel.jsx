@@ -804,42 +804,63 @@ export default function AgentPanel() {
     setPlayerError(null);
     setPlayerMode(null);
 
-    // 强制 H.264 模式
-    if (forceH264) {
-      console.log('[HEVC诊断] 用户强制使用 H.264 转码');
-      setPlayerMode('h264-file');
-      startH264Extraction(bagPath, row, startTs, endTs);
-      return;
-    }
-
     // 检测浏览器是否支持 HEVC in MP4（MSE）
     const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    const h264Mime = 'video/mp4; codecs="avc1.64001f"';
     const canPlayHevc = document.createElement('video').canPlayType(hevcMime);
     const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
+    const supportsH264MSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(h264Mime);
 
-    console.log('[HEVC诊断] canPlayType:', canPlayHevc, '| MSE支持:', supportsHevcMSE, '| Mime:', hevcMime);
+    console.log('[HEVC诊断] canPlayType:', canPlayHevc, '| HEVC MSE:', supportsHevcMSE, '| H264 MSE:', supportsH264MSE);
 
-    if (supportsHevcMSE) {
-      console.log('[HEVC诊断] 浏览器支持HEVC MSE，尝试流式播放');
-      setPlayerMode('hevc-stream');
+    const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
+    const streamToken = localStorage.getItem('token');
+
+    // 构建 stream URL 的公共参数
+    const buildStreamUrl = (endpoint) => {
       const params = new URLSearchParams({
         bag_path: bagPath,
         topic: selectedTopic,
       });
       if (startTs !== null) params.append('start_ts', String(startTs));
       if (endTs !== null) params.append('end_ts', String(endTs));
-
-      const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
-
-      // 带 token 参数（MSE fetch 不支持自定义 header）
-      const streamToken = localStorage.getItem('token');
       if (streamToken) params.append('token', streamToken);
+      return `${API_BASE}/api/video/${endpoint}?${params.toString()}`;
+    };
 
+    // 强制 H.264 模式
+    if (forceH264) {
+      if (supportsH264MSE) {
+        console.log('[播放] 用户强制H.264，使用流式MSE播放');
+        setPlayerMode('h264-stream');
+        setPlayerData({
+          stream_url: buildStreamUrl('stream-h264'),
+          row,
+          topic: selectedTopic,
+          use_mse: true,
+          mse_codec: h264Mime,
+          durationSec,
+        });
+        setTopicModalOpen(false);
+        setTopicModalData(null);
+        setPlayerModalOpen(true);
+      } else {
+        console.log('[播放] 用户强制H.264，但MSE不支持H.264，降级到全量转码');
+        setPlayerMode('h264-file');
+        startH264Extraction(bagPath, row, startTs, endTs);
+      }
+      return;
+    }
+
+    if (supportsHevcMSE) {
+      console.log('[播放] 浏览器支持HEVC MSE，流式播放');
+      setPlayerMode('hevc-stream');
       setPlayerData({
-        stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
+        stream_url: buildStreamUrl('stream-hevc'),
         row,
         topic: selectedTopic,
         use_mse: true,
+        mse_codec: hevcMime,
         durationSec,
       });
       setTopicModalOpen(false);
@@ -848,9 +869,27 @@ export default function AgentPanel() {
       return;
     }
 
-    // 浏览器不支持 HEVC，明确提示后降级
-    console.log('[HEVC诊断] 浏览器不支持HEVC MSE，降级到H.264转码');
-    alert('当前浏览器不支持 HEVC 解码（canPlayType=' + canPlayHevc + '），将自动使用 H.264 转码方式播放。');
+    // 浏览器不支持 HEVC MSE → 尝试 H.264 流式 MSE
+    if (supportsH264MSE) {
+      console.log('[播放] 浏览器不支持HEVC MSE，使用H.264流式MSE播放');
+      setPlayerMode('h264-stream');
+      setPlayerData({
+        stream_url: buildStreamUrl('stream-h264'),
+        row,
+        topic: selectedTopic,
+        use_mse: true,
+        mse_codec: h264Mime,
+        durationSec,
+      });
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setPlayerModalOpen(true);
+      return;
+    }
+
+    // MSE 完全不支持，降级到全量转码+文件播放
+    console.log('[播放] 浏览器不支持任何MSE，降级到H.264全量转码');
+    alert('当前浏览器不支持 MSE 流式播放，将使用 H.264 全量转码（需等待转码完成）。');
     setPlayerMode('h264-file');
     startH264Extraction(bagPath, row, startTs, endTs);
   };
@@ -929,7 +968,8 @@ export default function AgentPanel() {
     const streamController = new AbortController();
     streamAbortControllerRef.current = streamController;
 
-    const mimeCodec = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    // 根据流类型动态选择codec：HEVC用hvc1，H.264用avc1
+    const mimeCodec = playerData.mse_codec || 'video/mp4; codecs="hvc1.1.6.L120.B0"';
 
     const cleanup = () => {
       if (aborted) return;
@@ -973,9 +1013,9 @@ export default function AgentPanel() {
         mediaSourceState: msState,
         sourceBufferState: sbState,
       };
-      console.error('[HEVC诊断] MSE错误:', diagnostics);
+      console.error('[MSE诊断] MSE错误:', diagnostics);
       const msg = `[${source}] ${detail || '未知错误'} | video.error=${videoErr?.code || 'none'} | msState=${msState}`;
-      setPlayerError('HEVC流式播放失败: ' + msg);
+      setPlayerError('流式播放失败: ' + msg);
       cleanup();
     };
 

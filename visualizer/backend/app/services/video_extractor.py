@@ -5,7 +5,7 @@ import logging
 import queue
 import subprocess
 import threading
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from pathlib import Path
 
 import yaml
@@ -215,30 +215,8 @@ def _resolve_bag_path(bag_path: str, task_id: str) -> str:
     return local_bag
 
 
-def extract_topic_hevc_stream(
-    bag_path: str,
-    topic: str,
-    start_ts: Optional[int] = None,
-    end_ts: Optional[int] = None,
-    fps: Optional[float] = None,
-) -> tuple:
-    """创建 HEVC 流式提取的 generator 和 stop_event。
-
-    Returns:
-        (generator, stop_event) 元组。
-        generator yield fMP4 chunks；stop_event 可由调用方 set 以立即终止流。
-    """
-    # 所有上下文变量在此函数中创建，被内部 generator 闭包捕获
-    bag_path = _resolve_bag_path(bag_path, "stream")
-    if not bag_path:
-        raise RuntimeError("Failed to resolve bag path")
-
-    bag_start, bag_end = _get_bag_time_range(bag_path)
-    if start_ts is not None and bag_start is not None and start_ts < bag_start:
-        start_ts = bag_start
-    if end_ts is not None and bag_end is not None and end_ts > bag_end:
-        end_ts = bag_end
-
+def _get_fps_config(bag_path, topic, fps, task_id="stream"):
+    """统一获取帧率配置，供 stream 和 extract 共用。"""
     config = _load_video_config()
     meta_fps = _get_topic_fps(bag_path, topic)
     if fps is not None and fps > 0:
@@ -247,41 +225,34 @@ def extract_topic_hevc_stream(
         input_fps = meta_fps
     else:
         input_fps = _get_fps_for_topic(topic, config)
+    output_fps_cfg = config.get("output_fps")
+    output_fps = int(output_fps_cfg if output_fps_cfg is not None else input_fps)
+    crf = int(config.get("crf", 23))
+    preset = str(config.get("preset", "fast"))
+    return input_fps, output_fps, crf, preset
 
+
+def _start_bag_reader(bag_path, topic, start_ts, end_ts, task_id="stream"):
+    """打开gsbag reader并设置topic filter + time clamp。返回reader对象。"""
     if not _HAS_GSBAG:
         raise RuntimeError("gsbag SDK not available (not installed on this machine)")
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel", "error",
-        "-r", str(input_fps),
-        "-f", "hevc",
-        "-i", "-",
-        "-c:v", "copy",
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-        "-f", "mp4",
-        "pipe:1",
-    ]
-
-    process = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
     reader = gsbag_reader.GsBagReader(bag_path)
     reader.set_topic_filter([topic])
+    return reader
 
-    # 使用带缓冲的 producer-consumer 模式：
-    # - producer 从 bag 读 HEVC 帧放入 frame_queue
-    # - consumer 从 frame_queue 取出写入 ffmpeg stdin
-    # 缓冲约 4 秒（120 帧），既避免全部读入内存，又保证播放流畅。
-    stop_event = threading.Event()
-    frame_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=60)
 
+def _clamp_time_range(bag_path, start_ts, end_ts):
+    """Clamp start_ts/end_ts到bag实际范围。返回(clamped_start, clamped_end)。"""
+    bag_start, bag_end = _get_bag_time_range(bag_path)
+    if start_ts is not None and bag_start is not None and start_ts < bag_start:
+        start_ts = bag_start
+    if end_ts is not None and bag_end is not None and end_ts > bag_end:
+        end_ts = bag_end
+    return start_ts, end_ts
+
+
+def _start_feed_and_writer(reader, topic, start_ts, end_ts, process, stop_event, frame_queue):
+    """启动 gsbag读帧线程 + ffmpeg stdin写入线程，供HEVC stream和H.264 stream复用。"""
     def feed_input():
         skipped_decode_errors = 0
         total_frames = 0
@@ -337,102 +308,241 @@ def extract_topic_hevc_stream(
             except Exception:
                 pass
 
-    # 使用非 daemon 线程：全局锁要求 generator 结束时 feed/writer 必须已经退出，
-    # 否则旧 reader 资源未释放，下一个 stream 会卡死。
     feeder = threading.Thread(target=feed_input)
     writer = threading.Thread(target=write_input)
     feeder.start()
     writer.start()
+    return feeder, writer
+
+
+def _cleanup_stream(process, feeder, writer, reader, stop_event, frame_queue):
+    """流式播放结束后的统一清理逻辑。"""
+    stop_event.set()
+    # 清空队列，避免 producer 卡在 frame_queue.put 上
+    while not frame_queue.empty():
+        try:
+            frame_queue.get_nowait()
+        except queue.Empty:
+            break
+    # 关闭 stdin
+    try:
+        process.stdin.close()
+    except Exception:
+        pass
+    # kill ffmpeg 进程
+    try:
+        process.kill()
+    except Exception:
+        pass
+    # 等待线程退出
+    feeder.join(timeout=3)
+    writer.join(timeout=3)
+    # 尝试关闭 bag reader
+    try:
+        if hasattr(reader, 'close'):
+            reader.close()
+    except Exception as exc:
+        logger.debug("[stream] reader.close() failed: %s", exc)
+    feeder.join(timeout=3)
+    writer.join(timeout=3)
+    if feeder.is_alive() or writer.is_alive():
+        logger.warning(
+            "[stream] Threads still alive after cleanup: feeder=%s writer=%s — "
+            "gsbag lock may not be released. Next stream may be blocked.",
+            feeder.is_alive(), writer.is_alive(),
+        )
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        logger.warning("[stream] ffmpeg process did not exit after kill")
+    # 读取 stderr
+    try:
+        import selectors as _sel
+        _err_sel = _sel.DefaultSelector()
+        _err_sel.register(process.stderr, _sel.EVENT_READ)
+        stderr_data = b''
+        ready = _err_sel.select(timeout=1)
+        if ready:
+            stderr_data = process.stderr.read(65536)
+        _err_sel.close()
+        stderr_text = stderr_data.decode("utf-8", errors="ignore")
+        if stderr_text:
+            logger.warning("[stream] ffmpeg stderr: %s", stderr_text[:2000])
+    except Exception as exc:
+        logger.debug("[stream] stderr read failed: %s", exc)
+    # 释放 reader 资源
+    try:
+        del reader
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+
+def _read_stderr_nonblocking(process):
+    """非阻塞读取ffmpeg stderr，返回解码后的字符串。"""
+    try:
+        import selectors as _sel
+        _err_sel = _sel.DefaultSelector()
+        _err_sel.register(process.stderr, _sel.EVENT_READ)
+        stderr_data = b''
+        ready = _err_sel.select(timeout=1)
+        if ready:
+            stderr_data = process.stderr.read(65536)
+        _err_sel.close()
+        return stderr_data.decode("utf-8", errors="ignore")
+    except Exception:
+        return ''
+
+
+def extract_topic_hevc_stream(
+    bag_path: str,
+    topic: str,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+    fps: Optional[float] = None,
+) -> Tuple:
+    """创建 HEVC 流式提取的 generator 和 stop_event。
+
+    Returns:
+        (generator, stop_event) 元组。
+        generator yield fMP4 chunks；stop_event 可由调用方 set 以立即终止流。
+    """
+    bag_path = _resolve_bag_path(bag_path, "stream")
+    if not bag_path:
+        raise RuntimeError("Failed to resolve bag path")
+
+    start_ts, end_ts = _clamp_time_range(bag_path, start_ts, end_ts)
+    input_fps, output_fps, crf, preset = _get_fps_config(bag_path, topic, fps)
+
+    reader = _start_bag_reader(bag_path, topic, start_ts, end_ts)
+
+    # ffmpeg: HEVC raw → copy(remux) → fMP4（-c:v copy，不转码）
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-r", str(input_fps),
+        "-f", "hevc",
+        "-i", "-",
+        "-c:v", "copy",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4",
+        "pipe:1",
+    ]
+
+    process = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    stop_event = threading.Event()
+    frame_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=60)
+    feeder, writer = _start_feed_and_writer(reader, topic, start_ts, end_ts, process, stop_event, frame_queue)
 
     def _stream_generator():
         """内部 generator：yield fMP4 chunks。stop_event 被 set 后最多 0.5 秒退出。"""
-        # ── 非阻塞 read 循环 ──
-        # 核心修复：原 process.stdout.read(262144) 是阻塞调用，
-        # 客户端断开后 read 不会返回 → finally 执行不到 → gsbag reader 全局锁不释放 → 新请求卡死。
-        # 改为 selectors 轮询 + stop_event 检测，确保客户端断开后最多 0.5 秒退出 read 循环。
         import selectors as _sel
         _read_sel = _sel.DefaultSelector()
         _read_sel.register(process.stdout, _sel.EVENT_READ)
 
         try:
             while not stop_event.is_set():
-                # 轮询 stdout，每 0.5 秒检查一次 stop_event
                 ready = _read_sel.select(timeout=0.5)
                 if ready:
                     chunk = process.stdout.read(262144)
                     if not chunk:
                         break
                     yield chunk
-                # 如果 stop_event 被 set（客户端断开），立即退出
             logger.info("[stream] Read loop exited (stop_event=%s)", stop_event.is_set())
         finally:
             _read_sel.close()
-            # 客户端可能已断开。全局锁会等这个 finally 结束才释放，
-            # 因此必须确保 feed/writer 线程和 ffmpeg 进程都已清理。
             logger.info("[stream] Client disconnected or stream ended, cleaning up...")
-            stop_event.set()
-            # 清空队列，避免 producer 卡在 frame_queue.put 上
-            while not frame_queue.empty():
-                try:
-                    frame_queue.get_nowait()
-                except queue.Empty:
-                    break
-            # 关闭 stdin，consumer 会退出
-            try:
-                process.stdin.close()
-            except Exception:
-                pass
-            # 先 kill ffmpeg 进程——这是让 stdout.read 退出的最可靠方式
-            try:
-                process.kill()
-            except Exception:
-                pass
-            # 等待线程退出，给予更长时间（feeder 中 read_messages 可能还在阻塞）
-            feeder.join(timeout=3)
-            writer.join(timeout=3)
-            # 尝试关闭 bag reader，强制 feed 线程退出 read_messages() 循环
-            try:
-                if hasattr(reader, 'close'):
-                    reader.close()
-            except Exception as exc:
-                logger.debug("[stream] reader.close() failed: %s", exc)
-            # 再等一次，reader.close() 后 feeder 需要时间退出
-            feeder.join(timeout=3)
-            writer.join(timeout=3)
-            # 如果线程仍然活着，记录警告
-            if feeder.is_alive() or writer.is_alive():
-                logger.warning(
-                    "[stream] Threads still alive after cleanup: feeder=%s writer=%s — "
-                    "gsbag lock may not be released. Next stream may be blocked.",
-                    feeder.is_alive(), writer.is_alive(),
-                )
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                logger.warning("[stream] ffmpeg process did not exit after kill")
-            try:
-                # 非阻塞读取 stderr
-                _err_sel = _sel.DefaultSelector()
-                _err_sel.register(process.stderr, _sel.EVENT_READ)
-                stderr_data = b''
-                ready = _err_sel.select(timeout=1)
+            _cleanup_stream(process, feeder, writer, reader, stop_event, frame_queue)
+
+    return _stream_generator(), stop_event
+
+
+def extract_topic_h264_stream(
+    bag_path: str,
+    topic: str,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
+    fps: Optional[float] = None,
+) -> Tuple:
+    """创建 H.264 流式转码的 generator 和 stop_event。
+
+    与 extract_topic_hevc_stream 架构相同，但ffmpeg输出H.264编码的fMP4，
+    使不支持HEVC的浏览器也能通过MSE边转边播，无需等全片转完。
+
+    Returns:
+        (generator, stop_event) 元组。
+    """
+    bag_path = _resolve_bag_path(bag_path, "h264-stream")
+    if not bag_path:
+        raise RuntimeError("Failed to resolve bag path")
+
+    start_ts, end_ts = _clamp_time_range(bag_path, start_ts, end_ts)
+    input_fps, output_fps, crf, preset = _get_fps_config(bag_path, topic, fps)
+
+    reader = _start_bag_reader(bag_path, topic, start_ts, end_ts)
+
+    # ffmpeg: HEVC raw → libx264转码 → fMP4
+    # 关键：movflags 使用 frag_keyframe+empty_moov+default_base_moof
+    # 这样ffmpeg每编完一个fragment就立刻flush到stdout，前端MSE可以边收边播
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-r", str(input_fps),
+        "-f", "hevc",
+        "-i", "-",
+        "-c:v", "libx264",
+        "-preset", preset,
+        "-crf", str(crf),
+        "-pix_fmt", "yuv420p",
+        "-r", str(output_fps),
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4",
+        "pipe:1",
+    ]
+
+    process = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    stop_event = threading.Event()
+    frame_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=60)
+    feeder, writer = _start_feed_and_writer(reader, topic, start_ts, end_ts, process, stop_event, frame_queue)
+
+    def _stream_generator():
+        """内部 generator：yield H.264 fMP4 chunks。"""
+        import selectors as _sel
+        _read_sel = _sel.DefaultSelector()
+        _read_sel.register(process.stdout, _sel.EVENT_READ)
+
+        try:
+            while not stop_event.is_set():
+                ready = _read_sel.select(timeout=0.5)
                 if ready:
-                    stderr_data = process.stderr.read(65536)
-                _err_sel.close()
-                stderr_text = stderr_data.decode("utf-8", errors="ignore")
-                if stderr_text:
-                    logger.warning("[stream] ffmpeg stderr: %s", stderr_text[:2000])
-            except Exception as exc:
-                logger.debug("[stream] stderr read failed: %s", exc)
-            # 尝试释放 bag reader 资源并强制 GC
-            try:
-                del reader
-            except Exception:
-                pass
-            try:
-                gc.collect()
-            except Exception:
-                pass
+                    chunk = process.stdout.read(262144)
+                    if not chunk:
+                        break
+                    yield chunk
+            logger.info("[h264-stream] Read loop exited (stop_event=%s)", stop_event.is_set())
+        finally:
+            _read_sel.close()
+            logger.info("[h264-stream] Client disconnected or stream ended, cleaning up...")
+            _cleanup_stream(process, feeder, writer, reader, stop_event, frame_queue)
 
     return _stream_generator(), stop_event
 
@@ -446,6 +556,9 @@ def extract_topic_to_mp4(
     fps: Optional[float] = None,
 ) -> str:
     """Extract HEVC frames from a bag topic and transcode to H.264 MP4.
+
+    保留旧的全量转码接口，用于需要生成MP4文件下载的场景。
+    日常播放请使用 extract_topic_h264_stream（流式边转边播）。
 
     Optimizations:
       - set_topic_filter avoids scanning non-target topics.
@@ -498,6 +611,7 @@ def extract_topic_to_mp4(
     output_fps = int(output_fps_cfg if output_fps_cfg is not None else input_fps)
     crf = int(config.get("crf", 23))
     preset = str(config.get("preset", "fast"))
+
     logger.info("[%s] FPS source=%s input_fps=%.2f output_fps=%d crf=%d preset=%s", task_id, fps_source, input_fps, output_fps, crf, preset)
 
     try:
