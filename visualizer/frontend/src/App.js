@@ -6,13 +6,22 @@ import LoginPage from './components/LoginPage';
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
 // ── 带认证的 fetch wrapper ──
+// 401 时自动清除 token 并刷新页面（跳回登录）
 function authFetch(url, options = {}) {
   const token = localStorage.getItem('token');
   const headers = { ...options.headers };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, headers }).then(response => {
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      // 不直接刷新页面，让上层组件通过 token 丢失自然跳回登录
+      // 触发一个自定义事件，App 组件可以监听
+      window.dispatchEvent(new CustomEvent('auth:401'));
+    }
+    return response;
+  });
 }
 
 function App() {
@@ -55,21 +64,12 @@ function App() {
     setAuthed(false);
   }, []);
 
-  // ── 全局 401 拦截：token 过期自动跳回登录 ──
+  // 监听 auth:401 事件（authFetch 检测到 401 时触发）
   useEffect(() => {
-    const originalFetch = window.fetch;
-    window.fetch = function(...args) {
-      return originalFetch.apply(this, args).then(response => {
-        if (response.status === 401 && authed) {
-          // token 过期，登出
-          localStorage.removeItem('token');
-          setAuthed(false);
-        }
-        return response;
-      });
-    };
-    return () => { window.fetch = originalFetch; };
-  }, [authed]);
+    const onAuth401 = () => setAuthed(false);
+    window.addEventListener('auth:401', onAuth401);
+    return () => window.removeEventListener('auth:401', onAuth401);
+  }, []);
 
   // ── 加载中 ──
   if (authChecking) {
@@ -212,7 +212,14 @@ function MainApp({ onLogout }) {
         const data = await res.json();
         setTaskStatus(data);
         if (data.status === 'completed') {
-          setVideoUrl(data.video_url || '');
+          // video_url 是 /api/video/file/{task_id}，需要拼 token（浏览器 <video> 不带 Authorization header）
+          let vurl = data.video_url || '';
+          const token = localStorage.getItem('token');
+          if (vurl && token) {
+            const sep = vurl.includes('?') ? '&' : '?';
+            vurl = `${vurl}${sep}token=${encodeURIComponent(token)}`;
+          }
+          setVideoUrl(vurl);
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         } else if (data.status === 'failed' || data.status === 'not_found') {
@@ -290,7 +297,7 @@ function MainApp({ onLogout }) {
 
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
 
-        const response = await fetch(streamPlayerData.stream_url);
+        const response = await authFetch(streamPlayerData.stream_url);
         if (!response.ok) {
           throw new Error(`Stream HTTP ${response.status}`);
         }

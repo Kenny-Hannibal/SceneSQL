@@ -10,7 +10,21 @@ function authFetch(url, options = {}) {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, headers }).then(response => {
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      window.dispatchEvent(new CustomEvent('auth:401'));
+    }
+    return response;
+  });
+}
+
+// ── 给 URL 拼接 token 参数（用于 <video src>、<img src> 等无法设 header 的场景）──
+function addTokenParam(url) {
+  const token = localStorage.getItem('token');
+  if (!url || !token) return url || '';
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
 }
 
 // ============================================
@@ -875,7 +889,7 @@ export default function AgentPanel() {
             continue;
           }
           const data = await res.json();
-          const updated = { ...v, status: data.status, video_url: data.video_url || '', progress: data.progress || 0, message: data.message || '' };
+          const updated = { ...v, status: data.status, video_url: addTokenParam(data.video_url || ''), progress: data.progress || 0, message: data.message || '' };
           currentRows.push(updated);
           if (data.status === 'completed' && data.video_url && !playerModalOpen) {
             newlyCompleted = updated;
