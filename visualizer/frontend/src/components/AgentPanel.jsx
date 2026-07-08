@@ -417,6 +417,7 @@ export default function AgentPanel() {
       setAllRows(data.rows || []);
       setTotalRows((data.rows || []).length);
       setPage(1);  // 新查询重置到第 1 页
+      setVisualizedRows(new Set());  // 新搜索清空可视化标记
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -500,6 +501,7 @@ export default function AgentPanel() {
       setAllRows(data.rows || []);
       setTotalRows((data.rows || []).length);
       setPage(1);
+      setVisualizedRows(new Set());  // 新搜索清空可视化标记
       if (data.error && !data.rows?.length) {
         setError(data.error);
       }
@@ -602,6 +604,7 @@ export default function AgentPanel() {
                 setAllRows(data.rows || []);
                 setTotalRows((data.rows || []).length);
                 setPage(1);
+                setVisualizedRows(new Set());  // 新搜索清空可视化标记
               } else {
                 addProgress(data.message || data.stage);
               }
@@ -1454,8 +1457,9 @@ export default function AgentPanel() {
                   </thead>
                   <tbody>
                     {displayRows.map((row, idx) => {
-                      const globalIdx = (page - 1) * pageSize + idx;
-                      const isVisualized = visualizedRows.has(globalIdx);
+                      // 用行内容的唯一标识做去重key，保证翻页后也能识别
+                      const rowKey = `${row.bag_path || ''}|${row.topic || ''}|${row.start_ts || ''}|${row.tag_name || ''}`;
+                      const isVisualized = visualizedRows.has(rowKey);
                       return (
                       <tr key={idx} style={{
                         background: isVisualized ? '#e6f7ff' : (idx % 2 === 0 ? '#fff' : '#fafafa'),
@@ -1474,7 +1478,7 @@ export default function AgentPanel() {
                           <button
                             onClick={() => {
                               // 标记该行已可视化
-                              setVisualizedRows(prev => new Set(prev).add(idx));
+                              setVisualizedRows(prev => new Set(prev).add(rowKey));
                               startVisualization(row);
                             }}
                             disabled={topicModalOpen || playerModalOpen}
