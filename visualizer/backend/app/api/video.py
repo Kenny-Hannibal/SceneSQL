@@ -1,6 +1,10 @@
 import os
+import sys
 import uuid
+import json
 import logging
+import asyncio
+import subprocess
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Query, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -8,7 +12,7 @@ from app.models.schemas import (
     ExtractRequest, ExtractResponse, VideoStatus,
     ExtractBatchRequest, ExtractBatchResponse, ClipTaskResult, FrameTaskStatus,
 )
-from app.services.video_extractor import extract_topic_to_mp4, extract_topic_hevc_stream, extract_topic_h264_stream, get_task
+from app.services.video_extractor import extract_topic_to_mp4, get_task
 from app.services.frame_extractor import (
     extract_frames_from_bag,
     _resolve_bag_path_via_dm, _resolve_bag_path_local,
@@ -20,6 +24,11 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
+
+# stream_worker.py 的路径
+_STREAM_WORKER_SCRIPT = os.path.join(
+    os.path.dirname(__file__), "services", "stream_worker.py"
+)
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -72,6 +81,105 @@ def video_file(task_id: str):
     return FileResponse(video_path, media_type="video/mp4", filename=f"{task_id}.mp4")
 
 
+def _spawn_stream_worker(mode, bag_path, topic, start_ts, end_ts, fps):
+    """
+    启动 stream_worker.py 子进程，返回 Popen 对象。
+
+    子进程负责 gsbag 读帧 + ffmpeg 编码，fMP4 chunks 写 stdout。
+    父进程从 process.stdout 读取并通过 StreamingResponse 转发给浏览器。
+    客户端断开后，父进程 kill 子进程，OS 回收所有资源（包括 gsbag 全局锁）。
+    """
+    cmd = [sys.executable, _STREAM_WORKER_SCRIPT,
+           "--mode", mode,
+           "--bag-path", bag_path,
+           "--topic", topic]
+    if start_ts is not None:
+        cmd.extend(["--start-ts", str(start_ts)])
+    if end_ts is not None:
+        cmd.extend(["--end-ts", str(end_ts)])
+    if fps is not None:
+        cmd.extend(["--fps", str(fps)])
+
+    logger.info("Spawning stream worker: %s", " ".join(cmd))
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # 确保子进程在父进程退出时也被杀（但实际由父进程主动 kill）
+    )
+
+    # 检查子进程是否立刻失败（如 import 错误）
+    import time
+    time.sleep(0.1)
+    if process.poll() is not None:
+        stderr_out = process.stderr.read().decode("utf-8", errors="ignore")
+        logger.error("Stream worker exited immediately: %s", stderr_out)
+        raise RuntimeError(f"Stream worker failed to start: {stderr_out[:500]}")
+
+    return process
+
+
+def _stream_from_worker(process, request):
+    """
+    从 worker 子进程的 stdout 读取 fMP4 chunks 并 yield。
+    客户端断开后由外层逻辑 kill 子进程。
+    """
+    try:
+        while True:
+            chunk = process.stdout.read(262144)
+            if not chunk:
+                break
+            yield chunk
+    except Exception as exc:
+        logger.debug("Stream read error: %s", exc)
+    finally:
+        # 无论正常结束还是异常，都确保子进程被终止
+        logger.info("Stream ended, ensuring worker process is terminated (pid=%s)", process.pid)
+        _kill_worker(process)
+
+
+def _kill_worker(process, timeout=3):
+    """
+    终止 worker 子进程并等待其退出。
+    先 SIGTERM，超时后 SIGKILL，确保进程不会残留。
+    """
+    if process.poll() is not None:
+        return  # 已经退出
+    try:
+        process.terminate()  # SIGTERM
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning("Worker process (pid=%s) did not exit after SIGTERM, sending SIGKILL", process.pid)
+            process.kill()  # SIGKILL
+            process.wait(timeout=2)
+    except Exception as exc:
+        logger.warning("Error killing worker process: %s", exc)
+
+    # 读取 stderr 诊断信息
+    try:
+        import selectors as _sel
+        _err_sel = _sel.DefaultSelector()
+        _err_sel.register(process.stderr, _sel.EVENT_READ)
+        ready = _err_sel.select(timeout=1)
+        if ready:
+            stderr_data = process.stderr.read(65536)
+            _err_sel.close()
+            stderr_text = stderr_data.decode("utf-8", errors="ignore")
+            if stderr_text:
+                # 尝试解析 JSON 错误
+                for line in stderr_text.strip().split("\n"):
+                    try:
+                        err_obj = json.loads(line)
+                        if "error" in err_obj:
+                            logger.error("Worker error: %s", err_obj["error"])
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                logger.warning("Worker stderr: %s", stderr_text[:2000])
+    except Exception:
+        pass
+
+
 @router.get("/stream-hevc")
 async def stream_hevc(
     request: Request,
@@ -81,42 +189,46 @@ async def stream_hevc(
     end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
     fps: Optional[float] = Query(None, description="Override FPS"),
 ):
-    """Stream HEVC remuxed to fMP4 for MSE playback. No local file is created.
-    
-    修复：通过 Request.is_disconnected() 检测客户端断开，
-    将 stop_event 传入 generator，确保客户端关闭页面后后端资源立即释放，
-    避免新旧 stream 冲突导致卡死。
+    """Stream HEVC remuxed to fMP4 for MSE playback.
+
+    进程隔离架构：通过 subprocess 启动 stream_worker.py，
+    gsbag 读帧 + ffmpeg 编码在子进程中执行。
+    客户端断开后 kill 子进程，OS 回收所有资源（fd/mmap/gsbag 全局锁），
+    彻底解决锁不释放导致下次请求卡死的问题。
     """
     logger.info(
         "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
         bag_path, topic, start_ts, end_ts,
     )
     try:
-        stream_gen, stop_event = extract_topic_hevc_stream(bag_path, topic, start_ts, end_ts, fps)
-        # 启动后台任务：轮询客户端断开状态，一旦断开立即 set stop_event
+        process = _spawn_stream_worker("hevc", bag_path, topic, start_ts, end_ts, fps)
+
+        # 后台监控：客户端断开后立即 kill 子进程
         async def _watch_disconnect():
-            while not stop_event.is_set():
+            while process.poll() is None:
                 if await request.is_disconnected():
-                    logger.info("[stream] Client disconnected, signaling stop_event")
-                    stop_event.set()
+                    logger.info("[stream] Client disconnected, killing worker (pid=%s)", process.pid)
+                    _kill_worker(process)
                     return
                 await asyncio.sleep(0.5)
-        import asyncio
-        # 把 watch 任务挂到 FastAPI 的 background（不阻塞响应）
-        # 注意：不能用 BackgroundTasks，因为它在响应完成后才执行；
-        # 我们需要在响应发送期间就监控断开。
-        # 使用 asyncio.ensure_future 在当前 event loop 中启动监控协程。
+
         _watch_task = asyncio.ensure_future(_watch_disconnect())
-        
+
         response = StreamingResponse(
-            stream_gen,
+            _stream_from_worker(process, request),
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="stream.mp4"',
             },
         )
-        # 在响应发送完成后取消监控任务
-        response.background = _watch_task.cancel
+
+        async def _on_finish():
+            _watch_task.cancel()
+            # 兜底：如果客户端断开但 watch 还没来得及 kill，在响应结束后也确保 kill
+            if process.poll() is None:
+                _kill_worker(process)
+
+        response.background = _on_finish
         return response
     except Exception as exc:
         logger.exception("HEVC stream failed")
@@ -133,38 +245,41 @@ async def stream_h264(
     end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
     fps: Optional[float] = Query(None, description="Override FPS"),
 ):
-    """Stream H.264 transcoded fMP4 for MSE playback. No local file is created.
-    
-    与 /stream-hevc 架构相同，但输出H.264编码的fMP4。
-    用于不支持HEVC的浏览器，MSE边转码边播放，无需等全片转完。
-    
-    修复：通过 Request.is_disconnected() 检测客户端断开，
-    将 stop_event 传入 generator，确保客户端关闭页面后后端资源立即释放。
+    """Stream H.264 transcoded fMP4 for MSE playback.
+
+    进程隔离架构：与 /stream-hevc 相同，但 ffmpeg 输出 H.264 编码。
     """
     logger.info(
         "Starting H.264 stream: bag=%s topic=%s range=[%s, %s]",
         bag_path, topic, start_ts, end_ts,
     )
     try:
-        stream_gen, stop_event = extract_topic_h264_stream(bag_path, topic, start_ts, end_ts, fps)
+        process = _spawn_stream_worker("h264", bag_path, topic, start_ts, end_ts, fps)
+
         async def _watch_disconnect():
-            while not stop_event.is_set():
+            while process.poll() is None:
                 if await request.is_disconnected():
-                    logger.info("[h264-stream] Client disconnected, signaling stop_event")
-                    stop_event.set()
+                    logger.info("[h264-stream] Client disconnected, killing worker (pid=%s)", process.pid)
+                    _kill_worker(process)
                     return
                 await asyncio.sleep(0.5)
-        import asyncio
+
         _watch_task = asyncio.ensure_future(_watch_disconnect())
-        
+
         response = StreamingResponse(
-            stream_gen,
+            _stream_from_worker(process, request),
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="stream_h264.mp4"',
             },
         )
-        response.background = _watch_task.cancel
+
+        async def _on_finish():
+            _watch_task.cancel()
+            if process.poll() is None:
+                _kill_worker(process)
+
+        response.background = _on_finish
         return response
     except Exception as exc:
         logger.exception("H.264 stream failed")
@@ -209,7 +324,6 @@ def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
                     oss_path = local_result.oss_path
 
             if not bag_path:
-                # 最后尝试：当作直接路径
                 if os.path.exists(clip.bag_id):
                     bag_path = clip.bag_id
 
@@ -273,14 +387,12 @@ def extract_batch(req: ExtractBatchRequest, background_tasks: BackgroundTasks):
     task_id = str(uuid.uuid4())[:8]
     logger.info("Starting batch extraction task=%s with %d clips", task_id, len(req.clips))
 
-    # 初始化任务状态
     clip_results = [
         ClipTaskResult(bag_id=c.bag_id, status="pending")
         for c in req.clips
     ]
     create_batch_task(task_id, len(req.clips))
 
-    # 启动后台处理
     background_tasks.add_task(_process_batch_clips, task_id, req)
 
     return ExtractBatchResponse(
@@ -312,7 +424,6 @@ def batch_status(task_id: str):
 @router.get("/frames/{task_id}/{clip_idx}/{filename}")
 def serve_frame(task_id: str, clip_idx: int, filename: str):
     """下载抽帧 JPEG 图片"""
-    # 安全检查：防止路径穿越
     if ".." in filename or "/" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     fpath = os.path.join(FRAME_OUTPUT_DIR, task_id, f"clip_{clip_idx:03d}", filename)

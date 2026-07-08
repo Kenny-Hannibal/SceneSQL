@@ -218,18 +218,8 @@ export default function AgentPanel() {
   const sqlExecSlowTimerRef = useRef(null);
   const sqlExecStuckTimerRef = useRef(null);
 
-  // 播包可视化冷却：关闭播放器后短时间内禁止再次点击，避免旧资源未释放导致卡死
-  const [visualizeCooldown, setVisualizeCooldown] = useState(false);
-  const cooldownTimerRef = useRef(null);
-
-  const startVisualizeCooldown = (ms = 1500) => {
-    setVisualizeCooldown(true);
-    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
-    cooldownTimerRef.current = setTimeout(() => {
-      setVisualizeCooldown(false);
-      cooldownTimerRef.current = null;
-    }, ms);
-  };
+  // 已可视化行标记：记录用户点击过的行索引，用于深色高亮
+  const [visualizedRows, setVisualizedRows] = useState(new Set());
 
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
@@ -287,10 +277,6 @@ export default function AgentPanel() {
     if (!playerModalOpen && streamAbortControllerRef.current) {
       streamAbortControllerRef.current.abort();
       streamAbortControllerRef.current = null;
-    }
-    // 播放器关闭后进入冷却，避免旧资源未释放时立即点击下一个导致卡死
-    if (!playerModalOpen) {
-      startVisualizeCooldown(1500);
     }
   }, [playerModalOpen]);
 
@@ -1467,8 +1453,14 @@ export default function AgentPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayRows.map((row, idx) => (
-                      <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                    {displayRows.map((row, idx) => {
+                      const globalIdx = (page - 1) * pageSize + idx;
+                      const isVisualized = visualizedRows.has(globalIdx);
+                      return (
+                      <tr key={idx} style={{
+                        background: isVisualized ? '#e6f7ff' : (idx % 2 === 0 ? '#fff' : '#fafafa'),
+                        borderLeft: isVisualized ? '3px solid #1890ff' : 'none',
+                      }}>
                         {columns.map((col) => (
                           <td key={col} style={{ border: '1px solid #e8e8e8', padding: '8px 12px' }}>
                             {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col] ?? '')}
@@ -1476,17 +1468,21 @@ export default function AgentPanel() {
                         ))}
                         <td style={{
                           border: '1px solid #e8e8e8', padding: '8px 12px',
-                          position: 'sticky', right: 0, background: idx % 2 === 0 ? '#fff' : '#fafafa', zIndex: 1,
+                          position: 'sticky', right: 0, background: isVisualized ? '#e6f7ff' : (idx % 2 === 0 ? '#fff' : '#fafafa'), zIndex: 1,
                           boxShadow: '-2px 0 4px rgba(0,0,0,0.05)',
                         }}>
                           <button
-                            onClick={() => startVisualization(row)}
-                            disabled={topicModalOpen || playerModalOpen || visualizeCooldown}
-                            title={topicModalOpen || playerModalOpen ? '请先关闭当前弹窗' : visualizeCooldown ? '播放器刚关闭，请稍等' : '播包可视化'}
+                            onClick={() => {
+                              // 标记该行已可视化
+                              setVisualizedRows(prev => new Set(prev).add(idx));
+                              startVisualization(row);
+                            }}
+                            disabled={topicModalOpen || playerModalOpen}
+                            title={topicModalOpen || playerModalOpen ? '请先关闭当前弹窗' : '播包可视化'}
                             style={{
                               padding: '4px 10px', fontSize: 12, borderRadius: 4, border: 'none',
-                              background: (topicModalOpen || playerModalOpen || visualizeCooldown) ? '#ccc' : '#1890ff',
-                              color: '#fff', cursor: (topicModalOpen || playerModalOpen || visualizeCooldown) ? 'not-allowed' : 'pointer',
+                              background: (topicModalOpen || playerModalOpen) ? '#ccc' : '#1890ff',
+                              color: '#fff', cursor: (topicModalOpen || playerModalOpen) ? 'not-allowed' : 'pointer',
                               whiteSpace: 'nowrap',
                             }}
                           >
@@ -1494,7 +1490,8 @@ export default function AgentPanel() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1737,7 +1734,7 @@ export default function AgentPanel() {
                 )}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } startVisualizeCooldown(1500); }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭
