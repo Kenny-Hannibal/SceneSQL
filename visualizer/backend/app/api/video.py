@@ -25,10 +25,10 @@ from app.core.config import settings
 router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
 
-# stream_worker.py 的路径
-_STREAM_WORKER_SCRIPT = os.path.join(
-    os.path.dirname(__file__), "services", "stream_worker.py"
-)
+# stream_worker.py 的路径（在 app/services/ 下，不是 app/api/services/）
+_STREAM_WORKER_SCRIPT = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "services", "stream_worker.py"
+))
 
 
 @router.post("/extract", response_model=ExtractResponse)
