@@ -3,13 +3,22 @@
 stream_worker.py — 视频流式提取子进程
 
 被 video.py 通过 subprocess.Popen 启动。
-独立进程中执行 gsbag 读帧 + ffmpeg 编码，结果写 stdout。
+独立进程中执行 gsbag 读帧 + ffmpeg 编码，fMP4 chunks 写 stdout。
 父进程从 pipe 读取并通过 StreamingResponse 转发给浏览器。
 
 进程隔离的好处：
 - 客户端断开后，父进程直接 kill 本子进程
 - OS 回收所有资源（fd、mmap、gsbag 全局锁、线程），彻底解决锁不释放导致卡死的问题
 - 不依赖 Python 层的 cleanup 逻辑
+
+⚠ 关键设计：
+- gsbag C 层在 import 时会向 fd 1 (stdout) 写 "init gsbag_reader_wrapper\n"
+  这会污染 fMP4 二进制流。解决方案：import 前将 fd 1 重定向到 stderr，
+  import 完成后恢复。这样 C 层的 init 消息走 stderr，不影响 stdout 上的 fMP4 数据。
+- ffmpeg 的 stderr 必须被持续消耗（drain），否则缓冲区满后 ffmpeg 阻塞，
+  导致整个 pipeline 死锁。本脚本用守护线程 drain ffmpeg stderr。
+- 子进程继承父进程（uvicorn）的 LD_LIBRARY_PATH 等环境变量，
+  确保 gsbag C .so 依赖链能被正确加载。
 """
 import os
 import sys
@@ -23,7 +32,7 @@ import signal
 from typing import Optional
 from pathlib import Path
 
-# ── 环境配置（与 video_extractor.py 共用） ──
+# ── 环境配置 ──
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent.parent)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -34,13 +43,22 @@ for proto_path in [
     if proto_path not in sys.path:
         sys.path.insert(0, proto_path)
 
-# gsbag SDK
+# ── gsbag SDK 导入（避免 C 层 stdout 污染） ──
+# gsbag C 层 import 时会向 stdout (fd 1) 写 "init gsbag_reader_wrapper\n"
+# 这会污染后续的 fMP4 二进制流，所以 import 前先把 fd 1 重定向到 stderr
+_stdout_fd = os.dup(1)  # 备份真实 stdout fd
+os.dup2(2, 1)           # fd 1 → stderr（C 层的 init 消息走 stderr）
+
 try:
     from gsbag import gsbag_reader
     _HAS_GSBAG = True
 except ImportError:
     gsbag_reader = None
     _HAS_GSBAG = False
+
+# 恢复真实 stdout
+os.dup2(_stdout_fd, 1)
+os.close(_stdout_fd)
 
 try:
     from j6.image_encode import boleidl_pb2 as image_encode_boleidl_pb2
@@ -52,115 +70,101 @@ except ImportError:
 import yaml
 
 logger = logging.getLogger("stream_worker")
-logging.basicConfig(level=logging.INFO, format="[stream_worker] %(message)s")
+logging.basicConfig(level=logging.INFO, format="[stream_worker] %(message)s",
+                    stream=sys.stderr)  # 日志走 stderr，不污染 stdout
 
 
-# ── Video config loader（从 video_config.yaml） ──
-_DEFAULT_VIDEO_CONFIG = {
-    "input_fps": 10,
-    "output_fps": None,
-    "crf": 23,
-    "preset": "fast",
-    "topic_fps_overrides": {},
-}
-
-_video_config_cache = None
-_video_config_mtime = 0.0
-
+# ── 配置加载 ──
 
 def _load_video_config():
-    global _video_config_cache, _video_config_mtime
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / "video_config.yaml"
-    try:
-        mtime = config_path.stat().st_mtime
-    except OSError:
-        return dict(_DEFAULT_VIDEO_CONFIG)
-    if _video_config_cache is not None and mtime == _video_config_mtime:
-        return _video_config_cache
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            user_cfg = yaml.safe_load(f) or {}
-        merged = dict(_DEFAULT_VIDEO_CONFIG)
-        for k, v in user_cfg.items():
-            if k in merged:
-                merged[k] = type(merged[k])(v)
-            elif k == "topic_fps_overrides":
-                merged[k] = v if isinstance(v, dict) else {}
-        _video_config_cache = merged
-        _video_config_mtime = mtime
-    except Exception:
-        merged = dict(_DEFAULT_VIDEO_CONFIG)
-        _video_config_cache = merged
-    return _video_config_cache
-
-
-def _get_fps_for_topic(topic, config):
-    overrides = config.get("topic_fps_overrides", {})
-    if topic in overrides:
-        return int(overrides[topic])
-    for prefix, fps in overrides.items():
-        if topic.startswith(prefix):
-            return int(fps)
-    return int(config.get("input_fps", 10))
-
-
-def _get_topic_fps(bag_path, topic):
-    """从 bag metadata 读取 topic 帧率"""
-    metadata_path = os.path.join(bag_path, "metadata.yaml")
-    if not os.path.exists(metadata_path):
-        return None
-    try:
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            meta = yaml.safe_load(f) or {}
-        topics_info = meta.get("topics", {})
-        if topic in topics_info:
-            freq = topics_info[topic].get("message_freq")
-            if freq and freq > 0:
-                return int(freq)
-    except Exception:
-        pass
-    return None
+    """加载 video_config.yaml"""
+    config_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "config", "video_config.yaml"),
+        os.path.join(PROJECT_ROOT, "visualizer/backend/config/video_config.yaml"),
+    ]
+    for p in config_paths:
+        if os.path.exists(p):
+            with open(p) as f:
+                return yaml.safe_load(f) or {}
+    return {}
 
 
 def _get_bag_time_range(bag_path):
+    """读取 metadata.yaml 获取 bag 时间范围"""
     metadata_path = os.path.join(bag_path, "metadata.yaml")
     if not os.path.exists(metadata_path):
         return None, None
     try:
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            meta = yaml.safe_load(f) or {}
-        start = meta.get("start_time")
-        end = meta.get("end_time")
+        with open(metadata_path) as f:
+            meta = yaml.safe_load(f)
+        start = meta.get("starting_time", {}).get("nanoseconds_since_epoch")
+        end = meta.get("ending_time", {}).get("nanoseconds_since_epoch")
         return start, end
     except Exception:
         return None, None
 
 
-def _resolve_bag_path(bag_path):
-    """解析 bag 路径，支持 OSS 挂载路径转换"""
-    if not bag_path:
+def _get_topic_fps(bag_path, topic):
+    """从 metadata.yaml 获取指定 topic 的帧率"""
+    metadata_path = os.path.join(bag_path, "metadata.yaml")
+    if not os.path.exists(metadata_path):
         return None
-    # OSS 路径转换
-    if bag_path.startswith("oss://"):
-        mount_map_str = os.getenv("OSS_MOUNT_MAP", "")
-        for mapping in mount_map_str.split(","):
-            if ":" not in mapping:
-                continue
-            oss_prefix, local_base = mapping.split(":", 1)
-            if bag_path.startswith(oss_prefix):
-                relative = bag_path[len(oss_prefix):].lstrip("/")
-                local_path = os.path.join(local_base, relative)
-                if os.path.exists(local_path):
-                    return local_path
-    # 直接路径
-    if os.path.exists(bag_path):
+    try:
+        with open(metadata_path) as f:
+            meta = yaml.safe_load(f)
+        for tinfo in meta.get("topics_with_message_count", []):
+            if tinfo.get("topic_metadata", {}).get("name") == topic:
+                msg_count = tinfo.get("message_count", 0)
+                start = meta.get("starting_time", {}).get("nanoseconds_since_epoch")
+                end = meta.get("ending_time", {}).get("nanoseconds_since_epoch")
+                if msg_count > 0 and start and end and end > start:
+                    duration_s = (end - start) / 1e9
+                    return round(msg_count / duration_s, 2)
+        return None
+    except Exception:
+        return None
+
+
+def _get_fps_for_topic(topic, config):
+    """从配置获取 topic 对应的帧率"""
+    topic_fps = config.get("topic_fps", {})
+    if topic in topic_fps:
+        return topic_fps[topic]
+    for pattern, fps in topic_fps.items():
+        if pattern.replace("*", "") in topic:
+            return fps
+    return 10.0  # 默认
+
+
+def _resolve_bag_path(bag_path):
+    """
+    解析 bag 路径：支持绝对路径、OSS mount map 映射、ROSBAG_MOUNT_BASE 前缀。
+    复用 video_extractor.py 的完整逻辑。
+    """
+    # 已经是本地绝对路径且存在
+    if os.path.isabs(bag_path) and os.path.exists(bag_path):
         return bag_path
-    # 挂载点查找
-    rosbag_mount = os.getenv("ROSBAG_MOUNT_BASE", "")
+
+    # 尝试通过 OSS_MOUNT_MAP 解析
+    mount_map_str = os.environ.get("OSS_MOUNT_MAP", "")
+    if mount_map_str:
+        try:
+            from tools.rosbag_path_resolver import _parse_oss_mount_map, _oss_to_local
+            mount_map = _parse_oss_mount_map(mount_map_str)
+            local = _oss_to_local(bag_path, mount_map)
+            if local and os.path.exists(local):
+                return local
+        except ImportError:
+            pass
+
+    # 尝试 ROSBAG_MOUNT_BASE 前缀
+    rosbag_mount = os.environ.get("ROSBAG_MOUNT_BASE", "/mnt")
     if rosbag_mount and not bag_path.startswith("/"):
         candidate = os.path.join(rosbag_mount, bag_path)
         if os.path.exists(candidate):
             return candidate
+
+    # 原样返回（后续 os.path.exists 检查会捕获）
     return bag_path
 
 
@@ -187,6 +191,25 @@ def _get_fps_config(bag_path, topic, fps):
     crf = int(config.get("crf", 23))
     preset = str(config.get("preset", "fast"))
     return input_fps, output_fps, crf, preset
+
+
+# ── ffmpeg stderr drain 线程 ──
+
+def _drain_stderr(proc_stderr, log_prefix="ffmpeg"):
+    """
+    持续读取 ffmpeg stderr 并输出到 worker 的 stderr（诊断日志）。
+    不消耗会导致 ffmpeg 阻塞死锁。
+    """
+    try:
+        while True:
+            line = proc_stderr.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="ignore").rstrip()
+            if text:
+                logger.info("[%s] %s", log_prefix, text)
+    except Exception:
+        pass
 
 
 # ── 主流式提取逻辑 ──
@@ -232,15 +255,21 @@ def run_stream(mode, bag_path, topic, start_ts, end_ts, fps):
             "-f", "mp4", "pipe:1",
         ]
 
-    # SIGPIPE: 父进程关闭 pipe 后我们不崩溃，正常退出
+    # SIGPIPE: 父进程关闭 pipe 后不崩溃，正常退出
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
     process = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,   # ffmpeg 的 fMP4 输出 → 本 worker 读取
+        stderr=subprocess.PIPE,   # ffmpeg 诊断日志 → drain 线程消耗
     )
+
+    # 启动 stderr drain 线程（防止 ffmpeg stderr 缓冲区满导致死锁）
+    drain_thread = threading.Thread(
+        target=_drain_stderr, args=(process.stderr, "ffmpeg"), daemon=True
+    )
+    drain_thread.start()
 
     frame_queue = queue.Queue(maxsize=60)
 
@@ -307,7 +336,7 @@ def run_stream(mode, bag_path, topic, start_ts, end_ts, fps):
             chunk = process.stdout.read(262144)
             if not chunk:
                 break
-            # 写到 stdout（父进程的 pipe 端）
+            # 直接写 fd 1（stdout），父进程的 pipe 端读取
             os.write(sys.stdout.fileno(), chunk)
     except (BrokenPipeError, OSError):
         # 父进程已关闭读取端（客户端断开），正常退出
@@ -337,20 +366,8 @@ def run_stream(mode, bag_path, topic, start_ts, end_ts, fps):
         del reader
         gc.collect()
 
-        # 读 ffmpeg stderr（诊断用）
-        try:
-            import selectors as _sel
-            _err_sel = _sel.DefaultSelector()
-            _err_sel.register(process.stderr, _sel.EVENT_READ)
-            ready = _err_sel.select(timeout=1)
-            if ready:
-                stderr_data = process.stderr.read(65536)
-                _err_sel.close()
-                stderr_text = stderr_data.decode("utf-8", errors="ignore")
-                if stderr_text:
-                    logger.warning("ffmpeg stderr: %s", stderr_text[:2000])
-        except Exception:
-            pass
+        # 等 drain 线程结束
+        drain_thread.join(timeout=2)
 
         logger.info("Worker process exiting cleanly")
 

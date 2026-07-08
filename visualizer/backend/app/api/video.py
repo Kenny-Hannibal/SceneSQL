@@ -103,18 +103,18 @@ def _spawn_stream_worker(mode, bag_path, topic, start_ts, end_ts, fps):
     logger.info("Spawning stream worker: %s", " ".join(cmd))
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        # 确保子进程在父进程退出时也被杀（但实际由父进程主动 kill）
+        stdout=subprocess.PIPE,   # fMP4 数据流 → 父进程 StreamingResponse
+        stderr=None,              # 子进程日志直接继承 uvicorn stderr，避免 PIPE 死锁
     )
 
     # 检查子进程是否立刻失败（如 import 错误）
     import time
     time.sleep(0.1)
     if process.poll() is not None:
-        stderr_out = process.stderr.read().decode("utf-8", errors="ignore")
-        logger.error("Stream worker exited immediately: %s", stderr_out)
-        raise RuntimeError(f"Stream worker failed to start: {stderr_out[:500]}")
+        # 无法读取 stderr（因为没设 PIPE），从 stdout 读错误信息
+        stdout_out = process.stdout.read().decode("utf-8", errors="ignore") if process.stdout else ""
+        logger.error("Stream worker exited immediately: %s", stdout_out)
+        raise RuntimeError(f"Stream worker failed to start: {stdout_out[:500]}")
 
     return process
 
@@ -155,29 +155,6 @@ def _kill_worker(process, timeout=3):
             process.wait(timeout=2)
     except Exception as exc:
         logger.warning("Error killing worker process: %s", exc)
-
-    # 读取 stderr 诊断信息
-    try:
-        import selectors as _sel
-        _err_sel = _sel.DefaultSelector()
-        _err_sel.register(process.stderr, _sel.EVENT_READ)
-        ready = _err_sel.select(timeout=1)
-        if ready:
-            stderr_data = process.stderr.read(65536)
-            _err_sel.close()
-            stderr_text = stderr_data.decode("utf-8", errors="ignore")
-            if stderr_text:
-                # 尝试解析 JSON 错误
-                for line in stderr_text.strip().split("\n"):
-                    try:
-                        err_obj = json.loads(line)
-                        if "error" in err_obj:
-                            logger.error("Worker error: %s", err_obj["error"])
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                logger.warning("Worker stderr: %s", stderr_text[:2000])
-    except Exception:
-        pass
 
 
 @router.get("/stream-hevc")
