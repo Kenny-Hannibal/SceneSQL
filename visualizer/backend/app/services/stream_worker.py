@@ -254,10 +254,14 @@ def run_stream(mode, bag_path, topic, start_ts, end_ts, fps):
             "-f", "mp4", "pipe:1",
         ]
     else:  # h264
+        keyint = int(input_fps * 2)  # ~2秒一个关键帧，MSE 首帧快速起播
         cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-r", str(input_fps), "-f", "hevc", "-i", "-",
             "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+            "-tune", "zerolatency",
+            "-bf", "0",
+            "-g", str(keyint), "-keyint_min", str(keyint),
             "-pix_fmt", "yuv420p", "-r", str(output_fps),
             "-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "-f", "mp4", "pipe:1",
