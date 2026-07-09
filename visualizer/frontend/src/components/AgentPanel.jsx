@@ -202,7 +202,7 @@ export default function AgentPanel() {
 
   // 查询模式 & batch 选择
   const [queryMode, setQueryMode] = useState('sqlite');
-  const [batchId, setBatchId] = useState('');
+  const [batchId, setBatchId] = useState(() => localStorage.getItem('lastBatchId') || '');
   const [batches, setBatches] = useState([]);
 
   // SQL 编辑器
@@ -295,6 +295,11 @@ export default function AgentPanel() {
     return () => window.removeEventListener('unhandledrejection', handler);
   }, []);
 
+  // 记忆上次选择的 batchId
+  useEffect(() => {
+    if (batchId) localStorage.setItem('lastBatchId', batchId);
+  }, [batchId]);
+
   // 组件挂载时获取 batch 列表
   useEffect(() => {
     authFetch(`${API_BASE}/api/agent/batches`)
@@ -308,11 +313,17 @@ export default function AgentPanel() {
       .then((data) => {
         const arr = Array.isArray(data) ? data : [];
         setBatches(arr);
-        if (arr.length > 0 && !batchId) {
-          const defaultBatch = queryMode === 'parquet'
-            ? arr.find((b) => b.has_parquet)
-            : arr[0];
-          setBatchId(defaultBatch ? defaultBatch.batch_id : arr[0].batch_id);
+        if (arr.length > 0) {
+          const saved = localStorage.getItem('lastBatchId');
+          const savedExists = saved && arr.some((b) => b.batch_id === saved);
+          if (savedExists) {
+            setBatchId(saved);
+          } else {
+            const defaultBatch = queryMode === 'parquet'
+              ? arr.find((b) => b.has_parquet)
+              : arr[0];
+            setBatchId(defaultBatch ? defaultBatch.batch_id : arr[0].batch_id);
+          }
         }
       })
       .catch((e) => {
