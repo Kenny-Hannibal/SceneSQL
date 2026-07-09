@@ -105,18 +105,26 @@ def _get_bag_time_range(bag_path):
 
 
 def _get_topic_fps(bag_path, topic):
-    """从 metadata.yaml 获取指定 topic 的帧率"""
+    """从 metadata.yaml 获取指定 topic 的帧率（message_freq）"""
     metadata_path = os.path.join(bag_path, "metadata.yaml")
     if not os.path.exists(metadata_path):
         return None
     try:
         with open(metadata_path) as f:
             meta = yaml.safe_load(f)
-        for tinfo in meta.get("topics_with_message_count", []):
-            if tinfo.get("topic_metadata", {}).get("name") == topic:
+        # 兼容两种 metadata 结构
+        info = meta.get("gacbag_bagfile_information", meta)
+        for tinfo in info.get("topics_with_message_count", []):
+            tm = tinfo.get("topic_metadata", {})
+            if tm.get("name") == topic:
+                # 优先用 message_freq（直接给出帧率）
+                freq = tinfo.get("message_freq")
+                if freq and freq > 0:
+                    return float(freq)
+                # fallback: 用 message_count / duration 计算
                 msg_count = tinfo.get("message_count", 0)
-                start = meta.get("starting_time", {}).get("nanoseconds_since_epoch")
-                end = meta.get("ending_time", {}).get("nanoseconds_since_epoch")
+                start = info.get("starting_time", {}).get("nanoseconds_since_epoch")
+                end = info.get("ending_time", {}).get("nanoseconds_since_epoch")
                 if msg_count > 0 and start and end and end > start:
                     duration_s = (end - start) / 1e9
                     return round(msg_count / duration_s, 2)
