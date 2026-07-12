@@ -378,7 +378,7 @@ export default function AgentPanel() {
   // ── 策略保存/加载 ──
   const loadStrategyList = async () => {
     try {
-      const res = await fetchWithAuth('/api/strategies');
+      const res = await authFetch(`${API_BASE}/api/strategies`);
       if (res.ok) {
         setStrategyList(await res.json());
       }
@@ -399,7 +399,7 @@ export default function AgentPanel() {
           || sqlEditor.match(/['"]([A-Z][A-Za-z_]+)['"]\s+AS\s+tag_name/i);
         tag_name = m ? m[1] : strategyForm.name;
       }
-      const res = await fetchWithAuth('/api/strategies', {
+      const res = await authFetch(`${API_BASE}/api/strategies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -427,7 +427,7 @@ export default function AgentPanel() {
   const handleDeleteStrategy = async (name) => {
     if (!window.confirm(`确定删除策略 "${name}"？`)) return;
     try {
-      const res = await fetchWithAuth(`/api/strategies/${name}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/strategies/${name}`, { method: 'DELETE' });
       if (res.ok) loadStrategyList();
     } catch (e) { console.error(e); }
   };
