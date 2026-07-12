@@ -33,7 +33,8 @@ except ImportError:
 try:
     from j6.image_encode import boleidl_pb2 as image_encode_boleidl_pb2
     _HAS_PROTO = True
-except ImportError:
+except (ImportError, TypeError):
+    # protobuf 5+/6+/7+ 移除了纯 Python 实现，C++ 描述符池对旧式 pb2 的 duplicate json_name 会报 TypeError
     image_encode_boleidl_pb2 = None
     _HAS_PROTO = False
 
@@ -236,6 +237,8 @@ def _start_bag_reader(bag_path, topic, start_ts, end_ts, task_id="stream"):
     """打开gsbag reader并设置topic filter + time clamp。返回reader对象。"""
     if not _HAS_GSBAG:
         raise RuntimeError("gsbag SDK not available (not installed on this machine)")
+    if not _HAS_PROTO:
+        raise RuntimeError("protobuf modules not available (protobuf version incompatible with legacy pb2 files)")
     reader = gsbag_reader.GsBagReader(bag_path)
     reader.set_topic_filter([topic])
     return reader
@@ -617,6 +620,8 @@ def extract_topic_to_mp4(
     try:
         if not _HAS_GSBAG:
             raise RuntimeError("gsbag SDK not available (not installed on this machine)")
+        if not _HAS_PROTO:
+            raise RuntimeError("protobuf modules not available (protobuf version incompatible with legacy pb2 files)")
         reader = gsbag_reader.GsBagReader(bag_path)
         reader.set_topic_filter([topic])
     except Exception as exc:
