@@ -2,9 +2,10 @@
 
 用户策略存储为 YAML（与系统 recipe 格式相同），存放于 user_strategies/ 目录。
 策略变更后通知 ConceptRouter 重新加载映射。
+认证由 auth_middleware 统一处理，路由无需额外 Depends。
 """
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from typing import List
 
 from app.core.user_strategy import (
@@ -13,7 +14,6 @@ from app.core.user_strategy import (
     StrategyUpdateRequest,
     StrategyInfo,
 )
-from app.core.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
@@ -30,13 +30,13 @@ _manager = UserStrategyManager(strategy_dir=_STRATEGY_DIR)
 
 
 @router.get("", response_model=List[StrategyInfo])
-async def list_strategies(_: str = Depends(get_current_user)):
+async def list_strategies():
     """列出所有用户策略。"""
     return _manager.list_strategies()
 
 
 @router.get("/{name}", response_model=StrategyInfo)
-async def get_strategy(name: str, _: str = Depends(get_current_user)):
+async def get_strategy(name: str):
     """获取单个策略。"""
     try:
         return _manager.get_strategy(name)
@@ -45,7 +45,7 @@ async def get_strategy(name: str, _: str = Depends(get_current_user)):
 
 
 @router.post("", response_model=StrategyInfo)
-async def create_strategy(req: StrategyCreateRequest, _: str = Depends(get_current_user)):
+async def create_strategy(req: StrategyCreateRequest):
     """创建新策略。"""
     try:
         info = _manager.create_strategy(req)
@@ -56,7 +56,7 @@ async def create_strategy(req: StrategyCreateRequest, _: str = Depends(get_curre
 
 
 @router.put("/{name}", response_model=StrategyInfo)
-async def update_strategy(name: str, req: StrategyUpdateRequest, _: str = Depends(get_current_user)):
+async def update_strategy(name: str, req: StrategyUpdateRequest):
     """更新策略。"""
     try:
         info = _manager.update_strategy(name, req)
@@ -67,7 +67,7 @@ async def update_strategy(name: str, req: StrategyUpdateRequest, _: str = Depend
 
 
 @router.delete("/{name}")
-async def delete_strategy(name: str, _: str = Depends(get_current_user)):
+async def delete_strategy(name: str):
     """删除策略。"""
     try:
         _manager.delete_strategy(name)
@@ -86,13 +86,11 @@ def _reload_concept_router():
     try:
         import importlib
         mod = importlib.import_module("app.core.concept_router")
-        # 尝试获取全局 ConceptRouter 实例
         if hasattr(mod, "get_concept_router"):
             cr = mod.get_concept_router()
             cr.load_user_strategies()
             logger.info("ConceptRouter reloaded with updated user strategies")
     except ImportError:
-        # agent 模块不在 sys.path 中，说明是 visualizer 独立部署，跳过
         logger.debug("agent concept_router not available, skip reload")
     except Exception as e:
         logger.warning(f"Failed to reload ConceptRouter: {e}")
