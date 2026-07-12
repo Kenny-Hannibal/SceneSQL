@@ -308,6 +308,24 @@ class ConceptRouter:
         self.concept_groups, self.composition_rules = load_concept_groups()
         self.schema_dict_tags = load_schema_dict_tags()
         self._recipe_descriptions = self._load_recipe_descriptions()
+        # 用户策略映射（优先于系统 CONCEPT_RECIPE_MAP）
+        self._user_strategy_map: dict = {}
+        self.load_user_strategies()
+
+    def load_user_strategies(self):
+        """加载用户策略目录，构建 _user_strategy_map。
+        用户策略优先于系统 recipe：同一个 keyword，用户策略覆盖系统映射。
+        """
+        try:
+            from .user_strategy import UserStrategyManager
+            mgr = UserStrategyManager()
+            self._user_strategy_map = mgr.get_concept_recipe_map_entries()
+            if self._user_strategy_map:
+                logger.info(f"Loaded {len(self._user_strategy_map)} user strategy keywords: "
+                            f"{list(self._user_strategy_map.keys())}")
+        except Exception as e:
+            logger.warning(f"Failed to load user strategies: {e}")
+            self._user_strategy_map = {}
 
     @staticmethod
     def _load_recipe_descriptions() -> dict:
@@ -346,39 +364,45 @@ class ConceptRouter:
                 raise ValueError(f"Round 1 输出无法解析为JSON: {raw[:200]}")
 
         # ── 代码层 recipe 自动匹配：如果LLM未返回recipe但concept匹配 ──
+        # 合并映射：用户策略优先于系统 recipe
+        combined_map = {**self.CONCEPT_RECIPE_MAP, **self._user_strategy_map}
         if not result.get("recipe"):
             concepts = result.get("concepts", [])
             # Phase 1: exact match
             for concept in concepts:
-                if concept in self.CONCEPT_RECIPE_MAP:
-                    recipe, variant = self.CONCEPT_RECIPE_MAP[concept]
+                if concept in combined_map:
+                    recipe, variant = combined_map[concept]
                     result["recipe"] = recipe
                     result["recipe_variant"] = result.get("recipe_variant") or variant
+                    result["sql_source"] = "user_strategy" if concept in self._user_strategy_map else "recipe"
                     break
             # Phase 2: substring match — if concept contains a map key
             if not result.get("recipe"):
                 for concept in concepts:
-                    for key, (recipe, variant) in self.CONCEPT_RECIPE_MAP.items():
+                    for key, (recipe, variant) in combined_map.items():
                         if key in concept or concept in key:
                             result["recipe"] = recipe
                             result["recipe_variant"] = result.get("recipe_variant") or variant
+                            result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
                             break
                     if result.get("recipe"):
                         break
             # Phase 3: NL原文匹配 — 直接从用户输入中检测关键词
             if not result.get("recipe") and nl:
-                for key, (recipe, variant) in self.CONCEPT_RECIPE_MAP.items():
+                for key, (recipe, variant) in combined_map.items():
                     if key in nl:
                         result["recipe"] = recipe
                         result["recipe_variant"] = result.get("recipe_variant") or variant
+                        result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
                         break
             # Phase 4: n-gram 余弦相似度兜底 — 语义模糊匹配
             if not result.get("recipe") and nl:
                 best_key, best_score = self._fuzzy_match(nl)
                 if best_key and best_score >= 0.4:  # LCS 占比阈值
-                    recipe, variant = self.CONCEPT_RECIPE_MAP[best_key]
+                    recipe, variant = combined_map[best_key]
                     result["recipe"] = recipe
                     result["recipe_variant"] = result.get("recipe_variant") or variant
+                    result["sql_source"] = "user_strategy" if best_key in self._user_strategy_map else "recipe"
                     logger.info(f"Phase4 fuzzy match: '{nl}' → '{best_key}' (score={best_score:.3f})")
 
         return result
@@ -410,7 +434,8 @@ class ConceptRouter:
         
         best_key = None
         best_score = 0.0
-        for key, (recipe_name, _variant) in self.CONCEPT_RECIPE_MAP.items():
+        combined_map = {**self.CONCEPT_RECIPE_MAP, **self._user_strategy_map}
+        for key, (recipe_name, _variant) in combined_map.items():
             # 用 recipe_name (tag_name) 也做匹配源
             source = key + " " + recipe_name
             score = self._substring_overlap(nl_clean, source)
@@ -449,3 +474,13 @@ class ConceptRouter:
     def get_round2_messages(self, nl: str, r1_result: dict, schema_text: str) -> list[dict]:
         context = self.build_round2_context(r1_result, schema_text)
         return build_round2_messages(nl, context)
+
+
+# ── 全局单例 ──
+_instance = None
+
+def get_concept_router() -> ConceptRouter:
+    global _instance
+    if _instance is None:
+        _instance = ConceptRouter()
+    return _instance

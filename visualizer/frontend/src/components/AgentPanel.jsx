@@ -221,6 +221,12 @@ export default function AgentPanel() {
   // 已可视化行标记：记录用户点击过的行索引，用于深色高亮
   const [visualizedRows, setVisualizedRows] = useState(new Set());
 
+  // ── 策略保存 ──
+  const [saveStrategyModalOpen, setSaveStrategyModalOpen] = useState(false);
+  const [strategyListOpen, setStrategyListOpen] = useState(false);
+  const [strategyList, setStrategyList] = useState([]);
+  const [strategyForm, setStrategyForm] = useState({ name: '', keywords: '', tag_name: '', description: '' });
+
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
@@ -369,6 +375,70 @@ export default function AgentPanel() {
   };
 
   // 执行 SQL 编辑器中的 SQL（取回全量数据，翻页由前端完成）
+  // ── 策略保存/加载 ──
+  const loadStrategyList = async () => {
+    try {
+      const res = await fetchWithAuth('/api/strategies');
+      if (res.ok) {
+        setStrategyList(await res.json());
+      }
+    } catch (e) { console.error('Failed to load strategies', e); }
+  };
+
+  const handleSaveStrategy = async () => {
+    try {
+      const keywords = strategyForm.keywords.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+      if (!strategyForm.name || !keywords.length || !sqlEditor.trim()) {
+        alert('请填写策略名、关键词，并确保 SQL 不为空');
+        return;
+      }
+      // 自动推断 tag_name：从 SQL 中提取第一个字符串字面量
+      let tag_name = strategyForm.tag_name;
+      if (!tag_name) {
+        const m = sqlEditor.match(/(?:AS\s+tag_name|tag_name\s*=\s*)['"]([^'"]+)['"]/i)
+          || sqlEditor.match(/['"]([A-Z][A-Za-z_]+)['"]\s+AS\s+tag_name/i);
+        tag_name = m ? m[1] : strategyForm.name;
+      }
+      const res = await fetchWithAuth('/api/strategies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: strategyForm.name,
+          keywords,
+          tag_name,
+          sql: sqlEditor.trim(),
+          description: strategyForm.description,
+        }),
+      });
+      if (res.ok) {
+        setSaveStrategyModalOpen(false);
+        setStrategyForm({ name: '', keywords: '', tag_name: '', description: '' });
+        loadStrategyList();
+        alert('策略已保存');
+      } else {
+        const err = await res.json();
+        alert('保存失败: ' + (err.detail || JSON.stringify(err)));
+      }
+    } catch (e) {
+      alert('保存失败: ' + e.message);
+    }
+  };
+
+  const handleDeleteStrategy = async (name) => {
+    if (!window.confirm(`确定删除策略 "${name}"？`)) return;
+    try {
+      const res = await fetchWithAuth(`/api/strategies/${name}`, { method: 'DELETE' });
+      if (res.ok) loadStrategyList();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleLoadStrategy = (s) => {
+    setSqlEditor(s.sql);
+    setStrategyListOpen(false);
+  };
+
+  useEffect(() => { loadStrategyList(); }, []);
+
   const handleExecuteSql = async () => {
     const sql = sqlEditor.trim();
     if (!sql) return;
@@ -1412,6 +1482,31 @@ export default function AgentPanel() {
 
       {/* SQL 编辑器 */}
       <div style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: 12, color: '#888' }}>SQL 编辑器</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => { setStrategyListOpen(!strategyListOpen); loadStrategyList(); }}
+              style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #1890ff', background: 'transparent', color: '#1890ff', cursor: 'pointer' }}
+            >
+              我的策略 ({strategyList.length})
+            </button>
+            <button
+              onClick={() => {
+                // 预填关键词：从 SQL 提取 tag_name 作为默认关键词
+                const m = sqlEditor.match(/(?:AS\s+tag_name|tag_name\s*=\s*)['"]([^'"]+)['"]/i)
+                  || sqlEditor.match(/['"]([A-Z][A-Za-z_]+)['"]\s+AS\s+tag_name/i);
+                const kw = m ? m[1] : '';
+                setStrategyForm(prev => ({ ...prev, keywords: prev.keywords || kw }));
+                setSaveStrategyModalOpen(true);
+              }}
+              disabled={!sqlEditor.trim()}
+              style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #52c41a', background: sqlEditor.trim() ? 'transparent' : '#f5f5f5', color: sqlEditor.trim() ? '#52c41a' : '#ccc', cursor: sqlEditor.trim() ? 'pointer' : 'not-allowed' }}
+            >
+              保存为策略
+            </button>
+          </div>
+        </div>
         <SqlEditor
           value={sqlEditor}
           onChange={setSqlEditor}
@@ -1805,6 +1900,71 @@ export default function AgentPanel() {
                 autoPlay
                 style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
               />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 保存策略弹窗 ── */}
+      {saveStrategyModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px' }}>保存为策略</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>策略名</label>
+              <input value={strategyForm.name} onChange={e => setStrategyForm(p => ({...p, name: e.target.value}))} placeholder="如: high_speed_cutin" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>触发关键词（逗号分隔，用户输入含关键词时自动匹配此策略）</label>
+              <input value={strategyForm.keywords} onChange={e => setStrategyForm(p => ({...p, keywords: e.target.value}))} placeholder="如: 高速切入,高速变道" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>tag_name（可选，留空自动从SQL提取）</label>
+              <input value={strategyForm.tag_name} onChange={e => setStrategyForm(p => ({...p, tag_name: e.target.value}))} placeholder="如: high_speed_cutin" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>备注</label>
+              <input value={strategyForm.description} onChange={e => setStrategyForm(p => ({...p, description: e.target.value}))} placeholder="策略说明" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setSaveStrategyModalOpen(false)} style={{ padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>取消</button>
+              <button onClick={handleSaveStrategy} style={{ padding: '6px 16px', border: 'none', borderRadius: 4, background: '#52c41a', color: '#fff', cursor: 'pointer' }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 策略列表面板 ── */}
+      {strategyListOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 500, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>我的策略</h3>
+              <button onClick={() => setStrategyListOpen(false)} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            {strategyList.length === 0 ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无自定义策略</div>
+            ) : (
+              <div>
+                {strategyList.map(s => (
+                  <div key={s.name} style={{ padding: 12, borderBottom: '1px solid #f0f0f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong style={{ fontSize: 14 }}>{s.name}</strong>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: '#999' }}>
+                          关键词: {s.keywords.join(', ')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleLoadStrategy(s)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #1890ff', borderRadius: 3, background: 'transparent', color: '#1890ff', cursor: 'pointer' }}>加载</button>
+                        <button onClick={() => handleDeleteStrategy(s.name)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #ff4d4f', borderRadius: 3, background: 'transparent', color: '#ff4d4f', cursor: 'pointer' }}>删除</button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{s.description || '无备注'}</div>
+                    <pre style={{ fontSize: 10, color: '#888', marginTop: 4, maxHeight: 60, overflow: 'auto', background: '#fafafa', padding: 4, borderRadius: 3 }}>{s.sql.substring(0, 200)}{s.sql.length > 200 ? '...' : ''}</pre>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
