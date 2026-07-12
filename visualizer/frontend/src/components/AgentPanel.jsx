@@ -836,6 +836,38 @@ export default function AgentPanel() {
     setSelectedTopic(defaultTopic);
   };
 
+  // ── 多视图 Tab：切换 camera topic ──
+  const handleSwitchTopic = (newTopic) => {
+    if (!playerData?._multiViewMeta || newTopic === playerData.topic) return;
+    const { bagPath, startTs, endTs } = playerData._multiViewMeta;
+    const streamToken = localStorage.getItem('token');
+    const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    const h264Mime = 'video/mp4; codecs="avc1.64001f"';
+
+    const buildStreamUrl = (endpoint) => {
+      const params = new URLSearchParams({ bag_path: bagPath, topic: newTopic });
+      if (startTs !== null) params.append('start_ts', String(startTs));
+      if (endTs !== null) params.append('end_ts', String(endTs));
+      if (streamToken) params.append('token', streamToken);
+      return `${API_BASE}/api/video/${endpoint}?${params.toString()}`;
+    };
+
+    // 保持当前编码模式，构建新 stream URL
+    const codec = playerData.mse_codec || h264Mime;
+    const isHevc = codec === hevcMime;
+    const endpoint = isHevc ? 'stream-hevc' : 'stream-h264';
+    const newStreamUrl = buildStreamUrl(endpoint);
+
+    // 更新 playerData → React useEffect 自动 cleanup 旧流 + 重建新流
+    setPlayerData(prev => ({
+      ...prev,
+      stream_url: newStreamUrl,
+      topic: newTopic,
+    }));
+    setPlayerError(null);
+    localStorage.setItem('lastSelectedTopic', newTopic);
+  };
+
   const startH264Extraction = async (bagPath, row, startTs, endTs) => {
     try {
       const res = await authFetch(`${API_BASE}/api/video/extract`, {
@@ -862,7 +894,10 @@ export default function AgentPanel() {
 
   const handleExtractVideo = async () => {
     if (!topicModalData || !selectedTopic) return;
-    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
+    const { bagPath, row, startTs, endTs, clampedMsg, cameraTopics } = topicModalData;
+
+    // 多视图 Tab 所需的公共数据，会存入 playerData 供 Tab 切换时使用
+    const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics: cameraTopics || [] };
 
     // 记忆用户选择的 topic
     localStorage.setItem('lastSelectedTopic', selectedTopic);
@@ -910,6 +945,7 @@ export default function AgentPanel() {
           use_mse: true,
           mse_codec: h264Mime,
           durationSec,
+          _multiViewMeta,
         });
         setTopicModalOpen(false);
         setTopicModalData(null);
@@ -932,6 +968,7 @@ export default function AgentPanel() {
         use_mse: true,
         mse_codec: hevcMime,
         durationSec,
+        _multiViewMeta,
       });
       setTopicModalOpen(false);
       setTopicModalData(null);
@@ -950,6 +987,7 @@ export default function AgentPanel() {
         use_mse: true,
         mse_codec: h264Mime,
         durationSec,
+        _multiViewMeta,
       });
       setTopicModalOpen(false);
       setTopicModalData(null);
@@ -1010,7 +1048,7 @@ export default function AgentPanel() {
       setVideoRows(currentRows);
       if (newlyCompleted) {
         setPlayerMode('h264-file');
-        setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic });
+        setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic, _multiViewMeta: { bagPath: '', startTs: null, endTs: null, cameraTopics: [] } });
         setPlayerModalOpen(true);
         setExtractModalOpen(false);  // 关闭进度弹窗，打开播放器
       }
@@ -1850,6 +1888,35 @@ export default function AgentPanel() {
                 ✕ 关闭
               </button>
             </div>
+
+            {/* ── 多视图 Tab 栏 ── */}
+            {playerData._multiViewMeta?.cameraTopics?.length > 1 && (
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', background: '#1a1a1a', padding: '6px 8px', borderRadius: 4 }}>
+                {playerData._multiViewMeta.cameraTopics.map(t => {
+                  const shortName = t.split('/').pop() || t;
+                  const active = t === playerData.topic;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => handleSwitchTopic(t)}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: 12,
+                        borderRadius: 3,
+                        border: active ? '1px solid #1890ff' : '1px solid #555',
+                        background: active ? '#1890ff' : 'transparent',
+                        color: active ? '#fff' : '#aaa',
+                        cursor: active ? 'default' : 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      title={t}
+                    >
+                      {shortName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {playerError && (
               <div style={{
