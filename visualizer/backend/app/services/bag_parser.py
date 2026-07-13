@@ -24,7 +24,19 @@ def get_bag_info(bag_path: str) -> Dict:
 
     metadata_path = os.path.join(bag_path, "metadata.yaml")
     if not os.path.exists(metadata_path):
-        raise BagNotFoundException(f"metadata.yaml not found in {bag_path}")
+        # 没有 metadata.yaml 时，仍然检测 bin 目录下的数据文件
+        fusion_map_topic = None
+        if os.path.isfile(os.path.join(bag_path, "bin", "gac_enviro_model_fusion_map_plus.bin")):
+            fusion_map_topic = {"name": "/gac/enviro_model/fusion_map_plus", "type": "EFusionMap", "message_count": 0, "freq": 0}
+        return {
+            "bag_path": bag_path,
+            "topics": [],
+            "fusion_map_topic": fusion_map_topic,
+            "duration_sec": 0,
+            "message_count": 0,
+            "start_time_ns": None,
+            "end_time_ns": None,
+        }
 
     with open(metadata_path, "r") as f:
         meta = yaml.safe_load(f)
