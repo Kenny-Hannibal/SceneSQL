@@ -18,20 +18,50 @@ _pb_decoders = None
 
 
 def _init_pb_decoders():
-    """初始化 protobuf 解码器（延迟加载，避免 import 冲突）"""
+    """初始化 protobuf 解码器（延迟加载，避免 import 冲突）
+
+    EnviroModeling.boleidl_pb2 引用了 gac.Comm 中的一些高级类型
+    (RoutingInfo, AlphaSdInfo 等)，这些类型只存在于 UBM 的完整 Comm proto 中。
+    因此需要先加载 UBM 的 Comm（超集），再加载 EnviroModeling。
+    由于 protobuf 描述符池是累积的，image_encode 仍可正常工作。
+    """
     global _pb_decoders
     if _pb_decoders is not None:
         return _pb_decoders
     try:
         import sys as _sys
-        # EnviroModeling proto 在 scripts/proto/j6/EnviroModeling/
         from app.core.config import settings
         project_root = str(settings.PROJECT_ROOT)
-        proto_dir = os.path.join(project_root, "scripts/proto")
-        j6_dir = os.path.join(project_root, "scripts/proto/j6")
-        for p in [proto_dir, j6_dir]:
+
+        # 1) 优先尝试 UBM proto 路径（包含完整 Comm 类型）
+        ubm_proto_dir = os.path.join(project_root, "..", "..",
+                                     "git_test/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.9")
+        ubm_j6_dir = os.path.join(ubm_proto_dir, "j6")
+
+        # 2) 回退到本项目 proto 路径
+        local_proto_dir = os.path.join(project_root, "scripts/proto")
+        local_j6_dir = os.path.join(project_root, "scripts/proto/j6")
+
+        # 先加载 UBM 的 Comm（如果存在），因为它是超集
+        proto_dirs = []
+        if os.path.isdir(ubm_j6_dir):
+            proto_dirs = [ubm_proto_dir, ubm_j6_dir]
+            logger.info("使用 UBM proto 路径: %s", ubm_j6_dir)
+        else:
+            proto_dirs = [local_proto_dir, local_j6_dir]
+            logger.info("使用本地 proto 路径: %s", local_j6_dir)
+
+        for p in proto_dirs:
             if p not in _sys.path:
                 _sys.path.insert(0, p)
+
+        # 先加载 Comm（注册基础 gac.Comm 类型到描述符池）
+        try:
+            from j6.Comm import boleidl_pb2 as _comm_pb2  # noqa: F401
+            logger.debug("Comm proto 已加载 (注册基础类型)")
+        except ImportError:
+            logger.warning("Comm proto 加载失败, EnviroModeling 可能缺少依赖类型")
+
         from j6.EnviroModeling import boleidl_pb2 as j6_EnviroModeling
         _pb_decoders = {
             '/gac/enviro_model/fusion_map_plus': j6_EnviroModeling.EFusionMap,
