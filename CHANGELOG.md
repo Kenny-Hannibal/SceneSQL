@@ -6,7 +6,8 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
-| 2026-07-13 | 3D BEV 视图作为独立 Topic + ts→frame 精确索引 | `changelog/2026-07-13_3D-BEV-视图作为独立-Topic--tsframe-精确索引.md` |
+|| 2026-07-13 | Changelog 重构：拆分为索引+条目模式 | `changelog/2026-07-13_Changlog-重构拆分为索引条目模式.md` |
+|| 2026-07-13 | 3D BEV 视图作为独立 Topic + ts→frame 精确索引 | `changelog/2026-07-13_3D-BEV-视图作为独立-Topic--tsframe-精确索引.md` |
 | 2026-07-12 | Fusion Map BEV 集成 | `changelog/2026-07-12_Fusion-Map-BEV-集成.md` |
 | 2026-07-08 | 进程隔离根治stream卡死 + 去掉冷却期 + 可视化行标记 | `changelog/2026-07-08_进程隔离根治stream卡死--去掉冷却期--可视化行标记.md` |
 | 2026-07-06 | H.264流式播放(MSE) + JWT认证 + stream-hevc卡死修复 | `changelog/2026-07-06_H264流式播放MSE--JWT认证--stream-hevc卡死修复.md` |
