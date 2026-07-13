@@ -210,21 +210,20 @@ def _decode_efusionmap(pb_bytes: bytes) -> Optional[Dict]:
 
 # ── PB01 bin 文件帧偏移缓存 ──
 _offset_cache: Dict[str, List[int]] = {}
-# ── 帧时间戳缓存（pub_ts 列表，与 offset 一一对应）──
-_ts_cache: Dict[str, List[float]] = {}
+# ── 帧时间戳缓存（protobuf 内的 timestamp_ns，纳秒级整数）──
+_ts_ns_cache: Dict[str, List[int]] = {}
 
 
 def _get_offsets(bin_path: str) -> List[int]:
-    """扫描 PB01 bin 文件，构建帧偏移索引 + 时间戳索引（只做一次）"""
+    """扫描 PB01 bin 文件，构建帧偏移索引（只做一次）"""
     if bin_path in _offset_cache:
         return _offset_cache[bin_path]
     offsets = []
-    timestamps = []
     with open(bin_path, 'rb') as f:
         header = f.read(8)
         if len(header) < 8 or header[:4] != b'PB01':
             _offset_cache[bin_path] = offsets
-            _ts_cache[bin_path] = timestamps
+            _ts_ns_cache[bin_path] = []
             return offsets
         count = struct.unpack('<I', header[4:8])[0]
         f.seek(8)
@@ -233,21 +232,61 @@ def _get_offsets(bin_path: str) -> List[int]:
             frame_header = f.read(24)
             if len(frame_header) < 24:
                 break
-            seq_num, pub_ts, recv_ts, length = struct.unpack('<IddI', frame_header)
+            _, _, _, length = struct.unpack('<IddI', frame_header)
             offsets.append(offset)
-            timestamps.append(pub_ts)
             f.seek(length, 1)
     _offset_cache[bin_path] = offsets
-    _ts_cache[bin_path] = timestamps
+    _ts_ns_cache[bin_path] = []  # 延迟构建
     logger.info("FusionMap帧索引已构建: %d帧, %s", len(offsets), bin_path)
     return offsets
 
 
-def _get_timestamps(bin_path: str) -> List[float]:
-    """获取帧时间戳列表（与 _get_offsets 同步构建）"""
-    if bin_path not in _ts_cache:
-        _get_offsets(bin_path)
-    return _ts_cache.get(bin_path, [])
+def _get_ts_ns_index(bin_path: str) -> List[int]:
+    """构建/获取帧的 timestamp_ns 索引（纳秒整数列表，与 offset 一一对应）
+
+    PB01 帧头的 pub_ts 不可靠（某些 bag 里是极小值），
+    所以从 protobuf payload 中解码 timestamp.sec + timestamp.nsec。
+    为提高性能，一次性顺序读取整个文件，逐帧提取 timestamp。
+    """
+    if bin_path in _ts_ns_cache and _ts_ns_cache[bin_path]:
+        return _ts_ns_cache[bin_path]
+
+    offsets = _get_offsets(bin_path)
+    if not offsets:
+        _ts_ns_cache[bin_path] = []
+        return []
+
+    timestamps = []
+    decoders = _init_pb_decoders()
+    msg_type = decoders.get('/gac/enviro_model/fusion_map_plus')
+
+    with open(bin_path, 'rb') as f:
+        for idx, offset in enumerate(offsets):
+            try:
+                f.seek(offset)
+                fh = f.read(24)
+                if len(fh) < 24:
+                    timestamps.append(0)
+                    continue
+                _, _, _, length = struct.unpack('<IddI', fh)
+                payload = f.read(length)
+                if len(payload) < length or msg_type is None:
+                    timestamps.append(0)
+                    continue
+
+                msg = msg_type()
+                msg.ParseFromString(payload)
+                ts_ns = int(msg.timestamp.sec * 1e9 + msg.timestamp.nsec)
+                timestamps.append(ts_ns)
+            except Exception as e:
+                logger.debug("帧%d时间戳解码失败: %s", idx, e)
+                timestamps.append(0)
+
+    _ts_ns_cache[bin_path] = timestamps
+    logger.info("FusionMap时间戳索引已构建: %d帧, ts范围[%d, %d]",
+                len(timestamps), timestamps[0] if timestamps else 0,
+                timestamps[-1] if timestamps else 0)
+    return timestamps
 
 
 def find_frame_idx_by_ts(bag_path: str, ts_ns: int) -> Dict:
@@ -258,7 +297,7 @@ def find_frame_idx_by_ts(bag_path: str, ts_ns: int) -> Dict:
         ts_ns: 目标时间戳（纳秒）
 
     Returns:
-        {'frame_idx': int, 'ts_ns': int, 'actual_pub_ts_ns': int, 'total_frames': int}
+        {'frame_idx': int, 'ts_ns': int, 'actual_ts_ns': int, 'total_frames': int}
     """
     import bisect
     bin_path = os.path.join(bag_path, 'bin', 'gac_enviro_model_fusion_map_plus.bin')
@@ -266,23 +305,19 @@ def find_frame_idx_by_ts(bag_path: str, ts_ns: int) -> Dict:
         return {'error': '文件不存在', 'frame_idx': 0}
 
     offsets = _get_offsets(bin_path)
-    timestamps = _get_timestamps(bin_path)
+    timestamps = _get_ts_ns_index(bin_path)
     total = len(offsets)
-    if total == 0:
+    if total == 0 or not timestamps:
         return {'error': '无帧数据', 'frame_idx': 0, 'total_frames': 0}
 
-    # pub_ts 是秒级浮点数，转为纳秒
-    target_s = ts_ns / 1e9
-    ts_arr = timestamps  # 已是秒级浮点，有序
-
-    # 二分查找：找到 pub_ts <= target_s 的最大帧
-    idx = bisect.bisect_right(ts_arr, target_s) - 1
+    # 二分查找：找到 timestamp_ns <= ts_ns 的最大帧
+    idx = bisect.bisect_right(timestamps, ts_ns) - 1
     idx = max(0, min(idx, total - 1))
 
     return {
         'frame_idx': idx,
         'ts_ns': ts_ns,
-        'actual_pub_ts_ns': int(ts_arr[idx] * 1e9),
+        'actual_ts_ns': timestamps[idx],
         'total_frames': total,
     }
 
