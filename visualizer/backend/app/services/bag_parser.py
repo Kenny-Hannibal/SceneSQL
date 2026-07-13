@@ -42,6 +42,9 @@ def get_bag_info(bag_path: str) -> Dict:
 
     camera_topics = [t for t in topics if "/camera" in t["name"] or "/cam/" in t["name"]]
     fusion_map_topic = next((t for t in topics if "fusion_map_plus" in t["name"]), None)
+    # 如果 metadata.yaml 没有 fusion_map_plus topic，但 bin 目录下有对应文件，也标记为有数据
+    if fusion_map_topic is None and os.path.isfile(os.path.join(bag_path, "bin", "gac_enviro_model_fusion_map_plus.bin")):
+        fusion_map_topic = {"name": "/gac/enviro_model/fusion_map_plus", "type": "EFusionMap", "message_count": 0, "freq": 0}
     logger.info("Bag %s loaded: %d camera topics, %d total messages", bag_path, len(camera_topics), info.get("message_count", 0))
 
     # 解析 bag 起止时间戳（纳秒），用于 clamp 视频提取范围

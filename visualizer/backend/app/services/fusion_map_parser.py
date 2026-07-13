@@ -33,10 +33,21 @@ def _init_pb_decoders():
         from app.core.config import settings
         project_root = str(settings.PROJECT_ROOT)
 
-        # 1) 优先尝试 UBM proto 路径（包含完整 Comm 类型）
-        ubm_proto_dir = os.path.join(project_root, "..", "..",
-                                     "git_test/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.9")
-        ubm_j6_dir = os.path.join(ubm_proto_dir, "j6")
+        # 1) 搜索 UBM proto 路径（包含完整 Comm 类型，是 SceneSQL Comm 的超集）
+        #    多种部署环境下的常见位置
+        _ubm_candidates = [
+            os.path.join(project_root, "..", "..",
+                         "git_test/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.9"),
+            "/root/data/git_test/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/proto/v4.8.9",
+        ]
+        ubm_proto_dir = None
+        ubm_j6_dir = None
+        for c in _ubm_candidates:
+            j6 = os.path.join(c, "j6")
+            if os.path.isdir(os.path.join(j6, "Comm")) and os.path.isdir(os.path.join(j6, "EnviroModeling")):
+                ubm_proto_dir = c
+                ubm_j6_dir = j6
+                break
 
         # 2) 回退到本项目 proto 路径
         local_proto_dir = os.path.join(project_root, "scripts/proto")
@@ -44,7 +55,7 @@ def _init_pb_decoders():
 
         # 先加载 UBM 的 Comm（如果存在），因为它是超集
         proto_dirs = []
-        if os.path.isdir(ubm_j6_dir):
+        if ubm_j6_dir:
             proto_dirs = [ubm_proto_dir, ubm_j6_dir]
             logger.info("使用 UBM proto 路径: %s", ubm_j6_dir)
         else:
