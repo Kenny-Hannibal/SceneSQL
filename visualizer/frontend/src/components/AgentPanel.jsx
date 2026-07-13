@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SqlEditor from './SqlEditor';
+import BevViewer from './BevViewer';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -255,6 +256,9 @@ export default function AgentPanel() {
   const [playerMode, setPlayerMode] = useState(null); // 'hevc-stream' | 'h264-file'
   const [playerError, setPlayerError] = useState(null);
   const [forceH264, setForceH264] = useState(false);
+  // BEV 弹窗
+  const [bevModalOpen, setBevModalOpen] = useState(false);
+  const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -767,6 +771,7 @@ export default function AgentPanel() {
     let bagEndNs = null;
     let clampedMsg = '';
     let cameraTopics = [];
+    let fusionMapTopic = null;
 
     try {
       const response = await authFetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST', signal: controller.signal });
@@ -791,6 +796,7 @@ export default function AgentPanel() {
                 bagStartNs = info.start_time_ns;
                 bagEndNs = info.end_time_ns;
                 cameraTopics = (info.topics || []).map((t) => t.name).filter(Boolean);
+                fusionMapTopic = info.fusion_map_topic || null;
               } else if (data.stage === 'error') {
                 // 降级：使用非流式 API
                 throw new Error(data.message);
@@ -810,6 +816,7 @@ export default function AgentPanel() {
           bagStartNs = bagInfo.start_time_ns;
           bagEndNs = bagInfo.end_time_ns;
           cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
+          fusionMapTopic = bagInfo.fusion_map_topic || null;
         }
       } catch (e2) {
         // bag info 不可用，跳过
@@ -828,7 +835,7 @@ export default function AgentPanel() {
       endTs = bagEndNs;
     }
 
-    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
+    setTopicModalData({ bagPath, row, cameraTopics, fusionMapTopic, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
     // 优先使用上次记忆的 topic，如果它在当前可用 topic 列表中；否则取第一个
     const lastTopic = localStorage.getItem('lastSelectedTopic') || '';
     const defaultTopic = (lastTopic && cameraTopics.includes(lastTopic)) ? lastTopic
@@ -894,6 +901,20 @@ export default function AgentPanel() {
 
   const handleExtractVideo = async () => {
     if (!topicModalData || !selectedTopic) return;
+
+    // ── 如果选择了 fusion_map_plus → 打开 BEV 弹窗 ──
+    if (selectedTopic === 'fusion_map_plus') {
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setBevData({
+        bagPath: topicModalData.bagPath,
+        startTsNs: topicModalData.startTs,
+        endTsNs: topicModalData.endTs,
+      });
+      setBevModalOpen(true);
+      return;
+    }
+
     const { bagPath, row, startTs, endTs, clampedMsg, cameraTopics } = topicModalData;
 
     // 多视图 Tab 所需的公共数据，会存入 playerData 供 Tab 切换时使用
@@ -1744,33 +1765,59 @@ export default function AgentPanel() {
                 <style>{`@keyframes progress-pulse { 0%, 100% { opacity: 0.4; width: 30%; } 50% { opacity: 1; width: 70%; } }`}</style>
               </div>
             ) : (
-              topicModalData.cameraTopics.length > 0 ? (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>选择 Camera Topic:</label>
-                  <select
-                    value={selectedTopic}
-                    onChange={(e) => setSelectedTopic(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+              <div style={{ marginBottom: 16 }}>
+                {/* ── 3D BEV 可视化 Topic ── */}
+                {topicModalData.fusionMapTopic && (
+                  <div
+                    onClick={() => setSelectedTopic('fusion_map_plus')}
+                    style={{
+                      padding: '10px 14px', marginBottom: 8, borderRadius: 6, cursor: 'pointer',
+                      border: selectedTopic === 'fusion_map_plus' ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                      background: selectedTopic === 'fusion_map_plus' ? '#e6f7ff' : '#fafafa',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                    }}
                   >
-                    {topicModalData.cameraTopics.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
-                  <input
-                    type="text"
-                    value={selectedTopic}
-                    onChange={(e) => setSelectedTopic(e.target.value)}
-                    placeholder="/camera/front_center"
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
-                  />
-                </div>
-              )
+                    <span style={{ fontSize: 20 }}>🗺️</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>3D BEV 视图 (Fusion Map)</div>
+                      <div style={{ fontSize: 11, color: '#888' }}>fusion_map_plus · 障碍物/车道线/边界线 3D 渲染</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Camera Topics ── */}
+                {topicModalData.cameraTopics.length > 0 ? (
+                  <div>
+                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                      📹 Camera Topic:
+                    </label>
+                    <select
+                      value={selectedTopic.startsWith('/camera') || selectedTopic.startsWith('/cam') ? selectedTopic : ''}
+                      onChange={(e) => { if (e.target.value) setSelectedTopic(e.target.value); }}
+                      style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                    >
+                      <option value="" disabled>-- 选择摄像头 --</option>
+                      {topicModalData.cameraTopics.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : !topicModalData.fusionMapTopic ? (
+                  <div>
+                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
+                    <input
+                      type="text"
+                      value={selectedTopic}
+                      onChange={(e) => setSelectedTopic(e.target.value)}
+                      placeholder="/camera/front_center"
+                      style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                    />
+                  </div>
+                ) : null}
+              </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              {selectedTopic !== 'fusion_map_plus' && (
               <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input
                   type="checkbox"
@@ -1783,6 +1830,7 @@ export default function AgentPanel() {
                   ⚙️ 强制使用 H.264 转码（兼容性更好，用于调试）
                 </label>
               </div>
+              )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
@@ -1798,10 +1846,42 @@ export default function AgentPanel() {
                     background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  确认提取
+                  {selectedTopic === 'fusion_map_plus' ? '🗺️ 打开 BEV 视图' : '确认提取'}
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 3D BEV 视图弹窗 ── */}
+      {bevModalOpen && bevData && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setBevModalOpen(false); setBevData(null); } }}
+        >
+          <div style={{ background: '#fff', borderRadius: 8, padding: 20, minWidth: 700, maxWidth: 900, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>🗺️ 3D BEV View</h3>
+              <button
+                onClick={() => { setBevModalOpen(false); setBevData(null); }}
+                style={{ padding: '4px 10px', fontSize: 16, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', lineHeight: 1 }}
+                title="关闭"
+              >✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+              Bag: {bevData.bagPath}
+              {bevData.startTsNs != null && <> · 起始: {(bevData.startTsNs / 1e9).toFixed(2)}s</>}
+            </div>
+            <BevViewer
+              bagPath={bevData.bagPath}
+              authFetch={authFetch}
+              startTsNs={bevData.startTsNs}
+              endTsNs={bevData.endTsNs}
+            />
           </div>
         </div>
       )}

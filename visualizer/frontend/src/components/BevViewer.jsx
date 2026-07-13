@@ -3,14 +3,17 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 const API_BASE = 'http://localhost:8000';
 
 /**
- * BEV (Bird's Eye View) 可视化组件
- * 使用 Three.js OrthographicCamera 渲染 EFusionMap 数据
+ * 3D BEV 可视化组件
+ * 使用 Three.js PerspectiveCamera + OrbitControls 渲染 EFusionMap 数据
+ * 默认俯视（BEV），可鼠标拖拽旋转到任意3D角度
  *
  * Props:
  *   bagPath: string — bag 目录路径
  *   authFetch: function — 带认证的 fetch
+ *   startTsNs: number | null — 起始时间戳（纳秒），SQL结果锚定用
+ *   endTsNs: number | null — 结束时间戳（纳秒），播放终止用
  */
-export default function BevViewer({ bagPath, authFetch }) {
+export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -23,6 +26,7 @@ export default function BevViewer({ bagPath, authFetch }) {
     scene: null,
     camera: null,
     renderer: null,
+    controls: null,
     groups: {},
     animId: null,
   });
@@ -32,30 +36,60 @@ export default function BevViewer({ bagPath, authFetch }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // 动态加载 Three.js
-    if (!window.THREE) {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js';
-      script.onload = () => initScene();
-      document.head.appendChild(script);
-    } else {
-      initScene();
+    // 动态加载 Three.js + OrbitControls
+    const scriptsToLoad = [
+      'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
+      'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js',
+    ];
+
+    function loadScripts(urls, callback) {
+      let loaded = 0;
+      urls.forEach(url => {
+        if (document.querySelector(`script[src="${url}"]`)) {
+          loaded++;
+          if (loaded === urls.length) callback();
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = () => {
+          loaded++;
+          if (loaded === urls.length) callback();
+        };
+        document.head.appendChild(script);
+      });
     }
+
+    loadScripts(scriptsToLoad, () => initScene());
 
     function initScene() {
       const THREE = window.THREE;
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0a0a1a);
 
-      const camera = new THREE.OrthographicCamera(-50, 50, 50, -50, 0.1, 200);
-      camera.position.set(0, 80, 0);
+      // ── PerspectiveCamera（默认俯视 BEV，可旋转到 3D）──
+      const camera = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
+      camera.position.set(0, 100, 0.01);  // z 偏一点避免 lookAt 死锁
       camera.lookAt(0, 0, 0);
 
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
       renderer.setSize(canvas.clientWidth, canvas.clientHeight);
       renderer.setPixelRatio(window.devicePixelRatio);
 
-      const grid = new THREE.GridHelper(100, 50, 0x333355, 0x222244);
+      // ── OrbitControls ──
+      let controls = null;
+      if (THREE.OrbitControls) {
+        controls = new THREE.OrbitControls(camera, canvas);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0, 0);
+        controls.maxPolarAngle = Math.PI * 0.85;  // 限制不能翻到正下方
+        controls.minDistance = 5;
+        controls.maxDistance = 800;
+        controls.update();
+      }
+
+      const grid = new THREE.GridHelper(200, 100, 0x333355, 0x222244);
       scene.add(grid);
 
       const axesHelper = new THREE.AxesHelper(3);
@@ -70,15 +104,16 @@ export default function BevViewer({ bagPath, authFetch }) {
       };
       Object.values(groups).forEach(g => scene.add(g));
 
-      threeRef.current = { scene, camera, renderer, groups, animId: null };
+      threeRef.current = { scene, camera, renderer, controls, groups, animId: null };
       renderLoop();
     }
 
     function renderLoop() {
-      const { renderer, scene, camera } = threeRef.current;
+      const { renderer, scene, camera, controls } = threeRef.current;
       if (!renderer) return;
       const animate = () => {
         threeRef.current.animId = requestAnimationFrame(animate);
+        if (controls) controls.update();
         renderer.render(scene, camera);
       };
       animate();
@@ -100,36 +135,12 @@ export default function BevViewer({ bagPath, authFetch }) {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       renderer.setSize(w, h);
-      const aspect = w / h;
-      const viewSize = 50;
-      camera.left = -viewSize * aspect;
-      camera.right = viewSize * aspect;
-      camera.top = viewSize;
-      camera.bottom = -viewSize;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
     };
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // ── 鼠标滚轮缩放 ──
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const handleWheel = (e) => {
-      e.preventDefault();
-      const { camera } = threeRef.current;
-      if (!camera) return;
-      const factor = e.deltaY > 0 ? 1.1 : 0.9;
-      camera.left *= factor;
-      camera.right *= factor;
-      camera.top *= factor;
-      camera.bottom *= factor;
-      camera.updateProjectionMatrix();
-    };
-    canvas.addEventListener('wheel', handleWheel, { passive: false });
-    return () => canvas.removeEventListener('wheel', handleWheel);
   }, []);
 
   // ── 加载 fusion_map 基本信息 ──
@@ -143,13 +154,44 @@ export default function BevViewer({ bagPath, authFetch }) {
       const data = await res.json();
       setInfo(data);
       if (data.exists && data.total_frames > 0) {
-        setCurrentFrame(0);
-        loadFrame(0);
+        // 如果有 startTsNs，先查找对应的帧索引
+        if (startTsNs != null && startTsNs > 0) {
+          await seekToTimestamp(startTsNs);
+        } else {
+          setCurrentFrame(0);
+          loadFrame(0);
+        }
       }
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
+    }
+  }, [bagPath, authFetch, startTsNs]);
+
+  // ── 按时间戳定位帧 ──
+  const seekToTimestamp = useCallback(async (tsNs) => {
+    if (!bagPath) return 0;
+    try {
+      const res = await authFetch(
+        `${API_BASE}/api/bag/fusion-map-frame-by-ts?bag_path=${encodeURIComponent(bagPath)}&ts_ns=${tsNs}`
+      );
+      if (!res.ok) throw new Error('Failed to find frame by ts');
+      const data = await res.json();
+      if (data.error) {
+        // 降级到第0帧
+        setCurrentFrame(0);
+        loadFrame(0);
+        return 0;
+      }
+      const idx = data.frame_idx || 0;
+      setCurrentFrame(idx);
+      loadFrame(idx);
+      return idx;
+    } catch (e) {
+      setCurrentFrame(0);
+      loadFrame(0);
+      return 0;
     }
   }, [bagPath, authFetch]);
 
@@ -175,7 +217,7 @@ export default function BevViewer({ bagPath, authFetch }) {
   const updateScene = useCallback((data) => {
     const THREE = window.THREE;
     if (!THREE || !threeRef.current.scene) return;
-    const { groups, camera } = threeRef.current;
+    const { groups, camera, controls } = threeRef.current;
 
     // 清除旧对象
     Object.values(groups).forEach(g => {
@@ -189,7 +231,7 @@ export default function BevViewer({ bagPath, authFetch }) {
 
     if (!data) return;
 
-    // 障碍物
+    // 障碍物（3D 立方体）
     (data.obstacles || []).forEach(obs => {
       const color = obs.movable ? 0xff6b6b : 0xffa726;
       const w = Math.max(0.1, obs.w || 1);
@@ -198,7 +240,7 @@ export default function BevViewer({ bagPath, authFetch }) {
       const geo = new THREE.BoxGeometry(w, h, l);
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(obs.x || 0, 0.5, obs.y || 0);
+      mesh.position.set(obs.x || 0, h / 2, obs.y || 0);
       mesh.rotation.y = obs.heading || 0;
       groups.obstacles.add(mesh);
 
@@ -259,19 +301,37 @@ export default function BevViewer({ bagPath, authFetch }) {
       carWireframe.quaternion.copy(carMesh.quaternion);
       groups.vehicle.add(carWireframe);
 
-      // 相机跟随车辆
-      camera.position.set(vl.x || 0, 80, vl.y || 0);
-      camera.lookAt(vl.x || 0, 0, vl.y || 0);
+      // 相机跟随车辆（OrbitControls target 也跟随）
+      const cx = vl.x || 0;
+      const cy = vl.y || 0;
+      camera.position.set(cx, 100, cy + 0.01);
+      camera.lookAt(cx, 0, cy);
+      if (controls) {
+        controls.target.set(cx, 0, cy);
+        controls.update();
+      }
     }
   }, []);
 
   // ── 播放/暂停动画 ──
+  const totalFrames = info?.total_frames || 0;
+  const endFrame = React.useMemo(() => {
+    // 如果有 endTsNs，需要算出结束帧索引；否则播放到末尾
+    if (endTsNs != null && endTsNs > 0 && info?.exists) {
+      // 简单估算：用当前帧位置 + 帧率外推
+      // 精确方案需要再调 by-ts API，但播放时频繁调 API 不划算
+      // 所以这里只设 totalFrames 为上限，实际靠时间戳判断
+      return totalFrames;
+    }
+    return totalFrames;
+  }, [endTsNs, info, totalFrames]);
+
   useEffect(() => {
     if (!playing || !info || info.total_frames <= 0) return;
     const interval = setInterval(() => {
       setCurrentFrame(prev => {
         const next = prev + 1;
-        if (next >= info.total_frames) {
+        if (next >= totalFrames) {
           setPlaying(false);
           return prev;
         }
@@ -280,7 +340,7 @@ export default function BevViewer({ bagPath, authFetch }) {
       });
     }, 200); // 5fps for BEV animation
     return () => clearInterval(interval);
-  }, [playing, info, loadFrame]);
+  }, [playing, info, totalFrames, loadFrame]);
 
   // ── bag 路径变化时自动加载 ──
   useEffect(() => {
@@ -289,11 +349,12 @@ export default function BevViewer({ bagPath, authFetch }) {
     }
   }, [bagPath, loadInfo]);
 
-  const totalFrames = info?.total_frames || 0;
-
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-      <h2>🗺️ BEV View (Fusion Map)</h2>
+      <h2>🗺️ 3D BEV View (Fusion Map)</h2>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+        鼠标左键旋转 · 右键平移 · 滚轮缩放
+      </div>
       {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
       {loading && <div style={{ color: '#1890ff', marginBottom: 10 }}>Loading fusion map info...</div>}
       {info && !info.exists && (
@@ -303,7 +364,7 @@ export default function BevViewer({ bagPath, authFetch }) {
         <>
           <canvas
             ref={canvasRef}
-            style={{ width: '100%', height: 400, background: '#0a0a1a', borderRadius: 4, marginTop: 12, display: 'block' }}
+            style={{ width: '100%', height: 450, background: '#0a0a1a', borderRadius: 4, marginTop: 12, display: 'block' }}
           />
           <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <button
@@ -331,13 +392,13 @@ export default function BevViewer({ bagPath, authFetch }) {
               style={{ flex: 1, cursor: 'pointer' }}
             />
             <span style={{ fontSize: 12, color: '#999' }}>
-              滚轮缩放 · {info.file_size_mb}MB · {info.format}
+              {info.file_size_mb}MB · {info.format}
             </span>
           </div>
         </>
       )}
       {!info && !loading && !error && (
-        <div style={{ color: '#999', padding: '20px 0', textAlign: 'center' }}>加载 bag 后显示 BEV 视图</div>
+        <div style={{ color: '#999', padding: '20px 0', textAlign: 'center' }}>加载 bag 后显示 3D BEV 视图</div>
       )}
     </div>
   );

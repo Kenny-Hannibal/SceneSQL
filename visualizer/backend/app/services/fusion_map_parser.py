@@ -210,31 +210,81 @@ def _decode_efusionmap(pb_bytes: bytes) -> Optional[Dict]:
 
 # ── PB01 bin 文件帧偏移缓存 ──
 _offset_cache: Dict[str, List[int]] = {}
+# ── 帧时间戳缓存（pub_ts 列表，与 offset 一一对应）──
+_ts_cache: Dict[str, List[float]] = {}
 
 
 def _get_offsets(bin_path: str) -> List[int]:
-    """扫描 PB01 bin 文件，构建帧偏移索引（只做一次）"""
+    """扫描 PB01 bin 文件，构建帧偏移索引 + 时间戳索引（只做一次）"""
     if bin_path in _offset_cache:
         return _offset_cache[bin_path]
     offsets = []
+    timestamps = []
     with open(bin_path, 'rb') as f:
         header = f.read(8)
         if len(header) < 8 or header[:4] != b'PB01':
             _offset_cache[bin_path] = offsets
+            _ts_cache[bin_path] = timestamps
             return offsets
         count = struct.unpack('<I', header[4:8])[0]
         f.seek(8)
         for _ in range(count):
             offset = f.tell()
-            offsets.append(offset)
             frame_header = f.read(24)
             if len(frame_header) < 24:
                 break
-            _, _, _, length = struct.unpack('<IddI', frame_header)
+            seq_num, pub_ts, recv_ts, length = struct.unpack('<IddI', frame_header)
+            offsets.append(offset)
+            timestamps.append(pub_ts)
             f.seek(length, 1)
     _offset_cache[bin_path] = offsets
+    _ts_cache[bin_path] = timestamps
     logger.info("FusionMap帧索引已构建: %d帧, %s", len(offsets), bin_path)
     return offsets
+
+
+def _get_timestamps(bin_path: str) -> List[float]:
+    """获取帧时间戳列表（与 _get_offsets 同步构建）"""
+    if bin_path not in _ts_cache:
+        _get_offsets(bin_path)
+    return _ts_cache.get(bin_path, [])
+
+
+def find_frame_idx_by_ts(bag_path: str, ts_ns: int) -> Dict:
+    """根据纳秒时间戳找到最近的帧索引（二分查找）
+
+    Args:
+        bag_path: bag 目录路径
+        ts_ns: 目标时间戳（纳秒）
+
+    Returns:
+        {'frame_idx': int, 'ts_ns': int, 'actual_pub_ts_ns': int, 'total_frames': int}
+    """
+    import bisect
+    bin_path = os.path.join(bag_path, 'bin', 'gac_enviro_model_fusion_map_plus.bin')
+    if not os.path.exists(bin_path):
+        return {'error': '文件不存在', 'frame_idx': 0}
+
+    offsets = _get_offsets(bin_path)
+    timestamps = _get_timestamps(bin_path)
+    total = len(offsets)
+    if total == 0:
+        return {'error': '无帧数据', 'frame_idx': 0, 'total_frames': 0}
+
+    # pub_ts 是秒级浮点数，转为纳秒
+    target_s = ts_ns / 1e9
+    ts_arr = timestamps  # 已是秒级浮点，有序
+
+    # 二分查找：找到 pub_ts <= target_s 的最大帧
+    idx = bisect.bisect_right(ts_arr, target_s) - 1
+    idx = max(0, min(idx, total - 1))
+
+    return {
+        'frame_idx': idx,
+        'ts_ns': ts_ns,
+        'actual_pub_ts_ns': int(ts_arr[idx] * 1e9),
+        'total_frames': total,
+    }
 
 
 def get_fusion_map_info(bag_path: str) -> Dict:

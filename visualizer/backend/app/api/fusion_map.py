@@ -5,7 +5,10 @@
 """
 import logging
 from fastapi import APIRouter, Query
-from app.services.fusion_map_parser import get_fusion_map_info, read_fusion_map_frame, read_fusion_map_frames_range
+from app.services.fusion_map_parser import (
+    get_fusion_map_info, read_fusion_map_frame, read_fusion_map_frames_range,
+    find_frame_idx_by_ts,
+)
 
 router = APIRouter(prefix="/api/bag", tags=["fusion-map"])
 logger = logging.getLogger(__name__)
@@ -38,3 +41,16 @@ def fusion_map_frames_range(
     """
     end = min(end, start + 200)
     return read_fusion_map_frames_range(bag_path, start, end)
+
+
+@router.get("/fusion-map-frame-by-ts")
+def fusion_map_frame_by_ts(
+    bag_path: str = Query(..., description="bag 目录路径"),
+    ts_ns: int = Query(..., description="目标时间戳（纳秒）"),
+):
+    """根据时间戳查找最近的帧，返回帧索引信息
+
+    前端拿到 frame_idx 后，再调用 /fusion-map-frame 读取实际帧数据。
+    也可同时传 ts_ns，让前端知道实际帧的时间戳与目标时间的偏差。
+    """
+    return find_frame_idx_by_ts(bag_path, ts_ns)
