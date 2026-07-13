@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from app.api import bag, video, agent, strategies
+from app.api import bag, video, agent, strategies, fusion_map
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.exceptions import setup_exception_handlers
@@ -98,6 +98,7 @@ app.include_router(bag.router)
 app.include_router(video.router)
 app.include_router(agent.router)
 app.include_router(strategies.router)
+app.include_router(fusion_map.router)
 
 # Serve frontend build if available
 _FRONTEND_BUILD = settings.PROJECT_ROOT / "visualizer" / "frontend" / "build"
