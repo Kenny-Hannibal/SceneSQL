@@ -59,6 +59,8 @@ class AgentQueryResponse(BaseModel):
     total_rows: int = 0  # 总行数（用于分页）
     page: int = 1
     page_size: int = 50
+    correction_rounds: int = 0
+    max_corrections_exceeded: bool = False
 
 
 class ExecuteSQLRequest(BaseModel):
