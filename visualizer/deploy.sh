@@ -137,7 +137,10 @@ if [ -f "${PROJECT_ROOT}/.env" ]; then
     echo "[INFO] Loaded .env"
 fi
 
-nohup $PYTHON -m uvicorn backend.app.main:app --host 0.0.0.0 --port 30001 > /tmp/rosbag_visualizer.log 2>&1 &
+# protobuf 4.x 对 duplicate json_name 更严格，需要用纯 Python 实现避免 C++ 描述符池冲突
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENT=python
+
+nohup env PROTOCOL_BUFFERS_PYTHON_IMPLEMENT=python $PYTHON -m uvicorn backend.app.main:app --host 0.0.0.0 --port 30001 > /tmp/rosbag_visualizer.log 2>&1 &
 NEW_PID=$!
 sleep 3
 

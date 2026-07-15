@@ -56,6 +56,13 @@ class RecipeLibrary:
             name = f.stem
             with open(f, 'r', encoding='utf-8') as fh:
                 self._recipes[name] = yaml.safe_load(fh)
+        # 也加载用户策略（用户策略同名时覆盖系统 recipe）
+        user_dir = self.recipes_dir.parent / "user_strategies"
+        if user_dir.exists():
+            for f in sorted(user_dir.glob("*.yaml")):
+                name = f.stem
+                with open(f, 'r', encoding='utf-8') as fh:
+                    self._recipes[name] = yaml.safe_load(fh)
     
     def get(self, name: str) -> Optional[dict]:
         return self._recipes.get(name)

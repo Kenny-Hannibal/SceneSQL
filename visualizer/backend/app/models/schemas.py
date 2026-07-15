@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 class BagInfo(BaseModel):
     bag_path: str
     topics: List[Dict]
+    fusion_map_topic: Optional[Dict] = None
     duration_sec: float
     message_count: int
     start_time_ns: Optional[int] = None

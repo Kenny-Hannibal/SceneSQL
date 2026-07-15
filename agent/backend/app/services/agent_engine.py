@@ -644,9 +644,9 @@ class AgentEngine:
             matched_dbs=1 if good_rows else 0,
         )
 
-    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32, use_two_round: bool = True) -> AgentResult:
+    async def query(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32, use_two_round: bool = True, on_token=None) -> AgentResult:
         if use_two_round:
-            return await self._query_two_round(question, result_limit, db_limit, max_workers)
+            return await self._query_two_round(question, result_limit, db_limit, max_workers, on_token=on_token)
 
         # ── 旧流程 fallback ──
         route = self.router.route(question)
@@ -722,7 +722,7 @@ class AgentEngine:
             return await self._query_single(sql, result_limit=result_limit)
 
 
-    async def _query_two_round(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32) -> AgentResult:
+    async def _query_two_round(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32, on_token=None) -> AgentResult:
         """两轮NL2SQL：Round 1 概念识别 → Round 2 SQL生成"""
         from agent.backend.app.core.concept_router import ConceptRouter
 
@@ -790,11 +790,23 @@ class AgentEngine:
             schema_text_for_correction = schema_text
 
             r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
-            raw_sql = await self.llm.chat(
-                r2_messages[0]["content"],
-                r2_messages[1]["content"],
-                temperature=0.0,
-            )
+            # ── 流式生成 SQL：逐 token 回调 on_token ──
+            if on_token is not None:
+                sql_chunks = []
+                async for token in self.llm.chat_stream(
+                    r2_messages[0]["content"],
+                    r2_messages[1]["content"],
+                    temperature=0.0,
+                ):
+                    sql_chunks.append(token)
+                    await on_token(token)
+                raw_sql = "".join(sql_chunks)
+            else:
+                raw_sql = await self.llm.chat(
+                    r2_messages[0]["content"],
+                    r2_messages[1]["content"],
+                    temperature=0.0,
+                )
             sql = self._clean_sql(raw_sql)
 
             logger.info("Round 2 SQL: %s", sql[:200])

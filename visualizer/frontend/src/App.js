@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import AgentPanel from './components/AgentPanel';
 import LoginPage from './components/LoginPage';
+import BevViewer from './components/BevViewer';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -104,6 +105,8 @@ function MainApp({ onLogout }) {
   const [videoError, setVideoError] = useState(null);
   const [forceH264, setForceH264] = useState(false);
   const [streamPlayerData, setStreamPlayerData] = useState(null);
+  const [fusionMapTopic, setFusionMapTopic] = useState(null);
+  const [viewTab, setViewTab] = useState('camera'); // 'camera' | 'bev'
   const intervalRef = useRef(null);
   const videoRef = useRef(null);
 
@@ -125,8 +128,15 @@ function MainApp({ onLogout }) {
       const data = await res.json();
       setTopics(data.topics || []);
       setDurationSec(data.duration_sec || 0);
+      setFusionMapTopic(data.fusion_map_topic || null);
       if (data.topics && data.topics.length > 0) {
         setSelectedTopic(data.topics[0].name);
+      }
+      // 自动切换到 BEV tab 如果有 fusion_map 数据
+      if (data.fusion_map_topic) {
+        setViewTab('bev');
+      } else {
+        setViewTab('camera');
       }
     } catch (e) {
       setError(e.message);
@@ -409,6 +419,44 @@ function MainApp({ onLogout }) {
       </div>
 
       {topics.length > 0 && (
+        <>
+          {/* ── View Tab 切换 ── */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: -1, position: 'relative', zIndex: 1 }}>
+            <button
+              onClick={() => setViewTab('bev')}
+              style={{
+                padding: '8px 20px', fontSize: 14, cursor: 'pointer',
+                border: '1px solid #d9d9d9', borderBottom: viewTab === 'bev' ? '2px solid #fff' : '1px solid #d9d9d9',
+                borderRadius: '8px 8px 0 0',
+                background: viewTab === 'bev' ? '#fff' : '#fafafa',
+                color: viewTab === 'bev' ? '#1890ff' : '#666',
+                fontWeight: viewTab === 'bev' ? 600 : 400,
+              }}
+            >
+              🗺️ BEV View {fusionMapTopic ? '' : '(无数据)'}
+            </button>
+            <button
+              onClick={() => setViewTab('camera')}
+              style={{
+                padding: '8px 20px', fontSize: 14, cursor: 'pointer',
+                border: '1px solid #d9d9d9', borderBottom: viewTab === 'camera' ? '2px solid #fff' : '1px solid #d9d9d9',
+                borderRadius: '8px 8px 0 0',
+                background: viewTab === 'camera' ? '#fff' : '#fafafa',
+                color: viewTab === 'camera' ? '#1890ff' : '#666',
+                fontWeight: viewTab === 'camera' ? 600 : 400,
+              }}
+            >
+              📷 Camera ({topics.length})
+            </button>
+          </div>
+
+          {/* ── BEV View ── */}
+          {viewTab === 'bev' && (
+            <BevViewer bagPath={bagPath} authFetch={authFetch} />
+          )}
+
+          {/* ── Camera View ── */}
+          {viewTab === 'camera' && (
         <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
           <h2>📷 Camera Topics ({topics.length})</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 12 }}>
@@ -459,6 +507,8 @@ function MainApp({ onLogout }) {
             )}
           </div>
         </div>
+          )}
+        </>
       )}
 
       {videoUrl && (

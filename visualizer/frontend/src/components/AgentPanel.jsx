@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SqlEditor from './SqlEditor';
+import BevViewer from './BevViewer';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -221,6 +222,12 @@ export default function AgentPanel() {
   // 已可视化行标记：记录用户点击过的行索引，用于深色高亮
   const [visualizedRows, setVisualizedRows] = useState(new Set());
 
+  // ── 策略保存 ──
+  const [saveStrategyModalOpen, setSaveStrategyModalOpen] = useState(false);
+  const [strategyListOpen, setStrategyListOpen] = useState(false);
+  const [strategyList, setStrategyList] = useState([]);
+  const [strategyForm, setStrategyForm] = useState({ name: '', keywords: '', tag_name: '', description: '' });
+
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
@@ -249,6 +256,9 @@ export default function AgentPanel() {
   const [playerMode, setPlayerMode] = useState(null); // 'hevc-stream' | 'h264-file'
   const [playerError, setPlayerError] = useState(null);
   const [forceH264, setForceH264] = useState(false);
+  // BEV 弹窗
+  const [bevModalOpen, setBevModalOpen] = useState(false);
+  const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -369,6 +379,70 @@ export default function AgentPanel() {
   };
 
   // 执行 SQL 编辑器中的 SQL（取回全量数据，翻页由前端完成）
+  // ── 策略保存/加载 ──
+  const loadStrategyList = async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/strategies`);
+      if (res.ok) {
+        setStrategyList(await res.json());
+      }
+    } catch (e) { console.error('Failed to load strategies', e); }
+  };
+
+  const handleSaveStrategy = async () => {
+    try {
+      const keywords = strategyForm.keywords.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+      if (!strategyForm.name || !keywords.length || !sqlEditor.trim()) {
+        alert('请填写策略名、关键词，并确保 SQL 不为空');
+        return;
+      }
+      // 自动推断 tag_name：从 SQL 中提取第一个字符串字面量
+      let tag_name = strategyForm.tag_name;
+      if (!tag_name) {
+        const m = sqlEditor.match(/(?:AS\s+tag_name|tag_name\s*=\s*)['"]([^'"]+)['"]/i)
+          || sqlEditor.match(/['"]([A-Z][A-Za-z_]+)['"]\s+AS\s+tag_name/i);
+        tag_name = m ? m[1] : strategyForm.name;
+      }
+      const res = await authFetch(`${API_BASE}/api/strategies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: strategyForm.name,
+          keywords,
+          tag_name,
+          sql: sqlEditor.trim(),
+          description: strategyForm.description,
+        }),
+      });
+      if (res.ok) {
+        setSaveStrategyModalOpen(false);
+        setStrategyForm({ name: '', keywords: '', tag_name: '', description: '' });
+        loadStrategyList();
+        alert('策略已保存');
+      } else {
+        const err = await res.json();
+        alert('保存失败: ' + (err.detail || JSON.stringify(err)));
+      }
+    } catch (e) {
+      alert('保存失败: ' + e.message);
+    }
+  };
+
+  const handleDeleteStrategy = async (name) => {
+    if (!window.confirm(`确定删除策略 "${name}"？`)) return;
+    try {
+      const res = await authFetch(`${API_BASE}/api/strategies/${name}`, { method: 'DELETE' });
+      if (res.ok) loadStrategyList();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleLoadStrategy = (s) => {
+    setSqlEditor(s.sql);
+    setStrategyListOpen(false);
+  };
+
+  useEffect(() => { loadStrategyList(); }, []);
+
   const handleExecuteSql = async () => {
     const sql = sqlEditor.trim();
     if (!sql) return;
@@ -697,6 +771,7 @@ export default function AgentPanel() {
     let bagEndNs = null;
     let clampedMsg = '';
     let cameraTopics = [];
+    let fusionMapTopic = null;
 
     try {
       const response = await authFetch(`${API_BASE}/api/bag/info-stream?bag_path=${encodeURIComponent(bagPath)}`, { method: 'POST', signal: controller.signal });
@@ -721,6 +796,7 @@ export default function AgentPanel() {
                 bagStartNs = info.start_time_ns;
                 bagEndNs = info.end_time_ns;
                 cameraTopics = (info.topics || []).map((t) => t.name).filter(Boolean);
+                fusionMapTopic = info.fusion_map_topic || null;
               } else if (data.stage === 'error') {
                 // 降级：使用非流式 API
                 throw new Error(data.message);
@@ -740,6 +816,7 @@ export default function AgentPanel() {
           bagStartNs = bagInfo.start_time_ns;
           bagEndNs = bagInfo.end_time_ns;
           cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
+          fusionMapTopic = bagInfo.fusion_map_topic || null;
         }
       } catch (e2) {
         // bag info 不可用，跳过
@@ -758,12 +835,44 @@ export default function AgentPanel() {
       endTs = bagEndNs;
     }
 
-    setTopicModalData({ bagPath, row, cameraTopics, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
+    setTopicModalData({ bagPath, row, cameraTopics, fusionMapTopic, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
     // 优先使用上次记忆的 topic，如果它在当前可用 topic 列表中；否则取第一个
     const lastTopic = localStorage.getItem('lastSelectedTopic') || '';
     const defaultTopic = (lastTopic && cameraTopics.includes(lastTopic)) ? lastTopic
       : (cameraTopics.length > 0 ? cameraTopics[0] : '');
     setSelectedTopic(defaultTopic);
+  };
+
+  // ── 多视图 Tab：切换 camera topic ──
+  const handleSwitchTopic = (newTopic) => {
+    if (!playerData?._multiViewMeta || newTopic === playerData.topic) return;
+    const { bagPath, startTs, endTs } = playerData._multiViewMeta;
+    const streamToken = localStorage.getItem('token');
+    const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+    const h264Mime = 'video/mp4; codecs="avc1.64001f"';
+
+    const buildStreamUrl = (endpoint) => {
+      const params = new URLSearchParams({ bag_path: bagPath, topic: newTopic });
+      if (startTs !== null) params.append('start_ts', String(startTs));
+      if (endTs !== null) params.append('end_ts', String(endTs));
+      if (streamToken) params.append('token', streamToken);
+      return `${API_BASE}/api/video/${endpoint}?${params.toString()}`;
+    };
+
+    // 保持当前编码模式，构建新 stream URL
+    const codec = playerData.mse_codec || h264Mime;
+    const isHevc = codec === hevcMime;
+    const endpoint = isHevc ? 'stream-hevc' : 'stream-h264';
+    const newStreamUrl = buildStreamUrl(endpoint);
+
+    // 更新 playerData → React useEffect 自动 cleanup 旧流 + 重建新流
+    setPlayerData(prev => ({
+      ...prev,
+      stream_url: newStreamUrl,
+      topic: newTopic,
+    }));
+    setPlayerError(null);
+    localStorage.setItem('lastSelectedTopic', newTopic);
   };
 
   const startH264Extraction = async (bagPath, row, startTs, endTs) => {
@@ -792,7 +901,24 @@ export default function AgentPanel() {
 
   const handleExtractVideo = async () => {
     if (!topicModalData || !selectedTopic) return;
-    const { bagPath, row, startTs, endTs, clampedMsg } = topicModalData;
+
+    // ── 如果选择了 fusion_map_plus → 打开 BEV 弹窗 ──
+    if (selectedTopic === 'fusion_map_plus') {
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setBevData({
+        bagPath: topicModalData.bagPath,
+        startTsNs: topicModalData.startTs,
+        endTsNs: topicModalData.endTs,
+      });
+      setBevModalOpen(true);
+      return;
+    }
+
+    const { bagPath, row, startTs, endTs, clampedMsg, cameraTopics } = topicModalData;
+
+    // 多视图 Tab 所需的公共数据，会存入 playerData 供 Tab 切换时使用
+    const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics: cameraTopics || [] };
 
     // 记忆用户选择的 topic
     localStorage.setItem('lastSelectedTopic', selectedTopic);
@@ -840,6 +966,7 @@ export default function AgentPanel() {
           use_mse: true,
           mse_codec: h264Mime,
           durationSec,
+          _multiViewMeta,
         });
         setTopicModalOpen(false);
         setTopicModalData(null);
@@ -862,6 +989,7 @@ export default function AgentPanel() {
         use_mse: true,
         mse_codec: hevcMime,
         durationSec,
+        _multiViewMeta,
       });
       setTopicModalOpen(false);
       setTopicModalData(null);
@@ -880,6 +1008,7 @@ export default function AgentPanel() {
         use_mse: true,
         mse_codec: h264Mime,
         durationSec,
+        _multiViewMeta,
       });
       setTopicModalOpen(false);
       setTopicModalData(null);
@@ -940,7 +1069,7 @@ export default function AgentPanel() {
       setVideoRows(currentRows);
       if (newlyCompleted) {
         setPlayerMode('h264-file');
-        setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic });
+        setPlayerData({ video_url: newlyCompleted.video_url, task_id: newlyCompleted.task_id, row: newlyCompleted.row, topic: newlyCompleted.topic, _multiViewMeta: { bagPath: '', startTs: null, endTs: null, cameraTopics: [] } });
         setPlayerModalOpen(true);
         setExtractModalOpen(false);  // 关闭进度弹窗，打开播放器
       }
@@ -1412,6 +1541,31 @@ export default function AgentPanel() {
 
       {/* SQL 编辑器 */}
       <div style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: 12, color: '#888' }}>SQL 编辑器</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => { setStrategyListOpen(!strategyListOpen); loadStrategyList(); }}
+              style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #1890ff', background: 'transparent', color: '#1890ff', cursor: 'pointer' }}
+            >
+              我的策略 ({strategyList.length})
+            </button>
+            <button
+              onClick={() => {
+                // 预填关键词：从 SQL 提取 tag_name 作为默认关键词
+                const m = sqlEditor.match(/(?:AS\s+tag_name|tag_name\s*=\s*)['"]([^'"]+)['"]/i)
+                  || sqlEditor.match(/['"]([A-Z][A-Za-z_]+)['"]\s+AS\s+tag_name/i);
+                const kw = m ? m[1] : '';
+                setStrategyForm(prev => ({ ...prev, keywords: prev.keywords || kw }));
+                setSaveStrategyModalOpen(true);
+              }}
+              disabled={!sqlEditor.trim()}
+              style={{ padding: '2px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #52c41a', background: sqlEditor.trim() ? 'transparent' : '#f5f5f5', color: sqlEditor.trim() ? '#52c41a' : '#ccc', cursor: sqlEditor.trim() ? 'pointer' : 'not-allowed' }}
+            >
+              保存为策略
+            </button>
+          </div>
+        </div>
         <SqlEditor
           value={sqlEditor}
           onChange={setSqlEditor}
@@ -1611,33 +1765,59 @@ export default function AgentPanel() {
                 <style>{`@keyframes progress-pulse { 0%, 100% { opacity: 0.4; width: 30%; } 50% { opacity: 1; width: 70%; } }`}</style>
               </div>
             ) : (
-              topicModalData.cameraTopics.length > 0 ? (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>选择 Camera Topic:</label>
-                  <select
-                    value={selectedTopic}
-                    onChange={(e) => setSelectedTopic(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+              <div style={{ marginBottom: 16 }}>
+                {/* ── 3D BEV 可视化 Topic ── */}
+                {topicModalData.fusionMapTopic && (
+                  <div
+                    onClick={() => setSelectedTopic('fusion_map_plus')}
+                    style={{
+                      padding: '10px 14px', marginBottom: 8, borderRadius: 6, cursor: 'pointer',
+                      border: selectedTopic === 'fusion_map_plus' ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                      background: selectedTopic === 'fusion_map_plus' ? '#e6f7ff' : '#fafafa',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                    }}
                   >
-                    {topicModalData.cameraTopics.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
-                  <input
-                    type="text"
-                    value={selectedTopic}
-                    onChange={(e) => setSelectedTopic(e.target.value)}
-                    placeholder="/camera/front_center"
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
-                  />
-                </div>
-              )
+                    <span style={{ fontSize: 20 }}>🗺️</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>3D BEV 视图 (Fusion Map)</div>
+                      <div style={{ fontSize: 11, color: '#888' }}>fusion_map_plus · 障碍物/车道线/边界线 3D 渲染</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Camera Topics ── */}
+                {topicModalData.cameraTopics.length > 0 ? (
+                  <div>
+                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                      📹 Camera Topic:
+                    </label>
+                    <select
+                      value={selectedTopic.startsWith('/camera') || selectedTopic.startsWith('/cam') ? selectedTopic : ''}
+                      onChange={(e) => { if (e.target.value) setSelectedTopic(e.target.value); }}
+                      style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                    >
+                      <option value="" disabled>-- 选择摄像头 --</option>
+                      {topicModalData.cameraTopics.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : !topicModalData.fusionMapTopic ? (
+                  <div>
+                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
+                    <input
+                      type="text"
+                      value={selectedTopic}
+                      onChange={(e) => setSelectedTopic(e.target.value)}
+                      placeholder="/camera/front_center"
+                      style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
+                    />
+                  </div>
+                ) : null}
+              </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              {selectedTopic !== 'fusion_map_plus' && (
               <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input
                   type="checkbox"
@@ -1650,6 +1830,7 @@ export default function AgentPanel() {
                   ⚙️ 强制使用 H.264 转码（兼容性更好，用于调试）
                 </label>
               </div>
+              )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => { setTopicModalOpen(false); setTopicModalData(null); }}
@@ -1665,10 +1846,42 @@ export default function AgentPanel() {
                     background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  确认提取
+                  {selectedTopic === 'fusion_map_plus' ? '🗺️ 打开 BEV 视图' : '确认提取'}
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 3D BEV 视图弹窗 ── */}
+      {bevModalOpen && bevData && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setBevModalOpen(false); setBevData(null); } }}
+        >
+          <div style={{ background: '#fff', borderRadius: 8, padding: 20, minWidth: 700, maxWidth: 900, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>🗺️ 3D BEV View</h3>
+              <button
+                onClick={() => { setBevModalOpen(false); setBevData(null); }}
+                style={{ padding: '4px 10px', fontSize: 16, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', lineHeight: 1 }}
+                title="关闭"
+              >✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
+              Bag: {bevData.bagPath}
+              {bevData.startTsNs != null && <> · 起始: {(bevData.startTsNs / 1e9).toFixed(2)}s</>}
+            </div>
+            <BevViewer
+              bagPath={bevData.bagPath}
+              authFetch={authFetch}
+              startTsNs={bevData.startTsNs}
+              endTsNs={bevData.endTsNs}
+            />
           </div>
         </div>
       )}
@@ -1756,6 +1969,35 @@ export default function AgentPanel() {
               </button>
             </div>
 
+            {/* ── 多视图 Tab 栏 ── */}
+            {playerData._multiViewMeta?.cameraTopics?.length > 1 && (
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', background: '#1a1a1a', padding: '6px 8px', borderRadius: 4 }}>
+                {playerData._multiViewMeta.cameraTopics.map(t => {
+                  const shortName = t.split('/').pop() || t;
+                  const active = t === playerData.topic;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => handleSwitchTopic(t)}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: 12,
+                        borderRadius: 3,
+                        border: active ? '1px solid #1890ff' : '1px solid #555',
+                        background: active ? '#1890ff' : 'transparent',
+                        color: active ? '#fff' : '#aaa',
+                        cursor: active ? 'default' : 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                      title={t}
+                    >
+                      {shortName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {playerError && (
               <div style={{
                 background: '#fff2f0',
@@ -1805,6 +2047,71 @@ export default function AgentPanel() {
                 autoPlay
                 style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
               />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 保存策略弹窗 ── */}
+      {saveStrategyModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px' }}>保存为策略</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>策略名</label>
+              <input value={strategyForm.name} onChange={e => setStrategyForm(p => ({...p, name: e.target.value}))} placeholder="如: high_speed_cutin" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>触发关键词（逗号分隔，用户输入含关键词时自动匹配此策略）</label>
+              <input value={strategyForm.keywords} onChange={e => setStrategyForm(p => ({...p, keywords: e.target.value}))} placeholder="如: 高速切入,高速变道" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>tag_name（可选，留空自动从SQL提取）</label>
+              <input value={strategyForm.tag_name} onChange={e => setStrategyForm(p => ({...p, tag_name: e.target.value}))} placeholder="如: high_speed_cutin" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>备注</label>
+              <input value={strategyForm.description} onChange={e => setStrategyForm(p => ({...p, description: e.target.value}))} placeholder="策略说明" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setSaveStrategyModalOpen(false)} style={{ padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>取消</button>
+              <button onClick={handleSaveStrategy} style={{ padding: '6px 16px', border: 'none', borderRadius: 4, background: '#52c41a', color: '#fff', cursor: 'pointer' }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 策略列表面板 ── */}
+      {strategyListOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 500, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>我的策略</h3>
+              <button onClick={() => setStrategyListOpen(false)} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            {strategyList.length === 0 ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>暂无自定义策略</div>
+            ) : (
+              <div>
+                {strategyList.map(s => (
+                  <div key={s.name} style={{ padding: 12, borderBottom: '1px solid #f0f0f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong style={{ fontSize: 14 }}>{s.name}</strong>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: '#999' }}>
+                          关键词: {s.keywords.join(', ')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleLoadStrategy(s)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #1890ff', borderRadius: 3, background: 'transparent', color: '#1890ff', cursor: 'pointer' }}>加载</button>
+                        <button onClick={() => handleDeleteStrategy(s.name)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #ff4d4f', borderRadius: 3, background: 'transparent', color: '#ff4d4f', cursor: 'pointer' }}>删除</button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{s.description || '无备注'}</div>
+                    <pre style={{ fontSize: 10, color: '#888', marginTop: 4, maxHeight: 60, overflow: 'auto', background: '#fafafa', padding: 4, borderRadius: 3 }}>{s.sql.substring(0, 200)}{s.sql.length > 200 ? '...' : ''}</pre>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

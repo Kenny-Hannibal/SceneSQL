@@ -3,6 +3,7 @@ import logging
 import json
 import re
 import io
+import asyncio
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Query
@@ -352,9 +353,34 @@ async def agent_query_stream(req: AgentQueryRequest):
     async def event_generator():
         yield f"data: {json.dumps({'stage': 'understanding', 'message': '正在理解您的问题...'})}\n\n"
 
-        # ── 使用 engine.query() 走两轮路径（Round1 Recipe + Round2 LLM + Round3 纠错） ──
+        # ── 流式 token 队列：engine 通过 on_token 回调放入，这里取出 yield ──
+        token_queue = asyncio.Queue()
+
+        async def on_token(token: str):
+            await token_queue.put(token)
+
+        # 启动查询任务（后台协程）
+        query_task = asyncio.create_task(
+            engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers, on_token=on_token)
+        )
+
+        # 同时从队列读取 token 并 yield SSE 事件
+        query_done = False
         try:
-            result = await engine.query(req.question, result_limit=req.result_limit, db_limit=req.db_limit, max_workers=req.max_workers)
+            while not query_done or not token_queue.empty():
+                try:
+                    token = await asyncio.wait_for(token_queue.get(), timeout=0.1)
+                    yield f"data: {json.dumps({'stage': 'generating_token', 'token': token})}\n\n"
+                except asyncio.TimeoutError:
+                    # 检查查询是否已完成
+                    if query_task.done():
+                        query_done = True
+        except Exception as e:
+            logger.error("Stream error during token emission: %s", e)
+
+        # 获取查询结果
+        try:
+            result = query_task.result()
         except Exception as e:
             yield f"data: {json.dumps({'stage': 'error', 'message': f'查询失败: {e}'})}\n\n"
             return
