@@ -736,6 +736,7 @@ export default function AgentPanel() {
 
     // 如果 bag_path 为空，尝试解析
     let bagPath = row.bag_path;
+    let emBinPath = '';  // em bin 本地路径（3D BEV 视图用）
     if (!bagPath) {
       if (row.bag_id) {
         try {
@@ -744,6 +745,10 @@ export default function AgentPanel() {
             const resolveData = await resolveRes.json();
             if (resolveData.bag_path) {
               bagPath = resolveData.bag_path;
+            }
+            // 3D BEV 视图使用 em bin 路径（fusion_map_plus.bin 在 em bin 目录下）
+            if (resolveData.em_bin_local_path) {
+              emBinPath = resolveData.em_bin_local_path;
             }
           }
         } catch (e) {
@@ -760,7 +765,7 @@ export default function AgentPanel() {
     }
 
     // 打开 modal 并显示加载进度
-    setTopicModalData({ bagPath, row, cameraTopics: [], startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
+    setTopicModalData({ bagPath, emBinPath, row, cameraTopics: [], startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
     setSelectedTopic(localStorage.getItem('lastSelectedTopic') || '');
     setTopicModalOpen(true);
 
@@ -835,7 +840,7 @@ export default function AgentPanel() {
       endTs = bagEndNs;
     }
 
-    setTopicModalData({ bagPath, row, cameraTopics, fusionMapTopic, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
+    setTopicModalData({ bagPath, emBinPath, row, cameraTopics, fusionMapTopic, startTs, endTs, clampedMsg, loading: false, loadingMsg: '' });
     // 优先使用上次记忆的 topic，如果它在当前可用 topic 列表中；否则取第一个
     const lastTopic = localStorage.getItem('lastSelectedTopic') || '';
     const defaultTopic = (lastTopic && cameraTopics.includes(lastTopic)) ? lastTopic
@@ -906,8 +911,11 @@ export default function AgentPanel() {
     if (selectedTopic === 'fusion_map_plus') {
       setTopicModalOpen(false);
       setTopicModalData(null);
+      // 优先使用 em bin 路径（fusion_map_plus.bin 在 em bin 目录下）
+      // fallback 到 rosbag 路径（部分 upm_replay bag 里也包含 fusion_map_plus topic）
+      const bevBagPath = topicModalData.emBinPath || topicModalData.bagPath;
       setBevData({
-        bagPath: topicModalData.bagPath,
+        bagPath: bevBagPath,
         startTsNs: topicModalData.startTs,
         endTsNs: topicModalData.endTs,
       });
