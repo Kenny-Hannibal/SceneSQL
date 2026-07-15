@@ -248,17 +248,29 @@ def list_batches():
 
 @router.get("/resolve-bag-path")
 async def resolve_bag_path(bag_id: str):
-    """根据 bag_id 解析 bag 本地路径（用于前端可视化）。"""
+    """根据 bag_id 解析 bag 本地路径（用于前端可视化）。
+    
+    同时返回 em_bin 路径，3D BEV 视图需要从 em bin 目录读取 fusion_map_plus.bin。
+    """
     try:
         from tools.rosbag_path_resolver import RosbagPathResolver
         resolver = RosbagPathResolver()
-        info = resolver.resolve(bag_id)
+        
+        # 先用 resolve_em_bin_path 一次性获取 rosbag 路径 + em bin 路径
+        try:
+            info = resolver.resolve_em_bin_path(bag_id)
+        except Exception:
+            # fallback: 如果 em bin 路径查询失败，至少返回 rosbag 路径
+            info = resolver.resolve(bag_id)
+        
         return {
             "bag_id": bag_id,
             "origin_bag_id": info.origin_bag_id,
             "bag_path": info.local_path or info.oss_path or "",
             "oss_path": info.oss_path or "",
             "local_path": info.local_path or "",
+            "em_bin_oss_path": getattr(info, "em_bin_oss_path", None) or "",
+            "em_bin_local_path": getattr(info, "em_bin_local_path", None) or "",
         }
     except ImportError:
         return {"bag_id": bag_id, "bag_path": "", "error": "dm_sdk not installed"}

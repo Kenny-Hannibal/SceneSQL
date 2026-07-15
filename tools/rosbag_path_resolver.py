@@ -34,6 +34,8 @@ class BagPathInfo:
     bag_name: Optional[str] = None     # bag 名称
     vin: Optional[str] = None          # 车辆 VIN
     vehicle_model: Optional[str] = None # 车型
+    em_bin_oss_path: Optional[str] = None   # em bin 自身的 OSS 路径 (storage_prefix)
+    em_bin_local_path: Optional[str] = None # em bin 本地挂载路径
 
 
 def _parse_oss_mount_map(mount_map_str: Optional[str]) -> Dict[str, str]:
@@ -166,3 +168,54 @@ class RosbagPathResolver:
         """只返回本地挂载路径。"""
         info = self.resolve(data_id)
         return info.local_path
+
+    def resolve_em_bin_path(self, data_id: str) -> BagPathInfo:
+        """
+        解析 em bin 的本地路径 — 直接查询产线表中 em bin 自身的 storage_prefix，
+        不走 origins（origins 指向原始 rosbag，那里没有 fusion_map_plus.bin）。
+
+        用途：3D BEV 视图需要从 em bin 目录读取 fusion_map_plus.bin 等文件。
+        """
+        prod_client = self._ProdDataClient(
+            access_token=self.access_token,
+            table=self.prod_table,
+        )
+        resp = prod_client.get_bag_metadata(data_id=data_id)
+        if resp.resp_code() != 200:
+            raise RuntimeError(f"ProdData query failed for em bin: {resp.msg}")
+
+        prod_data = resp.resp_data()
+        if not prod_data:
+            raise ValueError(f"Bag {data_id} not found in {self.prod_table}")
+
+        # em bin 自身的 storage_prefix
+        em_bin_oss_path = prod_data.get("storage_prefix")
+
+        # 同时也获取 origins 信息（用于填充 rosbag 相关字段）
+        origins = prod_data.get("origins", [])
+        origin = origins[0] if origins else {}
+        origin_table = origin.get("table")
+        origin_bag_id = origin.get("bag_id")
+
+        # OSS → 本地路径转换
+        em_bin_local_path = _oss_to_local(em_bin_oss_path, self.mount_map) if em_bin_oss_path else None
+
+        # 也解析原始 rosbag 路径（复用 resolve 逻辑）
+        try:
+            base_info = self.resolve(data_id)
+        except Exception:
+            base_info = BagPathInfo(data_id=data_id)
+
+        return BagPathInfo(
+            data_id=data_id,
+            prod_table=self.prod_table,
+            origin_table=origin_table,
+            origin_bag_id=origin_bag_id,
+            oss_path=base_info.oss_path,
+            local_path=base_info.local_path,
+            bag_name=base_info.bag_name,
+            vin=base_info.vin,
+            vehicle_model=base_info.vehicle_model,
+            em_bin_oss_path=em_bin_oss_path,
+            em_bin_local_path=em_bin_local_path,
+        )
