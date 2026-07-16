@@ -65,8 +65,10 @@ $PYTHON -c "import pydantic_settings, fastapi, uvicorn, yaml" 2>/dev/null || {
 # ============================================
 # 3. Build frontend
 # ============================================
-echo "[INFO] Building frontend..."
+echo "[INFO] Installing frontend dependencies..."
 cd "${SCRIPT_DIR}/frontend"
+npm install --legacy-peer-deps 2>&1 | tail -3
+echo "[INFO] Building frontend..."
 npm run build
 cd "$SCRIPT_DIR"
 
