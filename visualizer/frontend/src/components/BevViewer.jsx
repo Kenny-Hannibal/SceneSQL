@@ -17,8 +17,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
   const [currentFrame, setCurrentFrame] = useState(0);
+  const [startFrameIdx, setStartFrameIdx] = useState(0);
+  const [endFrameIdx, setEndFrameIdx] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [indexingMsg, setIndexingMsg] = useState('');
   const [error, setError] = useState('');
 
   // Three.js 对象引用
@@ -143,60 +146,65 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // ── 加载 fusion_map 基本信息 ──
+  // ── 加载 fusion_map 基本信息 + 帧范围 ──
   const loadInfo = useCallback(async () => {
     if (!bagPath) return;
     setLoading(true);
     setError('');
+    setIndexingMsg('');
     try {
       const res = await authFetch(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`);
       if (!res.ok) throw new Error('Failed to load fusion map info');
       const data = await res.json();
       setInfo(data);
+
       if (data.exists && data.total_frames > 0) {
-        // 如果有 startTsNs，先查找对应的帧索引
-        if (startTsNs != null && startTsNs > 0) {
-          await seekToTimestamp(startTsNs);
-        } else {
-          setCurrentFrame(0);
-          loadFrame(0);
+        // 如果有 startTsNs 或 endTsNs，用批量接口一次性查询帧范围
+        const hasStart = startTsNs != null && startTsNs > 0;
+        const hasEnd = endTsNs != null && endTsNs > 0;
+
+        if (hasStart || hasEnd) {
+          setIndexingMsg('正在索引帧（首次可能需要几分钟）...');
+          try {
+            const params = new URLSearchParams({ bag_path: bagPath });
+            if (hasStart) params.set('start_ts_ns', String(startTsNs));
+            if (hasEnd) params.set('end_ts_ns', String(endTsNs));
+
+            const rangeRes = await authFetch(`${API_BASE}/api/bag/fusion-map-frames-by-ts-range?${params.toString()}`);
+            if (rangeRes.ok) {
+              const rangeData = await rangeRes.json();
+              if (!rangeData.error) {
+                const sIdx = rangeData.start_frame_idx ?? 0;
+                const eIdx = rangeData.end_frame_idx ?? (data.total_frames - 1);
+                setStartFrameIdx(sIdx);
+                setEndFrameIdx(eIdx);
+                setCurrentFrame(sIdx);
+                await loadFrameDirect(sIdx);
+                setIndexingMsg('');
+                return;
+              }
+            }
+          } catch (e) {
+            // 降级：忽略范围查询失败
+          }
+          setIndexingMsg('');
         }
+
+        // 无时间范围或降级：从第0帧开始
+        setStartFrameIdx(0);
+        setEndFrameIdx(data.total_frames - 1);
+        setCurrentFrame(0);
+        await loadFrameDirect(0);
       }
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [bagPath, authFetch, startTsNs]);
+  }, [bagPath, authFetch, startTsNs, endTsNs]);
 
-  // ── 按时间戳定位帧 ──
-  const seekToTimestamp = useCallback(async (tsNs) => {
-    if (!bagPath) return 0;
-    try {
-      const res = await authFetch(
-        `${API_BASE}/api/bag/fusion-map-frame-by-ts?bag_path=${encodeURIComponent(bagPath)}&ts_ns=${tsNs}`
-      );
-      if (!res.ok) throw new Error('Failed to find frame by ts');
-      const data = await res.json();
-      if (data.error) {
-        // 降级到第0帧
-        setCurrentFrame(0);
-        loadFrame(0);
-        return 0;
-      }
-      const idx = data.frame_idx || 0;
-      setCurrentFrame(idx);
-      loadFrame(idx);
-      return idx;
-    } catch (e) {
-      setCurrentFrame(0);
-      loadFrame(0);
-      return 0;
-    }
-  }, [bagPath, authFetch]);
-
-  // ── 加载并渲染单帧 ──
-  const loadFrame = useCallback(async (idx) => {
+  // ── 加载并渲染单帧（不触发useCallback循环依赖）──
+  const loadFrameDirect = async (idx) => {
     if (!bagPath) return;
     try {
       const res = await authFetch(`${API_BASE}/api/bag/fusion-map-frame?bag_path=${encodeURIComponent(bagPath)}&frame_idx=${idx}`);
@@ -211,6 +219,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     } catch (e) {
       setError(e.message);
     }
+  };
+
+  // ── 加载并渲染单帧 ──
+  const loadFrame = useCallback(async (idx) => {
+    await loadFrameDirect(idx);
   }, [bagPath, authFetch]);
 
   // ── 更新 Three.js 场景 ──
@@ -315,23 +328,16 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
   // ── 播放/暂停动画 ──
   const totalFrames = info?.total_frames || 0;
-  const endFrame = React.useMemo(() => {
-    // 如果有 endTsNs，需要算出结束帧索引；否则播放到末尾
-    if (endTsNs != null && endTsNs > 0 && info?.exists) {
-      // 简单估算：用当前帧位置 + 帧率外推
-      // 精确方案需要再调 by-ts API，但播放时频繁调 API 不划算
-      // 所以这里只设 totalFrames 为上限，实际靠时间戳判断
-      return totalFrames;
-    }
-    return totalFrames;
-  }, [endTsNs, info, totalFrames]);
+  // 如果有 endFrameIdx，播放到该帧就停；否则播到文件末尾
+  const playEnd = endFrameIdx != null ? endFrameIdx : totalFrames - 1;
+  const segmentFrameCount = playEnd - startFrameIdx + 1;
 
   useEffect(() => {
     if (!playing || !info || info.total_frames <= 0) return;
     const interval = setInterval(() => {
       setCurrentFrame(prev => {
         const next = prev + 1;
-        if (next >= totalFrames) {
+        if (next > playEnd) {
           setPlaying(false);
           return prev;
         }
@@ -340,7 +346,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       });
     }, 200); // 5fps for BEV animation
     return () => clearInterval(interval);
-  }, [playing, info, totalFrames, loadFrame]);
+  }, [playing, info, playEnd, loadFrame]);
 
   // ── bag 路径变化时自动加载 ──
   useEffect(() => {
@@ -349,14 +355,26 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   }, [bagPath, loadInfo]);
 
+  // ── 片段信息显示 ──
+  const isSegment = (startTsNs != null && startTsNs > 0) || (endTsNs != null && endTsNs > 0);
+  const segmentStartSec = startTsNs != null ? (startTsNs / 1e9).toFixed(2) : null;
+  const segmentEndSec = endTsNs != null ? (endTsNs / 1e9).toFixed(2) : null;
+
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
       <h2>🗺️ 3D BEV View (Fusion Map)</h2>
+      {isSegment && (
+        <div style={{ fontSize: 12, color: '#1890ff', marginBottom: 4, fontWeight: 500 }}>
+          📍 片段模式: {segmentStartSec != null ? `${segmentStartSec}s` : '起始'} → {segmentEndSec != null ? `${segmentEndSec}s` : '末尾'}
+          {segmentFrameCount > 0 && ` · 约 ${segmentFrameCount} 帧`}
+        </div>
+      )}
       <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
         鼠标左键旋转 · 右键平移 · 滚轮缩放
       </div>
       {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
       {loading && <div style={{ color: '#1890ff', marginBottom: 10 }}>Loading fusion map info...</div>}
+      {indexingMsg && <div style={{ color: '#d48806', marginBottom: 10 }}>⏳ {indexingMsg}</div>}
       {info && !info.exists && (
         <div style={{ color: '#999', padding: '20px 0' }}>此 bag 无 fusion_map_plus 数据</div>
       )}
@@ -369,20 +387,24 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
           <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <button
               onClick={() => setPlaying(!playing)}
+              disabled={!!indexingMsg}
               style={{
                 padding: '8px 16px', fontSize: 14, borderRadius: 4, border: 'none',
-                background: playing ? '#ff4d4f' : '#52c41a', color: '#fff', cursor: 'pointer',
+                background: playing ? '#ff4d4f' : (indexingMsg ? '#ccc' : '#52c41a'), color: '#fff', cursor: indexingMsg ? 'not-allowed' : 'pointer',
               }}
             >
               {playing ? '⏸ Pause' : '▶ Play'}
             </button>
             <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
-              Frame: {currentFrame + 1} / {totalFrames}
+              {isSegment
+                ? `片段帧: ${currentFrame - startFrameIdx + 1} / ${segmentFrameCount}`
+                : `Frame: ${currentFrame + 1} / ${totalFrames}`
+              }
             </span>
             <input
               type="range"
-              min={0}
-              max={totalFrames - 1 || 1}
+              min={startFrameIdx}
+              max={endFrameIdx != null ? endFrameIdx : (totalFrames - 1 || 1)}
               value={currentFrame}
               onChange={(e) => {
                 const idx = parseInt(e.target.value);
@@ -397,7 +419,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
           </div>
         </>
       )}
-      {!info && !loading && !error && (
+      {!info && !loading && !error && !indexingMsg && (
         <div style={{ color: '#999', padding: '20px 0', textAlign: 'center' }}>加载 bag 后显示 3D BEV 视图</div>
       )}
     </div>

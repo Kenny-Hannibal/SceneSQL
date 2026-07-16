@@ -323,7 +323,11 @@ def find_frame_idx_by_ts(bag_path: str, ts_ns: int) -> Dict:
 
 
 def get_fusion_map_info(bag_path: str) -> Dict:
-    """获取本地 fusion_map_plus bin 文件基本信息"""
+    """获取本地 fusion_map_plus bin 文件基本信息
+
+    同时预构建帧偏移索引和时间戳索引，避免后续 find_frame_idx_by_ts
+    首次调用时逐帧解码 timestamp 导致 4 分钟卡顿。
+    """
     bin_path = os.path.join(bag_path, 'bin', 'gac_enviro_model_fusion_map_plus.bin')
     if not os.path.exists(bin_path):
         return {'exists': False, 'error': '文件不存在: {}'.format(bin_path)}
@@ -336,6 +340,11 @@ def get_fusion_map_info(bag_path: str) -> Dict:
                 return {'exists': True, 'error': '文件太小', 'total_frames': 0}
             magic = header[:4]
             count = struct.unpack('<I', header[4:8])[0] if magic == b'PB01' else 0
+
+        # 预构建帧偏移和时间戳索引（首次耗时，后续命中缓存）
+        if count > 0:
+            _get_offsets(bin_path)
+            _get_ts_ns_index(bin_path)
 
         return {
             'exists': True,

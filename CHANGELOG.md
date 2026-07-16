@@ -6,6 +6,7 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
+| 2026-07-16 | BEV片段模式：只播SQL片段而非整个bag | `changelog/2026-07-16_BEV片段模式只播SQL片段.md` |
 || 2026-07-13 | Fix BevViewer API_BASE hardcoded localhost:8000 | `changelog/2026-07-13_Fix-BevViewer-API-BASE-hardcoded-localhost.md` |
 || 2026-07-13 | Changelog 重构：拆分为索引+条目模式 | `changelog/2026-07-13_Changlog-重构拆分为索引条目模式.md` |
 || 2026-07-13 | 3D BEV 视图作为独立 Topic + ts→frame 精确索引 | `changelog/2026-07-13_3D-BEV-视图作为独立-Topic--tsframe-精确索引.md` |

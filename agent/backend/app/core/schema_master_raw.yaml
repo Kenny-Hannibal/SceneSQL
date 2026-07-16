@@ -7,9 +7,9 @@ source_files:
   car_end_tag_map: /root/data/data_mining/UBM_mining/ubm_data_mining/gsbag_parser/tag_map.py
   user_workspace: /root/data/data_mining/UBM_mining/ubm_data_mining/user_workspace/
 git_version:
-  data_mining_repo: fe3781f8d19551a9678a96bd2772ee222a63392b
+  data_mining_repo: 92e362729902a8d1a8e2a5b147c29afb44e427fd
   branch: data_mining/master
-  synced_at: '2026-06-30T16:23:24.235398+08:00'
+  synced_at: '2026-07-14T11:58:56.664700+08:00'
   note: 数据挖掘项目当前 commit hash，schema 以此版本为基准
 tables:
   range_tag:
