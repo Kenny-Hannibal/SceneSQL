@@ -38,25 +38,29 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
   // 缓存最新帧数据，Three.js 就绪后立即渲染
   const pendingDataRef = useRef(null);
+  // 标记Three.js是否已初始化
+  const threeInitializedRef = useRef(false);
 
-  // ── 初始化 Three.js 场景 ──
-  useEffect(() => {
+  // ── 初始化 Three.js 场景（canvas DOM就绪后调用）──
+  const initThreeJS = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || threeInitializedRef.current) return;
+    threeInitializedRef.current = true;
+
+    const w = canvas.clientWidth || 800;
+    const h = canvas.clientHeight || 450;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a1a);
 
-    // ── PerspectiveCamera（默认俯视 BEV，可旋转到 3D）──
-    const camera = new THREE.PerspectiveCamera(60, 2, 0.1, 5000);
+    const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 5000);
     camera.position.set(0, 100, 0.01);
     camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    renderer.setSize(w, h);
     renderer.setPixelRatio(window.devicePixelRatio);
 
-    // ── OrbitControls ──
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -96,14 +100,15 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       updateSceneInternal(pendingDataRef.current);
       pendingDataRef.current = null;
     }
-
-    return () => {
-      if (threeRef.current.animId) {
-        cancelAnimationFrame(threeRef.current.animId);
-      }
-      renderer.dispose();
-    };
   }, []);
+
+  // ── 当canvas出现时初始化Three.js ──
+  useEffect(() => {
+    // canvas可能还没渲染（条件渲染），用MutationObserver或setTimeout检测
+    if (canvasRef.current) {
+      initThreeJS();
+    }
+  }, [info, initThreeJS]); // info变化时检查canvas是否出现
 
   // ── 调整 canvas 大小 ──
   useEffect(() => {
@@ -111,8 +116,8 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       const { renderer, camera } = threeRef.current;
       const canvas = canvasRef.current;
       if (!renderer || !canvas) return;
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
+      const w = canvas.clientWidth || 800;
+      const h = canvas.clientHeight || 450;
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -120,7 +125,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [info]);
 
   // ── 加载 fusion_map 基本信息 + 帧范围 ──
   const loadInfo = useCallback(async () => {
@@ -160,12 +165,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
               }
             }
           } catch (e) {
-            // 降级：忽略范围查询失败
+            // 降级
           }
           setIndexingMsg('');
         }
 
-        // 无时间范围或降级：从第0帧开始
         setStartFrameIdx(0);
         setEndFrameIdx(data.total_frames - 1);
         setCurrentFrame(0);
@@ -178,7 +182,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   }, [bagPath, authFetch, startTsNs, endTsNs]);
 
-  // ── 加载并渲染单帧（不触发useCallback循环依赖）──
+  // ── 加载并渲染单帧 ──
   const loadFrameDirect = async (idx) => {
     if (!bagPath) return;
     try {
@@ -196,7 +200,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   };
 
-  // ── 加载并渲染单帧 ──
   const loadFrame = useCallback(async (idx) => {
     await loadFrameDirect(idx);
   }, [bagPath, authFetch]);
@@ -204,7 +207,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   // ── 更新 Three.js 场景 ──
   const updateSceneInternal = (data) => {
     if (!threeRef.current.scene) {
-      // Three.js 尚未就绪，缓存数据待就绪后渲染
       pendingDataRef.current = data;
       return;
     }
@@ -298,7 +300,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       carWireframe.quaternion.copy(carMesh.quaternion);
       groups.vehicle.add(carWireframe);
 
-      // 相机跟随车辆（OrbitControls target 也跟随）
+      // 相机跟随车辆
       const cx = vl.x || 0;
       const cy = vl.y || 0;
       camera.position.set(cx, 100, cy + 0.01);
@@ -327,7 +329,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         loadFrame(next);
         return next;
       });
-    }, 200); // 5fps for BEV animation
+    }, 200);
     return () => clearInterval(interval);
   }, [playing, info, playEnd, loadFrame]);
 
@@ -342,6 +344,9 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const isSegment = (startTsNs != null && startTsNs > 0) || (endTsNs != null && endTsNs > 0);
   const segmentStartSec = startTsNs != null ? (startTsNs / 1e9).toFixed(2) : null;
   const segmentEndSec = endTsNs != null ? (endTsNs / 1e9).toFixed(2) : null;
+
+  // canvas始终渲染（不再是条件渲染），info加载前显示placeholder
+  const showCanvas = bagPath;
 
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -361,48 +366,50 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       {info && !info.exists && (
         <div style={{ color: '#999', padding: '20px 0' }}>此 bag 无 fusion_map_plus 数据</div>
       )}
-      {info && info.exists && (
+      {showCanvas && (
         <>
           <canvas
             ref={canvasRef}
             style={{ width: '100%', height: 450, background: '#0a0a1a', borderRadius: 4, marginTop: 12, display: 'block' }}
           />
-          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setPlaying(!playing)}
-              disabled={!!indexingMsg}
-              style={{
-                padding: '8px 16px', fontSize: 14, borderRadius: 4, border: 'none',
-                background: playing ? '#ff4d4f' : (indexingMsg ? '#ccc' : '#52c41a'), color: '#fff', cursor: indexingMsg ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {playing ? '⏸ Pause' : '▶ Play'}
-            </button>
-            <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
-              {isSegment
-                ? `片段帧: ${currentFrame - startFrameIdx + 1} / ${segmentFrameCount}`
-                : `Frame: ${currentFrame + 1} / ${totalFrames}`
-              }
-            </span>
-            <input
-              type="range"
-              min={startFrameIdx}
-              max={endFrameIdx != null ? endFrameIdx : (totalFrames - 1 || 1)}
-              value={currentFrame}
-              onChange={(e) => {
-                const idx = parseInt(e.target.value);
-                setCurrentFrame(idx);
-                loadFrame(idx);
-              }}
-              style={{ flex: 1, cursor: 'pointer' }}
-            />
-            <span style={{ fontSize: 12, color: '#999' }}>
-              {info.file_size_mb}MB · {info.format}
-            </span>
-          </div>
+          {info && info.exists && (
+            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setPlaying(!playing)}
+                disabled={!!indexingMsg}
+                style={{
+                  padding: '8px 16px', fontSize: 14, borderRadius: 4, border: 'none',
+                  background: playing ? '#ff4d4f' : (indexingMsg ? '#ccc' : '#52c41a'), color: '#fff', cursor: indexingMsg ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {playing ? '⏸ Pause' : '▶ Play'}
+              </button>
+              <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
+                {isSegment
+                  ? `片段帧: ${currentFrame - startFrameIdx + 1} / ${segmentFrameCount}`
+                  : `Frame: ${currentFrame + 1} / ${totalFrames}`
+                }
+              </span>
+              <input
+                type="range"
+                min={startFrameIdx}
+                max={endFrameIdx != null ? endFrameIdx : (totalFrames - 1 || 1)}
+                value={currentFrame}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value);
+                  setCurrentFrame(idx);
+                  loadFrame(idx);
+                }}
+                style={{ flex: 1, cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 12, color: '#999' }}>
+                {info.file_size_mb}MB · {info.format}
+              </span>
+            </div>
+          )}
         </>
       )}
-      {!info && !loading && !error && !indexingMsg && (
+      {!showCanvas && !loading && !error && (
         <div style={{ color: '#999', padding: '20px 0', textAlign: 'center' }}>加载 bag 后显示 3D BEV 视图</div>
       )}
     </div>
