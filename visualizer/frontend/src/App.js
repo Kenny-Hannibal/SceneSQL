@@ -93,7 +93,7 @@ function App() {
 
 function MainApp({ onLogout }) {
   const [topics, setTopics] = useState([]);
-  const [bagPath, setBagPath] = useState('');
+  const [bagInput, setBagInput] = useState('');  // 用户输入（bag_id 或路径）
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
@@ -109,6 +109,9 @@ function MainApp({ onLogout }) {
   const [viewTab, setViewTab] = useState('camera'); // 'camera' | 'bev'
   const intervalRef = useRef(null);
   const videoRef = useRef(null);
+  // ── 双路径：get_bag_info 返回的 em_bin_path 和 rosbag_path ──
+  const [emBinPath, setEmBinPath] = useState(null);    // BEV 3D 用
+  const [rosbagPath, setRosbagPath] = useState(null);  // camera 视频用
 
   const loadBag = async () => {
     setLoading(true);
@@ -117,8 +120,10 @@ function MainApp({ onLogout }) {
     setVideoUrl('');
     setTaskId('');
     setTaskStatus(null);
+    setEmBinPath(null);
+    setRosbagPath(null);
     try {
-      const res = await authFetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagPath)}`, {
+      const res = await authFetch(`${API_BASE}/api/bag/info?bag_path=${encodeURIComponent(bagInput)}`, {
         method: 'POST',
       });
       if (!res.ok) {
@@ -129,14 +134,19 @@ function MainApp({ onLogout }) {
       setTopics(data.topics || []);
       setDurationSec(data.duration_sec || 0);
       setFusionMapTopic(data.fusion_map_topic || null);
+      // ── 保存双路径 ──
+      setEmBinPath(data.em_bin_path || null);
+      setRosbagPath(data.rosbag_path || null);
       if (data.topics && data.topics.length > 0) {
         setSelectedTopic(data.topics[0].name);
       }
-      // 自动切换到 BEV tab 如果有 fusion_map 数据
-      if (data.fusion_map_topic) {
+      // 自动切换：有 fusion_map → BEV, 有 camera topics → camera
+      if (data.fusion_map_topic && (!data.topics || data.topics.length === 0)) {
         setViewTab('bev');
-      } else {
+      } else if (data.topics && data.topics.length > 0) {
         setViewTab('camera');
+      } else if (data.fusion_map_topic) {
+        setViewTab('bev');
       }
     } catch (e) {
       setError(e.message);
@@ -150,7 +160,7 @@ function MainApp({ onLogout }) {
       const res = await authFetch(`${API_BASE}/api/video/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bag_path: bagPath, topic: selectedTopic }),
+        body: JSON.stringify({ bag_path: rosbagPath || bagInput, topic: selectedTopic }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -193,7 +203,7 @@ function MainApp({ onLogout }) {
       console.log('[HEVC诊断] 浏览器支持HEVC MSE，尝试流式播放');
       setVideoMode('hevc-stream');
       const params = new URLSearchParams({
-        bag_path: bagPath,
+        bag_path: rosbagPath || bagInput,
         topic: selectedTopic,
       });
       // 流式播放 URL 需要带 token 作为查询参数（因为 MSE fetch 不支持自定义 header）
@@ -403,8 +413,8 @@ function MainApp({ onLogout }) {
         <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
           <input
             type="text"
-            value={bagPath}
-            onChange={(e) => setBagPath(e.target.value)}
+            value={bagInput}
+            onChange={(e) => setBagInput(e.target.value)}
             style={{ flex: 1, padding: '10px', fontSize: 16, borderRadius: 4, border: '1px solid #ccc' }}
             placeholder="输入 bag_id 或本地路径（如 1002AePBU4WlfnBzNtDbBu202606）"
           />
@@ -453,7 +463,7 @@ function MainApp({ onLogout }) {
 
           {/* ── BEV View ── */}
           {viewTab === 'bev' && (
-            <BevViewer bagPath={bagPath} authFetch={authFetch} />
+            <BevViewer bagPath={emBinPath || bagInput} authFetch={authFetch} />
           )}
 
           {/* ── Camera View ── */}

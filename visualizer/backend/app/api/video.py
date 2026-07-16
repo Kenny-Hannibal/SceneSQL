@@ -82,77 +82,17 @@ def video_file(task_id: str):
     return FileResponse(video_path, media_type="video/mp4", filename=f"{task_id}.mp4")
 
 
-def _extract_bag_id_from_path(bag_path: str) -> str:
-    """从 bag_path 提取可能的 bag_id（不含 / 的长字符串，或路径最后一段）"""
-    if "/" not in bag_path and len(bag_path) > 10:
-        return bag_path
-    basename = os.path.basename(bag_path.rstrip("/"))
-    if len(basename) > 10 and re.match(r"^[a-zA-Z0-9]+$", basename):
-        return basename
-    if basename.endswith(".db") and len(basename) > 14:
-        return basename[:-3]
-    return ""
+# ── rosbag 路径解析（camera 流用） ──
 
+def _find_bag_file(bag_path: str) -> Optional[str]:
+    """在给定路径中查找 bag.bag 文件。
 
-def _resolve_rosbag_via_dm(bag_id: str) -> str:
-    """通过 dm_sdk 查询 bag_id 对应的原始 rosbag 路径。
-    
-    优先检查本地挂载，如果不可用则通过 ossutil 下载到临时目录。
-    返回包含 metadata.yaml + bag.bag (camera.bag) 的本地目录路径。
-    """
-    try:
-        from tools.rosbag_path_resolver import RosbagPathResolver
-        from app.core.config import settings
-        
-        token = settings.DM_ACCESS_TOKEN
-        if not token:
-            logger.warning("DM_ACCESS_TOKEN not configured")
-            return ""
-        
-        resolver = RosbagPathResolver(
-            access_token=token,
-            table=settings.DM_PROD_TABLE,
-            oss_mount_map=settings.OSS_MOUNT_MAP,
-        )
-        info = resolver.resolve(bag_id)
-        
-        # 1. 检查本地挂载路径
-        if info.local_path and os.path.exists(info.local_path):
-            # 检查是否有 metadata.yaml
-            if os.path.isfile(os.path.join(info.local_path, "metadata.yaml")):
-                logger.info("dm_sdk: bag_id=%s → local=%s", bag_id, info.local_path)
-                return info.local_path
-            # 检查子目录
-            for entry in sorted(os.listdir(info.local_path)):
-                sub = os.path.join(info.local_path, entry)
-                if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, "metadata.yaml")):
-                    logger.info("dm_sdk: bag_id=%s → local(sub)=%s", bag_id, sub)
-                    return sub
-        
-        # 2. 本地不可用 → OSS 下载
-        if info.oss_path:
-            from app.services.frame_extractor import _download_bag_from_oss
-            logger.info("dm_sdk: bag_id=%s → downloading from OSS: %s", bag_id, info.oss_path)
-            local_dir = _download_bag_from_oss(info.oss_path, f"stream_{bag_id}", bag_id)
-            if local_dir:
-                logger.info("dm_sdk: bag_id=%s → downloaded to %s", bag_id, local_dir)
-                return local_dir
-        
-        logger.warning("dm_sdk: bag_id=%s → no local path and no OSS path", bag_id)
-        return ""
-    except Exception as exc:
-        logger.warning("dm_sdk resolve failed for bag_id=%s: %s", bag_id, exc)
-        return ""
+    bag_path 可能是:
+    - 直接包含 bag.bag 的目录
+    - 包含子目录的父目录（子目录里有 bag.bag）
+    - bag.bag 文件本身
 
-
-def _resolve_rosbag_path(bag_path: str) -> str:
-    """解析 rosbag 路径。
-    
-    优先级：
-    1. bag_path 直接就是 bag.bag 文件
-    2. bag_path 目录下有 bag.bag
-    3. bag_path 子目录里有 bag.bag
-    4. 通过 dm_sdk 查询 bag_id → rosbag OSS 路径 → 本地挂载或下载
+    Returns: bag.bag 的完整路径，或 None
     """
     if os.path.isfile(bag_path):
         return bag_path
@@ -167,16 +107,81 @@ def _resolve_rosbag_path(bag_path: str) -> str:
             if os.path.isdir(sub):
                 candidate = os.path.join(sub, "bag.bag")
                 if os.path.isfile(candidate):
-                    logger.info("Resolved rosbag: %s -> %s", bag_path, candidate)
+                    logger.info("Found bag.bag in subdirectory: %s", candidate)
                     return candidate
-    
-    # 本地没有 bag.bag → 尝试 dm_sdk
-    bag_id = _extract_bag_id_from_path(bag_path)
+    return None
+
+
+def _extract_bag_id_from_input(input_str: str) -> Optional[str]:
+    """从输入字符串中提取 bag_id（纯字母数字，长度 > 10）。"""
+    if not input_str:
+        return None
+    if "/" not in input_str and len(input_str) > 10 and re.match(r"^[a-zA-Z0-9]+$", input_str):
+        return input_str
+    basename = os.path.basename(input_str.rstrip("/"))
+    if len(basename) > 10 and re.match(r"^[a-zA-Z0-9]+$", basename):
+        return basename
+    if basename.endswith(".db") and len(basename) > 14:
+        return basename[:-3]
+    return None
+
+
+def _resolve_rosbag_for_stream(bag_path: str) -> str:
+    """为视频流解析 rosbag 路径。
+
+    流程：
+    1. bag_path 里直接有 bag.bag → 用它
+    2. bag_path 看起来是 bag_id → dm_sdk 查 rosbag 路径
+    3. 都不行 → 原样返回（让 stream_worker 报错）
+
+    注意：前端现在应该传 rosbag_path（从 get_bag_info 返回的），
+    此函数仅作为兜底，处理旧前端或 SQL 可视化按钮的路径解析。
+    """
+    # 1. 直接找到 bag.bag
+    bag_file = _find_bag_file(bag_path)
+    if bag_file:
+        return bag_file
+
+    # 2. 尝试 dm_sdk 解析 rosbag 路径
+    bag_id = _extract_bag_id_from_input(bag_path)
     if bag_id:
-        dm_path = _resolve_rosbag_via_dm(bag_id)
-        if dm_path:
-            return dm_path
-    
+        try:
+            from tools.rosbag_path_resolver import RosbagPathResolver
+
+            token = settings.DM_ACCESS_TOKEN
+            if not token:
+                logger.warning("DM_ACCESS_TOKEN not configured")
+                return bag_path
+
+            resolver = RosbagPathResolver(
+                access_token=token,
+                table=settings.DM_PROD_TABLE,
+                oss_mount_map=settings.OSS_MOUNT_MAP,
+            )
+            info = resolver.resolve(bag_id)
+
+            # 检查本地挂载路径
+            if info.local_path and os.path.exists(info.local_path):
+                local_bag = _find_bag_file(info.local_path)
+                if local_bag:
+                    logger.info("dm_sdk: bag_id=%s → rosbag=%s", bag_id, local_bag)
+                    return local_bag
+
+            # 本地不可用 → OSS 下载
+            if info.oss_path:
+                from app.services.frame_extractor import _download_bag_from_oss
+                logger.info("dm_sdk: bag_id=%s → downloading rosbag from OSS: %s", bag_id, info.oss_path)
+                local_dir = _download_bag_from_oss(info.oss_path, f"stream_{bag_id}", bag_id)
+                if local_dir:
+                    local_bag = _find_bag_file(local_dir)
+                    if local_bag:
+                        logger.info("dm_sdk: bag_id=%s → downloaded rosbag=%s", bag_id, local_bag)
+                        return local_bag
+
+            logger.warning("dm_sdk: bag_id=%s → rosbag not found", bag_id)
+        except Exception as exc:
+            logger.warning("dm_sdk resolve rosbag failed for bag_id=%s: %s", bag_id, exc)
+
     return bag_path
 
 
@@ -184,12 +189,11 @@ def _spawn_stream_worker(mode, bag_path, topic, start_ts, end_ts, fps):
     """
     启动 stream_worker.py 子进程，返回 Popen 对象。
 
-    子进程负责 gsbag 读帧 + ffmpeg 编码，fMP4 chunks 写 stdout。
-    父进程从 process.stdout 读取并通过 StreamingResponse 转发给浏览器。
-    客户端断开后，父进程 kill 子进程，OS 回收所有资源（包括 gsbag 全局锁）。
+    bag_path 应该是 rosbag 路径（含 bag.bag），
+    如果不是，会通过 _resolve_rosbag_for_stream 兜底解析。
     """
-    # 自动解析 rosbag 路径（em bin 目录 -> 子目录中的 bag.bag）
-    resolved_path = _resolve_rosbag_path(bag_path)
+    resolved_path = _resolve_rosbag_for_stream(bag_path)
+
     cmd = [sys.executable, _STREAM_WORKER_SCRIPT,
            "--mode", mode,
            "--bag-path", resolved_path,
@@ -261,7 +265,7 @@ def _kill_worker(process, timeout=3):
 @router.get("/stream-hevc")
 async def stream_hevc(
     request: Request,
-    bag_path: str = Query(..., description="Bag path"),
+    bag_path: str = Query(..., description="Rosbag path (should contain bag.bag)"),
     topic: str = Query(..., description="Camera topic"),
     start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
     end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
@@ -269,10 +273,8 @@ async def stream_hevc(
 ):
     """Stream HEVC remuxed to fMP4 for MSE playback.
 
-    进程隔离架构：通过 subprocess 启动 stream_worker.py，
-    gsbag 读帧 + ffmpeg 编码在子进程中执行。
-    客户端断开后 kill 子进程，OS 回收所有资源（fd/mmap/gsbag 全局锁），
-    彻底解决锁不释放导致下次请求卡死的问题。
+    bag_path 应该是 rosbag 路径（从 get_bag_info 返回的 rosbag_path 字段），
+    如果没有 bag.bag，会自动通过 dm_sdk 解析 rosbag 路径作为兜底。
     """
     logger.info(
         "Starting HEVC stream: bag=%s topic=%s range=[%s, %s]",
@@ -317,7 +319,7 @@ async def stream_hevc(
 @router.get("/stream-h264")
 async def stream_h264(
     request: Request,
-    bag_path: str = Query(..., description="Bag path"),
+    bag_path: str = Query(..., description="Rosbag path (should contain bag.bag)"),
     topic: str = Query(..., description="Camera topic"),
     start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
     end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
@@ -371,7 +373,12 @@ DEFAULT_CAMERA_TOPIC = "/gac/cam/ft30_encoded"
 
 
 def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
-    """后台任务：逐条处理 clips"""
+    """后台任务：逐条处理 clips
+
+    入口2（SQL结果可视化）：bag_id → dm_sdk 查 rosbag 路径 → 抽帧
+    这部分逻辑和旧 dsw 一致，使用 frame_extractor 中已有的
+    _resolve_bag_path_via_dm / _resolve_bag_path_local / _download_bag_from_oss。
+    """
     import time
     update_batch_status(task_id, "processing", "Starting batch extraction")
 
@@ -386,7 +393,7 @@ def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
         update_batch_clip(task_id, idx, clip_result)
 
         try:
-            # 1. 解析 bag 路径
+            # 1. 解析 bag 路径（rosbag 路径，用于 camera）
             bag_path = None
             oss_path = None
 
@@ -417,14 +424,14 @@ def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
                 update_batch_clip(task_id, idx, clip_result)
                 continue
 
-            # 2. 确定 camera topic
+            # 3. 确定 camera topic
             topic = clip.topic
             if not topic:
                 topic = _find_default_camera_topic(bag_path)
             if not topic:
                 topic = DEFAULT_CAMERA_TOPIC
 
-            # 3. 抽帧
+            # 4. 抽帧
             clip_output_dir = os.path.join(FRAME_OUTPUT_DIR, task_id, f"clip_{idx:03d}")
             frame_paths = extract_frames_from_bag(
                 bag_path=bag_path,
@@ -437,7 +444,7 @@ def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:
                 task_id=f"{task_id}/clip{idx}",
             )
 
-            # 4. 生成帧下载 URL
+            # 5. 生成帧下载 URL
             frame_urls = []
             for fi, fpath in enumerate(frame_paths):
                 fname = os.path.basename(fpath)
