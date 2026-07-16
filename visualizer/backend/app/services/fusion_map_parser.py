@@ -423,12 +423,17 @@ def get_fusion_map_info(bag_path: str) -> Dict:
             _get_offsets(bin_path)
             _get_ts_ns_index(bin_path)
 
+        # 获取首帧时间戳（用于前端显示相对时间）
+        ts_index = _get_ts_ns_index(bin_path) if count > 0 else []
+        first_ts_ns = ts_index[0] if ts_index else 0
+
         return {
             'exists': True,
             'format': 'PB01' if magic == b'PB01' else 'unknown',
             'total_frames': count,
             'file_size_mb': round(file_size / 1024 / 1024, 1),
             'bin_path': bin_path,
+            'first_ts_ns': first_ts_ns,
         }
     except Exception as e:
         return {'exists': False, 'error': str(e)}
