@@ -4,6 +4,18 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+/**
+ * BEV坐标系 → Three.js 映射:
+ *   vehicle frame: x=纵向(前), y=横向(左正右负)
+ *   Three.js (camera up=-z):  screen_up = -z = 前方, screen_right = +x
+ *   映射: Three.js_x = -veh_y,  Three.js_z = -veh_x
+ *   heading: rotation.y = π + heading (heading=0 → 前方 → -z → 屏幕上方)
+ */
+function vehToThree(vx, vy) {
+  // veh frame (x=forward, y=lateral) → Three.js (x=right, z=forward→-z=up)
+  return [-(vy || 0), -(vx || 0)];
+}
+
 export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
@@ -17,10 +29,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const [frameStats, setFrameStats] = useState(null);
 
   // ── 用 ref 追踪播放状态，避免 React stale closure ──
-  const playIdxRef = useRef(0);        // 播放时当前帧索引
+  const playIdxRef = useRef(0);
   const playTimerRef = useRef(null);
   const lastTsRef = useRef(null);
-  const playingRef = useRef(false);     // 和 playing state 同步的 ref
+  const playingRef = useRef(false);
 
   const threeRef = useRef({
     scene: null, camera: null, renderer: null, controls: null, groups: {}, animId: null,
@@ -40,7 +52,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a1a);
 
-    // 正交相机（和UBM一致）
+    // 正交相机 — -z = screen UP = 前方
     const aspect = w / h;
     const viewSize = 40;
     const camera = new THREE.OrthographicCamera(
@@ -48,7 +60,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     );
     camera.position.set(0, 100, 0);
     camera.lookAt(0, 0, 0);
-    camera.up.set(0, 0, -1);
+    camera.up.set(0, 0, -1);  // -z = screen up = forward
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(w, h);
@@ -63,17 +75,60 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     controls.maxDistance = 800;
     controls.update();
 
+    // 网格 — x轴(横向), z轴(纵向)
     const grid = new THREE.GridHelper(200, 100, 0x333355, 0x222244);
     scene.add(grid);
+
+    // 坐标轴 — 短轴标记原点
     const axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
+
+    // ── 自车标记 ──
+    // 地面圆环 (醒目定位)
+    const ringGeo = new THREE.RingGeometry(2.5, 3, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;  // 放平到 xz 平面
+    ring.position.set(0, 0.02, 0);
+    scene.add(ring);
+
+    // 自车车身 (蓝色 box)
+    const carGeo = new THREE.BoxGeometry(2, 1.5, 4.5);  // w=2, h=1.5, l=4.5
+    const carMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.85 });
+    const carMesh = new THREE.Mesh(carGeo, carMat);
+    carMesh.position.set(0, 0.75, 0);
+    carMesh.rotation.y = Math.PI;  // heading=0 → 前方 → -z → rotation.y = π
+    scene.add(carMesh);
+
+    // 自车边框
+    const carEdges = new THREE.EdgesGeometry(carGeo);
+    const carLineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+    const carWireframe = new THREE.LineSegments(carEdges, carLineMat);
+    carWireframe.position.copy(carMesh.position);
+    carWireframe.rotation.copy(carMesh.rotation);
+    scene.add(carWireframe);
+
+    // 前方箭头 (指向 -z = screen up = 前方)
+    const arrowGeo = new THREE.ConeGeometry(0.4, 1.5, 8);
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
+    const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+    arrow.position.set(0, 0.75, -3);  // 车头前方3m处
+    arrow.rotation.x = -Math.PI / 2;  // 锥体尖端朝 -z (screen up)
+    scene.add(arrow);
+
+    // "FWD" 文字用第二个小箭头标记
+    const fwdGeo = new THREE.ConeGeometry(0.2, 0.8, 6);
+    const fwdMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.7 });
+    const fwdArrow = new THREE.Mesh(fwdGeo, fwdMat);
+    fwdArrow.position.set(0, 0.75, -6);
+    fwdArrow.rotation.x = -Math.PI / 2;
+    scene.add(fwdArrow);
 
     const groups = {
       obstacles: new THREE.Group(),
       paths: new THREE.Group(),
       boundaries: new THREE.Group(),
       lanes: new THREE.Group(),
-      vehicle: new THREE.Group(),
     };
     Object.values(groups).forEach(g => scene.add(g));
 
@@ -133,7 +188,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     setIndexingMsg('');
     setPlaying(false);
     playingRef.current = false;
-    setFrameStats(null); // 清空旧帧统计
+    setFrameStats(null);
     try {
       const res = await authFetch(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`);
       if (!res.ok) throw new Error('Failed to load fusion map info');
@@ -198,7 +253,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       }
       updateSceneInternal(result.data);
       setCurrentFrame(idx);
-      // 更新帧统计
       const d = result.data;
       setFrameStats({
         obs: (d.obstacles || []).length,
@@ -208,7 +262,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         ts_ns: d.timestamp_ns,
         veh: d.veh_loc ? `(${d.veh_loc.x.toFixed(1)},${d.veh_loc.y.toFixed(1)})` : 'None',
       });
-      return d; // 返回帧数据供播放逻辑使用
+      return d;
     } catch (e) {
       setError(e.message);
       return null;
@@ -219,15 +273,15 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     return await loadFrameDirect(idx);
   }, [bagPath, authFetch]);
 
-  // ── 更新 Three.js 场景 ──
+  // ── 更新 Three.js 场景 (动态数据: obstacles, boundaries, lanes, paths) ──
   const updateSceneInternal = (data) => {
     if (!threeRef.current.scene) {
       pendingDataRef.current = data;
       return;
     }
-    const { groups, camera, controls } = threeRef.current;
+    const { groups } = threeRef.current;
 
-    // 清除旧对象
+    // 清除旧动态对象 (自车标记是静态的,不在这里清除)
     Object.values(groups).forEach(g => {
       while (g.children.length > 0) {
         const child = g.children[0];
@@ -245,8 +299,9 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     if (!data) return;
 
-    // 障碍物
+    // 障碍物 — vehToThree: x=forward→-z, y=lateral→-y→+x
     (data.obstacles || []).forEach(obs => {
+      const [tx, tz] = vehToThree(obs.x, obs.y);
       const color = obs.movable ? 0xff6b6b : 0xffa726;
       const w = Math.max(0.1, obs.w || 1);
       const h = Math.max(0.1, obs.h || 1);
@@ -254,10 +309,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       const geo = new THREE.BoxGeometry(w, h, l);
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(obs.x || 0, h / 2, obs.y || 0);
-      mesh.rotation.y = obs.heading || 0;
+      mesh.position.set(tx, h / 2, tz);
+      mesh.rotation.y = Math.PI + (obs.heading || 0);  // heading=0 → forward → -z
       groups.obstacles.add(mesh);
 
+      // 边框
       const edges = new THREE.EdgesGeometry(geo);
       const lineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 });
       const wireframe = new THREE.LineSegments(edges, lineMat);
@@ -268,7 +324,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     // 路径
     (data.paths || []).forEach(path => {
-      const pts = (path.points || []).map(p => new THREE.Vector3(p[0], 0.1, p[1]));
+      const pts = (path.points || []).map(p => {
+        const [tx, tz] = vehToThree(p[0], p[1]);
+        return new THREE.Vector3(tx, 0.1, tz);
+      });
       if (pts.length < 2) return;
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const color = path.type === 'model' ? 0x4fc3f7 : 0x66bb6a;
@@ -278,7 +337,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     // 车道
     (data.lanes || []).forEach(lane => {
-      const pts = (lane.points || []).map(p => new THREE.Vector3(p[0], 0.05, p[1]));
+      const pts = (lane.points || []).map(p => {
+        const [tx, tz] = vehToThree(p[0], p[1]);
+        return new THREE.Vector3(tx, 0.05, tz);
+      });
       if (pts.length < 2) return;
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const color = lane.source === 'rule' ? 0x81d4fa : 0xffff4c;
@@ -288,41 +350,16 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     // 边界
     (data.boundaries || []).forEach(bnd => {
-      const pts = (bnd.points || []).map(p => new THREE.Vector3(p[0], 0.05, p[1]));
+      const pts = (bnd.points || []).map(p => {
+        const [tx, tz] = vehToThree(p[0], p[1]);
+        return new THREE.Vector3(tx, 0.05, tz);
+      });
       if (pts.length < 2) return;
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const color = bnd.source === 'stopline' ? 0xff5252 : (bnd.source === 'rule' ? 0x90caf9 : 0xffffff);
       const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 });
       groups.boundaries.add(new THREE.Line(geo, mat));
     });
-
-    // 车辆位置
-    const vl = data.veh_loc;
-    if (vl) {
-      const carGeo = new THREE.BoxGeometry(2, 1.5, 4.5);
-      const carMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.8 });
-      const carMesh = new THREE.Mesh(carGeo, carMat);
-      carMesh.position.set(vl.x || 0, 0.75, vl.y || 0);
-      if (vl.qw !== undefined) {
-        carMesh.quaternion.set(vl.qx || 0, vl.qy || 0, vl.qz || 0, vl.qw || 1);
-      }
-      groups.vehicle.add(carMesh);
-
-      // 前方箭头
-      const arrowGeo = new THREE.ConeGeometry(0.3, 1, 8);
-      const arrowMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7 });
-      const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-      arrow.position.set(vl.x || 0, 0.75, vl.y || 0);
-      arrow.rotation.x = -Math.PI / 2;
-      if (vl.qw !== undefined) {
-        const q = new THREE.Quaternion(vl.qx || 0, vl.qy || 0, vl.qz || 0, vl.qw || 1);
-        arrow.quaternion.copy(q);
-        arrow.rotateX(-Math.PI / 2);
-      }
-      groups.vehicle.add(arrow);
-    }
-
-    // 注意：不在这里移动相机，让用户自由控制视角
   };
 
   // ── 播放逻辑（用 ref 避免 stale closure）──
@@ -339,14 +376,13 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
 
     const frameData = await loadFrame(nextIdx);
-    if (!frameData || !playingRef.current) return; // 加载失败或已停止
+    if (!frameData || !playingRef.current) return;
 
     playIdxRef.current = nextIdx;
 
-    // 基于帧间真实时间差控制延迟
     const curTs = frameData.timestamp_ns;
     const prevTs = lastTsRef.current;
-    let delay = 100; // 默认100ms
+    let delay = 100;
     if (prevTs && curTs > prevTs) {
       delay = Math.max(10, (curTs - prevTs) / 1e6);
     }
@@ -360,7 +396,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     playingRef.current = playing;
 
     if (playing) {
-      // 从当前帧开始播
       playIdxRef.current = currentFrame;
       lastTsRef.current = null;
       playNextFrame();
@@ -377,7 +412,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         playTimerRef.current = null;
       }
     };
-  }, [playing]); // 只在 playing 变化时触发
+  }, [playing]);
 
   // ── bag 路径变化时自动加载 ──
   useEffect(() => {
@@ -394,7 +429,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const segmentFrameCount = playEnd - startFrameIdx + 1;
   const showCanvas = bagPath;
 
-  // 时间戳显示：用相对时间（从bag起始算）
+  // 相对时间显示
   const baseTs = info?.first_ts_ns || 0;
   const tsSec = frameStats?.ts_ns ? ((frameStats.ts_ns - baseTs) / 1e9).toFixed(3) : '--';
 
@@ -408,7 +443,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         </div>
       )}
       <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
-        鼠标左键旋转 · 右键平移 · 滚轮缩放
+        🔵 自车(蓝色box+箭头=前方) · 红box=动态障碍 · 橙box=静态障碍 · 黄线=车道 · 白线=边界 · 绿线=路径
       </div>
       {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
       {loading && <div style={{ color: '#1890ff', marginBottom: 10 }}>Loading fusion map info...</div>}
@@ -422,7 +457,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
             ref={canvasRef}
             style={{ width: '100%', height: 450, background: '#0a0a1a', borderRadius: 4, marginTop: 12, display: 'block' }}
           />
-          {/* 帧数据统计 */}
           {frameStats && (
             <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#666', marginTop: 4, padding: '4px 8px', background: '#f5f5f5', borderRadius: 3 }}>
               t={tsSec}s · Obs:{frameStats.obs} Bnd:{frameStats.bnd} Lane:{frameStats.lane} Path:{frameStats.path} · veh={frameStats.veh}
@@ -443,8 +477,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
               <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
                 {isSegment
                   ? `片段帧: ${currentFrame - startFrameIdx + 1} / ${segmentFrameCount}`
-                  : `Frame: ${currentFrame + 1} / ${totalFrames}`
-                }
+                  : `Frame: ${currentFrame + 1} / ${totalFrames}`}
               </span>
               <input
                 type="range"
@@ -454,7 +487,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
                 onChange={(e) => {
                   const idx = parseInt(e.target.value);
                   setCurrentFrame(idx);
-                  playIdxRef.current = idx; // 同步ref
+                  playIdxRef.current = idx;
                   loadFrame(idx);
                 }}
                 style={{ flex: 1, cursor: 'pointer' }}
