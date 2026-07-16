@@ -180,6 +180,21 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     return () => window.removeEventListener('resize', handleResize);
   }, [info]);
 
+  // ── 带超时的 fetch ──
+  const fetchWithTimeout = useCallback(async (url, timeoutMs = 30000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await authFetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      if (e.name === 'AbortError') throw new Error(`请求超时(${timeoutMs / 1000}s): ${url.split('?')[0]}`);
+      throw e;
+    }
+  }, [authFetch]);
+
   // ── 加载 fusion_map 基本信息 + 帧范围 ──
   const loadInfo = useCallback(async () => {
     if (!bagPath) return;
@@ -190,7 +205,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     playingRef.current = false;
     setFrameStats(null);
     try {
-      const res = await authFetch(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`, 30000);
       if (!res.ok) throw new Error(`fusion-map-info API 返回 ${res.status}`);
       const data = await res.json();
       setInfo(data);
@@ -206,7 +221,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
             if (hasStart) params.set('start_ts_ns', String(startTsNs));
             if (hasEnd) params.set('end_ts_ns', String(endTsNs));
 
-            const rangeRes = await authFetch(`${API_BASE}/api/bag/fusion-map-frames-by-ts-range?${params.toString()}`);
+            const rangeRes = await fetchWithTimeout(`${API_BASE}/api/bag/fusion-map-frames-by-ts-range?${params.toString()}`, 30000);
             if (rangeRes.ok) {
               const rangeData = await rangeRes.json();
               if (!rangeData.error) {
@@ -242,13 +257,13 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     } finally {
       setLoading(false);
     }
-  }, [bagPath, authFetch, startTsNs, endTsNs]);
+  }, [bagPath, fetchWithTimeout, startTsNs, endTsNs]);
 
   // ── 加载并渲染单帧 ──
   const loadFrameDirect = async (idx) => {
     if (!bagPath) return;
     try {
-      const res = await authFetch(`${API_BASE}/api/bag/fusion-map-frame?bag_path=${encodeURIComponent(bagPath)}&frame_idx=${idx}`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/bag/fusion-map-frame?bag_path=${encodeURIComponent(bagPath)}&frame_idx=${idx}`, 60000);
       if (!res.ok) throw new Error('Failed to load frame');
       const result = await res.json();
       if (result.error) {
