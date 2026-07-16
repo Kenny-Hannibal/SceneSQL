@@ -4,6 +4,11 @@ from typing import List, Optional, Dict, Any
 
 class BagInfo(BaseModel):
     bag_path: str
+    bag_id: Optional[str] = None
+    em_bin_path: Optional[str] = None       # em bin 本地路径（BEV 3D 用）
+    rosbag_path: Optional[str] = None       # rosbag 本地路径（camera 视频用）
+    rosbag_oss_path: Optional[str] = None   # rosbag OSS 路径（备下载用）
+    em_bin_oss_path: Optional[str] = None   # em bin OSS 路径
     topics: List[Dict]
     fusion_map_topic: Optional[Dict] = None
     duration_sec: float
