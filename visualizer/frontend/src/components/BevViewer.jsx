@@ -191,7 +191,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     setFrameStats(null);
     try {
       const res = await authFetch(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`);
-      if (!res.ok) throw new Error('Failed to load fusion map info');
+      if (!res.ok) throw new Error(`fusion-map-info API 返回 ${res.status}`);
       const data = await res.json();
       setInfo(data);
 
@@ -231,7 +231,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         setEndFrameIdx(data.total_frames - 1);
         setCurrentFrame(0);
         playIdxRef.current = 0;
-        await loadFrameDirect(0);
+        try {
+          await loadFrameDirect(0);
+        } catch (e) {
+          setError(`首帧加载失败: ${e.message}`);
+        }
       }
     } catch (e) {
       setError(e.message);
@@ -443,7 +447,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         🔵 自车(w1.9×l4.9m, 蓝色box+箭头=前方) · 红box=动态障碍 · 橙box=静态障碍 · 黄线=车道 · 白线=边界 · 绿线=路径 · 10fps
       </div>
       {error && <div style={{ color: 'red', marginBottom: 10 }}>{error}</div>}
-      {loading && <div style={{ color: '#1890ff', marginBottom: 10 }}>Loading fusion map info...</div>}
+      {loading && <div style={{ color: '#1890ff', marginBottom: 10 }}>⏳ Loading fusion map info for: {bagPath}...</div>}
       {indexingMsg && <div style={{ color: '#d48806', marginBottom: 10 }}>⏳ {indexingMsg}</div>}
       {info && !info.exists && (
         <div style={{ color: '#999', padding: '20px 0' }}>此 bag 无 fusion_map_plus 数据</div>
