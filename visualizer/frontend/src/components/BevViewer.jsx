@@ -4,17 +4,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
-/**
- * 3D BEV 可视化组件
- * 使用 Three.js PerspectiveCamera + OrbitControls 渲染 EFusionMap 数据
- * 默认俯视（BEV），可鼠标拖拽旋转到任意3D角度
- *
- * Props:
- *   bagPath: string — bag 目录路径
- *   authFetch: function — 带认证的 fetch
- *   startTsNs: number | null — 起始时间戳（纳秒），SQL结果锚定用
- *   endTsNs: number | null — 结束时间戳（纳秒），播放终止用
- */
 export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
@@ -25,8 +14,8 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const [loading, setLoading] = useState(false);
   const [indexingMsg, setIndexingMsg] = useState('');
   const [error, setError] = useState('');
+  const [frameStats, setFrameStats] = useState(null); // {obs, bnd, lane, path, ts_ns}
 
-  // Three.js 对象引用
   const threeRef = useRef({
     scene: null,
     camera: null,
@@ -36,12 +25,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     animId: null,
   });
 
-  // 缓存最新帧数据，Three.js 就绪后立即渲染
   const pendingDataRef = useRef(null);
-  // 标记Three.js是否已初始化
   const threeInitializedRef = useRef(false);
 
-  // ── 初始化 Three.js 场景（canvas DOM就绪后调用）──
+  // ── 初始化 Three.js 场景 ──
   const initThreeJS = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || threeInitializedRef.current) return;
@@ -53,9 +40,15 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a1a);
 
-    const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 5000);
-    camera.position.set(0, 100, 0.01);
+    // 正交相机（和UBM一致，更适合BEV俯视）
+    const aspect = w / h;
+    const viewSize = 40;
+    const camera = new THREE.OrthographicCamera(
+      -viewSize * aspect, viewSize * aspect, viewSize, -viewSize, 0.1, 2000
+    );
+    camera.position.set(0, 100, 0);
     camera.lookAt(0, 0, 0);
+    camera.up.set(0, 0, -1);
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(w, h);
@@ -73,7 +66,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     const grid = new THREE.GridHelper(200, 100, 0x333355, 0x222244);
     scene.add(grid);
 
-    const axesHelper = new THREE.AxesHelper(3);
+    const axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
 
     const groups = {
@@ -87,7 +80,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     threeRef.current = { scene, camera, renderer, controls, groups, animId: null };
 
-    // 渲染循环
     const animate = () => {
       threeRef.current.animId = requestAnimationFrame(animate);
       controls.update();
@@ -95,20 +87,18 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     };
     animate();
 
-    // Three.js 就绪后，渲染之前缓存的数据
     if (pendingDataRef.current) {
       updateSceneInternal(pendingDataRef.current);
       pendingDataRef.current = null;
     }
   }, []);
 
-  // ── 当canvas出现时初始化Three.js ──
+  // ── canvas出现时初始化Three.js ──
   useEffect(() => {
-    // canvas可能还没渲染（条件渲染），用MutationObserver或setTimeout检测
     if (canvasRef.current) {
       initThreeJS();
     }
-  }, [info, initThreeJS]); // info变化时检查canvas是否出现
+  }, [info, initThreeJS]);
 
   // ── 调整 canvas 大小 ──
   useEffect(() => {
@@ -119,7 +109,16 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       const w = canvas.clientWidth || 800;
       const h = canvas.clientHeight || 450;
       renderer.setSize(w, h);
-      camera.aspect = w / h;
+      if (camera.isOrthographicCamera) {
+        const aspect = w / h;
+        const viewSize = 40;
+        camera.left = -viewSize * aspect;
+        camera.right = viewSize * aspect;
+        camera.top = viewSize;
+        camera.bottom = -viewSize;
+      } else {
+        camera.aspect = w / h;
+      }
       camera.updateProjectionMatrix();
     };
     window.addEventListener('resize', handleResize);
@@ -195,6 +194,16 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       }
       updateSceneInternal(result.data);
       setCurrentFrame(idx);
+      // 更新帧统计
+      const d = result.data;
+      setFrameStats({
+        obs: (d.obstacles || []).length,
+        bnd: (d.boundaries || []).length,
+        lane: (d.lanes || []).length,
+        path: (d.paths || []).length,
+        ts_ns: d.timestamp_ns,
+        veh: d.veh_loc ? `(${d.veh_loc.x.toFixed(1)},${d.veh_loc.y.toFixed(1)})` : 'None',
+      });
     } catch (e) {
       setError(e.message);
     }
@@ -230,7 +239,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     if (!data) return;
 
-    // 障碍物（3D 立方体）
+    // 障碍物
     (data.obstacles || []).forEach(obs => {
       const color = obs.movable ? 0xff6b6b : 0xffa726;
       const w = Math.max(0.1, obs.w || 1);
@@ -293,45 +302,68 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       }
       groups.vehicle.add(carMesh);
 
-      const carEdges = new THREE.EdgesGeometry(carGeo);
-      const carLineMat = new THREE.LineBasicMaterial({ color: 0x4fc3f7 });
-      const carWireframe = new THREE.LineSegments(carEdges, carLineMat);
-      carWireframe.position.copy(carMesh.position);
-      carWireframe.quaternion.copy(carMesh.quaternion);
-      groups.vehicle.add(carWireframe);
+      // 前方箭头（和UBM一致）
+      const arrowGeo = new THREE.ConeGeometry(0.3, 1, 8);
+      const arrowMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7 });
+      const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+      arrow.position.set(vl.x || 0, 0.75, vl.y || 0);
+      arrow.rotation.x = -Math.PI / 2;
+      if (vl.qw !== undefined) {
+        const q = new THREE.Quaternion(vl.qx || 0, vl.qy || 0, vl.qz || 0, vl.qw || 1);
+        arrow.quaternion.copy(q);
+        arrow.rotateX(-Math.PI / 2);
+      }
+      groups.vehicle.add(arrow);
 
-      // 相机跟随车辆
-      const cx = vl.x || 0;
-      const cy = vl.y || 0;
-      camera.position.set(cx, 100, cy + 0.01);
-      camera.lookAt(cx, 0, cy);
-      if (controls) {
-        controls.target.set(cx, 0, cy);
-        controls.update();
+      // 正交相机跟随车辆
+      if (camera.isOrthographicCamera) {
+        camera.position.set(vl.x || 0, 100, vl.y || 0);
+        camera.lookAt(vl.x || 0, 0, vl.y || 0);
+        if (controls) {
+          controls.target.set(vl.x || 0, 0, vl.y || 0);
+          controls.update();
+        }
       }
     }
   };
 
-  // ── 播放/暂停动画 ──
-  const totalFrames = info?.total_frames || 0;
-  const playEnd = endFrameIdx != null ? endFrameIdx : totalFrames - 1;
-  const segmentFrameCount = playEnd - startFrameIdx + 1;
+  // ── 播放/暂停（基于真实时间差控制帧率，和UBM一致）──
+  const playTimerRef = useRef(null);
+  const lastTsRef = useRef(null);
+
+  const playNextFrame = useCallback(async () => {
+    const nextIdx = currentFrame + 1;
+    if (nextIdx > (endFrameIdx ?? (info?.total_frames - 1 || 0))) {
+      setPlaying(false);
+      return;
+    }
+    await loadFrame(nextIdx);
+    // 根据帧间时间差计算下一帧延迟
+    if (frameStats?.ts_ns && lastTsRef.current && frameStats.ts_ns > lastTsRef.current) {
+      const dtMs = (frameStats.ts_ns - lastTsRef.current) / 1e6;
+      playTimerRef.current = setTimeout(playNextFrame, Math.max(10, dtMs));
+    } else {
+      playTimerRef.current = setTimeout(playNextFrame, 100); // 默认100ms
+    }
+    lastTsRef.current = frameStats?.ts_ns || null;
+  }, [currentFrame, endFrameIdx, info, frameStats, loadFrame]);
 
   useEffect(() => {
-    if (!playing || !info || info.total_frames <= 0) return;
-    const interval = setInterval(() => {
-      setCurrentFrame(prev => {
-        const next = prev + 1;
-        if (next > playEnd) {
-          setPlaying(false);
-          return prev;
-        }
-        loadFrame(next);
-        return next;
-      });
-    }, 200);
-    return () => clearInterval(interval);
-  }, [playing, info, playEnd, loadFrame]);
+    if (playing) {
+      lastTsRef.current = null;
+      playNextFrame();
+    } else {
+      if (playTimerRef.current) {
+        clearTimeout(playTimerRef.current);
+        playTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (playTimerRef.current) {
+        clearTimeout(playTimerRef.current);
+      }
+    };
+  }, [playing]);
 
   // ── bag 路径变化时自动加载 ──
   useEffect(() => {
@@ -340,13 +372,16 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   }, [bagPath, loadInfo]);
 
-  // ── 片段信息显示 ──
   const isSegment = (startTsNs != null && startTsNs > 0) || (endTsNs != null && endTsNs > 0);
   const segmentStartSec = startTsNs != null ? (startTsNs / 1e9).toFixed(2) : null;
   const segmentEndSec = endTsNs != null ? (endTsNs / 1e9).toFixed(2) : null;
-
-  // canvas始终渲染（不再是条件渲染），info加载前显示placeholder
+  const totalFrames = info?.total_frames || 0;
+  const playEnd = endFrameIdx != null ? endFrameIdx : totalFrames - 1;
+  const segmentFrameCount = playEnd - startFrameIdx + 1;
   const showCanvas = bagPath;
+
+  // 时间戳显示
+  const tsSec = frameStats?.ts_ns ? (frameStats.ts_ns / 1e9).toFixed(3) : '--';
 
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -372,8 +407,14 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
             ref={canvasRef}
             style={{ width: '100%', height: 450, background: '#0a0a1a', borderRadius: 4, marginTop: 12, display: 'block' }}
           />
+          {/* 帧数据统计 */}
+          {frameStats && (
+            <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#666', marginTop: 4, padding: '4px 8px', background: '#f5f5f5', borderRadius: 3 }}>
+              ts={tsSec}s · Obs:{frameStats.obs} Bnd:{frameStats.bnd} Lane:{frameStats.lane} Path:{frameStats.path} · veh={frameStats.veh}
+            </div>
+          )}
           {info && info.exists && (
-            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <button
                 onClick={() => setPlaying(!playing)}
                 disabled={!!indexingMsg}
