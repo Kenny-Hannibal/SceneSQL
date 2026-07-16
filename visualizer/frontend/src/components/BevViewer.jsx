@@ -14,17 +14,17 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const [loading, setLoading] = useState(false);
   const [indexingMsg, setIndexingMsg] = useState('');
   const [error, setError] = useState('');
-  const [frameStats, setFrameStats] = useState(null); // {obs, bnd, lane, path, ts_ns}
+  const [frameStats, setFrameStats] = useState(null);
+
+  // ── 用 ref 追踪播放状态，避免 React stale closure ──
+  const playIdxRef = useRef(0);        // 播放时当前帧索引
+  const playTimerRef = useRef(null);
+  const lastTsRef = useRef(null);
+  const playingRef = useRef(false);     // 和 playing state 同步的 ref
 
   const threeRef = useRef({
-    scene: null,
-    camera: null,
-    renderer: null,
-    controls: null,
-    groups: {},
-    animId: null,
+    scene: null, camera: null, renderer: null, controls: null, groups: {}, animId: null,
   });
-
   const pendingDataRef = useRef(null);
   const threeInitializedRef = useRef(false);
 
@@ -40,7 +40,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a1a);
 
-    // 正交相机（和UBM一致，更适合BEV俯视）
+    // 正交相机（和UBM一致）
     const aspect = w / h;
     const viewSize = 40;
     const camera = new THREE.OrthographicCamera(
@@ -65,7 +65,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
     const grid = new THREE.GridHelper(200, 100, 0x333355, 0x222244);
     scene.add(grid);
-
     const axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
 
@@ -132,6 +131,9 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     setLoading(true);
     setError('');
     setIndexingMsg('');
+    setPlaying(false);
+    playingRef.current = false;
+    setFrameStats(null); // 清空旧帧统计
     try {
       const res = await authFetch(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`);
       if (!res.ok) throw new Error('Failed to load fusion map info');
@@ -158,6 +160,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
                 setStartFrameIdx(sIdx);
                 setEndFrameIdx(eIdx);
                 setCurrentFrame(sIdx);
+                playIdxRef.current = sIdx;
                 await loadFrameDirect(sIdx);
                 setIndexingMsg('');
                 return;
@@ -172,6 +175,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         setStartFrameIdx(0);
         setEndFrameIdx(data.total_frames - 1);
         setCurrentFrame(0);
+        playIdxRef.current = 0;
         await loadFrameDirect(0);
       }
     } catch (e) {
@@ -204,13 +208,15 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         ts_ns: d.timestamp_ns,
         veh: d.veh_loc ? `(${d.veh_loc.x.toFixed(1)},${d.veh_loc.y.toFixed(1)})` : 'None',
       });
+      return d; // 返回帧数据供播放逻辑使用
     } catch (e) {
       setError(e.message);
+      return null;
     }
   };
 
   const loadFrame = useCallback(async (idx) => {
-    await loadFrameDirect(idx);
+    return await loadFrameDirect(idx);
   }, [bagPath, authFetch]);
 
   // ── 更新 Three.js 场景 ──
@@ -302,7 +308,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       }
       groups.vehicle.add(carMesh);
 
-      // 前方箭头（和UBM一致）
+      // 前方箭头
       const arrowGeo = new THREE.ConeGeometry(0.3, 1, 8);
       const arrowMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7 });
       const arrow = new THREE.Mesh(arrowGeo, arrowMat);
@@ -314,42 +320,48 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         arrow.rotateX(-Math.PI / 2);
       }
       groups.vehicle.add(arrow);
-
-      // 正交相机跟随车辆
-      if (camera.isOrthographicCamera) {
-        camera.position.set(vl.x || 0, 100, vl.y || 0);
-        camera.lookAt(vl.x || 0, 0, vl.y || 0);
-        if (controls) {
-          controls.target.set(vl.x || 0, 0, vl.y || 0);
-          controls.update();
-        }
-      }
     }
+
+    // 注意：不在这里移动相机，让用户自由控制视角
   };
 
-  // ── 播放/暂停（基于真实时间差控制帧率，和UBM一致）──
-  const playTimerRef = useRef(null);
-  const lastTsRef = useRef(null);
-
+  // ── 播放逻辑（用 ref 避免 stale closure）──
   const playNextFrame = useCallback(async () => {
-    const nextIdx = currentFrame + 1;
-    if (nextIdx > (endFrameIdx ?? (info?.total_frames - 1 || 0))) {
+    if (!playingRef.current) return;
+
+    const endIdx = endFrameIdx != null ? endFrameIdx : (info?.total_frames - 1 || 0);
+    const nextIdx = playIdxRef.current + 1;
+
+    if (nextIdx > endIdx) {
+      playingRef.current = false;
       setPlaying(false);
       return;
     }
-    await loadFrame(nextIdx);
-    // 根据帧间时间差计算下一帧延迟
-    if (frameStats?.ts_ns && lastTsRef.current && frameStats.ts_ns > lastTsRef.current) {
-      const dtMs = (frameStats.ts_ns - lastTsRef.current) / 1e6;
-      playTimerRef.current = setTimeout(playNextFrame, Math.max(10, dtMs));
-    } else {
-      playTimerRef.current = setTimeout(playNextFrame, 100); // 默认100ms
-    }
-    lastTsRef.current = frameStats?.ts_ns || null;
-  }, [currentFrame, endFrameIdx, info, frameStats, loadFrame]);
 
+    const frameData = await loadFrame(nextIdx);
+    if (!frameData || !playingRef.current) return; // 加载失败或已停止
+
+    playIdxRef.current = nextIdx;
+
+    // 基于帧间真实时间差控制延迟
+    const curTs = frameData.timestamp_ns;
+    const prevTs = lastTsRef.current;
+    let delay = 100; // 默认100ms
+    if (prevTs && curTs > prevTs) {
+      delay = Math.max(10, (curTs - prevTs) / 1e6);
+    }
+    lastTsRef.current = curTs;
+
+    playTimerRef.current = setTimeout(playNextFrame, delay);
+  }, [endFrameIdx, info, loadFrame]);
+
+  // ── 播放/暂停控制 ──
   useEffect(() => {
+    playingRef.current = playing;
+
     if (playing) {
+      // 从当前帧开始播
+      playIdxRef.current = currentFrame;
       lastTsRef.current = null;
       playNextFrame();
     } else {
@@ -358,12 +370,14 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         playTimerRef.current = null;
       }
     }
+
     return () => {
       if (playTimerRef.current) {
         clearTimeout(playTimerRef.current);
+        playTimerRef.current = null;
       }
     };
-  }, [playing]);
+  }, [playing]); // 只在 playing 变化时触发
 
   // ── bag 路径变化时自动加载 ──
   useEffect(() => {
@@ -380,8 +394,9 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const segmentFrameCount = playEnd - startFrameIdx + 1;
   const showCanvas = bagPath;
 
-  // 时间戳显示
-  const tsSec = frameStats?.ts_ns ? (frameStats.ts_ns / 1e9).toFixed(3) : '--';
+  // 时间戳显示：用相对时间（从bag起始算）
+  const baseTs = info?.first_ts_ns || 0;
+  const tsSec = frameStats?.ts_ns ? ((frameStats.ts_ns - baseTs) / 1e9).toFixed(3) : '--';
 
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -410,7 +425,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
           {/* 帧数据统计 */}
           {frameStats && (
             <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#666', marginTop: 4, padding: '4px 8px', background: '#f5f5f5', borderRadius: 3 }}>
-              ts={tsSec}s · Obs:{frameStats.obs} Bnd:{frameStats.bnd} Lane:{frameStats.lane} Path:{frameStats.path} · veh={frameStats.veh}
+              t={tsSec}s · Obs:{frameStats.obs} Bnd:{frameStats.bnd} Lane:{frameStats.lane} Path:{frameStats.path} · veh={frameStats.veh}
             </div>
           )}
           {info && info.exists && (
@@ -439,12 +454,13 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
                 onChange={(e) => {
                   const idx = parseInt(e.target.value);
                   setCurrentFrame(idx);
+                  playIdxRef.current = idx; // 同步ref
                   loadFrame(idx);
                 }}
                 style={{ flex: 1, cursor: 'pointer' }}
               />
               <span style={{ fontSize: 12, color: '#999' }}>
-                {info.file_size_mb}MB · {info.format}
+                {info.file_size_mb?.toFixed(0)}MB · {info.format}
               </span>
             </div>
           )}
