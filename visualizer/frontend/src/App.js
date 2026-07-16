@@ -93,7 +93,7 @@ function App() {
 
 function MainApp({ onLogout }) {
   const [topics, setTopics] = useState([]);
-  const [bagPath, setBagPath] = useState('/root/data/bags/20260124_085515');
+  const [bagPath, setBagPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
@@ -399,13 +399,14 @@ function MainApp({ onLogout }) {
 
       <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <h2>📁 Bag Loader</h2>
+        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>支持 bag_id（如 1002AePBU4WlfnBzNtDbBu202606）或本地 rosbag/em bin 路径</div>
         <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
           <input
             type="text"
             value={bagPath}
             onChange={(e) => setBagPath(e.target.value)}
             style={{ flex: 1, padding: '10px', fontSize: 16, borderRadius: 4, border: '1px solid #ccc' }}
-            placeholder="Enter bag path..."
+            placeholder="输入 bag_id 或本地路径（如 1002AePBU4WlfnBzNtDbBu202606）"
           />
           <button
             onClick={loadBag}

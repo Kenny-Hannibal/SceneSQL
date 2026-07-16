@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import uuid
 import json
@@ -81,8 +82,78 @@ def video_file(task_id: str):
     return FileResponse(video_path, media_type="video/mp4", filename=f"{task_id}.mp4")
 
 
+def _extract_bag_id_from_path(bag_path: str) -> str:
+    """从 bag_path 提取可能的 bag_id（不含 / 的长字符串，或路径最后一段）"""
+    if "/" not in bag_path and len(bag_path) > 10:
+        return bag_path
+    basename = os.path.basename(bag_path.rstrip("/"))
+    if len(basename) > 10 and re.match(r"^[a-zA-Z0-9]+$", basename):
+        return basename
+    if basename.endswith(".db") and len(basename) > 14:
+        return basename[:-3]
+    return ""
+
+
+def _resolve_rosbag_via_dm(bag_id: str) -> str:
+    """通过 dm_sdk 查询 bag_id 对应的原始 rosbag 路径。
+    
+    优先检查本地挂载，如果不可用则通过 ossutil 下载到临时目录。
+    返回包含 metadata.yaml + bag.bag (camera.bag) 的本地目录路径。
+    """
+    try:
+        from tools.rosbag_path_resolver import RosbagPathResolver
+        from app.core.config import settings
+        
+        token = settings.DM_ACCESS_TOKEN
+        if not token:
+            logger.warning("DM_ACCESS_TOKEN not configured")
+            return ""
+        
+        resolver = RosbagPathResolver(
+            access_token=token,
+            table=settings.DM_PROD_TABLE,
+            oss_mount_map=settings.OSS_MOUNT_MAP,
+        )
+        info = resolver.resolve(bag_id)
+        
+        # 1. 检查本地挂载路径
+        if info.local_path and os.path.exists(info.local_path):
+            # 检查是否有 metadata.yaml
+            if os.path.isfile(os.path.join(info.local_path, "metadata.yaml")):
+                logger.info("dm_sdk: bag_id=%s → local=%s", bag_id, info.local_path)
+                return info.local_path
+            # 检查子目录
+            for entry in sorted(os.listdir(info.local_path)):
+                sub = os.path.join(info.local_path, entry)
+                if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, "metadata.yaml")):
+                    logger.info("dm_sdk: bag_id=%s → local(sub)=%s", bag_id, sub)
+                    return sub
+        
+        # 2. 本地不可用 → OSS 下载
+        if info.oss_path:
+            from app.services.frame_extractor import _download_bag_from_oss
+            logger.info("dm_sdk: bag_id=%s → downloading from OSS: %s", bag_id, info.oss_path)
+            local_dir = _download_bag_from_oss(info.oss_path, f"stream_{bag_id}", bag_id)
+            if local_dir:
+                logger.info("dm_sdk: bag_id=%s → downloaded to %s", bag_id, local_dir)
+                return local_dir
+        
+        logger.warning("dm_sdk: bag_id=%s → no local path and no OSS path", bag_id)
+        return ""
+    except Exception as exc:
+        logger.warning("dm_sdk resolve failed for bag_id=%s: %s", bag_id, exc)
+        return ""
+
+
 def _resolve_rosbag_path(bag_path: str) -> str:
-    """如果 bag_path 是目录且不含 bag.bag，自动查找子目录中的 bag.bag"""
+    """解析 rosbag 路径。
+    
+    优先级：
+    1. bag_path 直接就是 bag.bag 文件
+    2. bag_path 目录下有 bag.bag
+    3. bag_path 子目录里有 bag.bag
+    4. 通过 dm_sdk 查询 bag_id → rosbag OSS 路径 → 本地挂载或下载
+    """
     if os.path.isfile(bag_path):
         return bag_path
     # 直接目录下有 bag.bag
@@ -98,6 +169,14 @@ def _resolve_rosbag_path(bag_path: str) -> str:
                 if os.path.isfile(candidate):
                     logger.info("Resolved rosbag: %s -> %s", bag_path, candidate)
                     return candidate
+    
+    # 本地没有 bag.bag → 尝试 dm_sdk
+    bag_id = _extract_bag_id_from_path(bag_path)
+    if bag_id:
+        dm_path = _resolve_rosbag_via_dm(bag_id)
+        if dm_path:
+            return dm_path
+    
     return bag_path
 
 
