@@ -34,36 +34,41 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     animId: null,
   });
 
+  // 缓存最新帧数据，Three.js 就绪后立即渲染
+  const pendingDataRef = useRef(null);
+
   // ── 初始化 Three.js 场景 ──
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // 动态加载 Three.js + OrbitControls
-    const scriptsToLoad = [
-      'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
-      'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js',
-    ];
+    // 动态加载 Three.js（OrbitControls 用 inline 降级方案，不依赖外部 CDN）
+    const threeUrl = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js';
 
-    function loadScripts(urls, callback) {
-      let loaded = 0;
-      urls.forEach(url => {
-        if (document.querySelector(`script[src="${url}"]`)) {
-          loaded++;
-          if (loaded === urls.length) callback();
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = url;
-        script.onload = () => {
-          loaded++;
-          if (loaded === urls.length) callback();
-        };
-        document.head.appendChild(script);
-      });
+    function loadThreeScript(url, callback) {
+      if (document.querySelector(`script[src="${url}"]`)) {
+        if (window.THREE) { callback(); return; }
+        // script 存在但 THREE 还没挂上，等一下
+        const wait = setInterval(() => {
+          if (window.THREE) { clearInterval(wait); callback(); }
+        }, 50);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = url;
+      script.onload = () => callback();
+      script.onerror = () => {
+        // CDN 加载失败，尝试备用版本
+        const fallback = document.createElement('script');
+        fallback.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
+        fallback.onload = () => callback();
+        fallback.onerror = () => callback(); // 最终降级：无 Three.js
+        document.head.appendChild(fallback);
+      };
+      document.head.appendChild(script);
     }
 
-    loadScripts(scriptsToLoad, () => initScene());
+    loadThreeScript(threeUrl, () => initScene());
 
     function initScene() {
       const THREE = window.THREE;
@@ -79,17 +84,79 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       renderer.setSize(canvas.clientWidth, canvas.clientHeight);
       renderer.setPixelRatio(window.devicePixelRatio);
 
-      // ── OrbitControls ──
+      // ── OrbitControls（优先用 THREE.OrbitControls，否则 inline 降级）──
       let controls = null;
       if (THREE.OrbitControls) {
         controls = new THREE.OrbitControls(camera, canvas);
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
         controls.target.set(0, 0, 0);
-        controls.maxPolarAngle = Math.PI * 0.85;  // 限制不能翻到正下方
+        controls.maxPolarAngle = Math.PI * 0.85;
         controls.minDistance = 5;
         controls.maxDistance = 800;
         controls.update();
+      } else {
+        // ── inline 鼠标交互：左键旋转、右键平移、滚轮缩放 ──
+        let isDragging = false;
+        let isPanning = false;
+        let prevMouse = { x: 0, y: 0 };
+        let spherical = { theta: 0, phi: Math.PI / 2, radius: 100 };
+        let target = new THREE.Vector3(0, 0, 0);
+
+        canvas.addEventListener('mousedown', (e) => {
+          if (e.button === 0) isDragging = true;
+          if (e.button === 2) isPanning = true;
+          prevMouse = { x: e.clientX, y: e.clientY };
+          e.preventDefault();
+        });
+        canvas.addEventListener('mousemove', (e) => {
+          const dx = e.clientX - prevMouse.x;
+          const dy = e.clientY - prevMouse.y;
+          if (isDragging) {
+            spherical.theta -= dx * 0.005;
+            spherical.phi = Math.max(0.1, Math.min(Math.PI * 0.85, spherical.phi - dy * 0.005));
+          }
+          if (isPanning) {
+            const right = new THREE.Vector3();
+            const up = new THREE.Vector3(0, 1, 0);
+            camera.getWorldDirection(right);
+            right.cross(up).normalize();
+            target.add(right.multiplyScalar(-dx * spherical.radius * 0.002));
+            target.y += dy * spherical.radius * 0.002;
+          }
+          prevMouse = { x: e.clientX, y: e.clientY };
+        });
+        canvas.addEventListener('mouseup', () => { isDragging = false; isPanning = false; });
+        canvas.addEventListener('mouseleave', () => { isDragging = false; isPanning = false; });
+        canvas.addEventListener('wheel', (e) => {
+          spherical.radius *= e.deltaY > 0 ? 1.1 : 0.9;
+          spherical.radius = Math.max(5, Math.min(800, spherical.radius));
+          e.preventDefault();
+        }, { passive: false });
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // 覆盖 renderLoop 以应用 spherical 相机
+        const origRenderLoop = renderLoop;
+        renderLoop = function() {
+          const animate = () => {
+            threeRef.current.animId = requestAnimationFrame(animate);
+            if (!THREE || !threeRef.current.renderer) return;
+            // 根据球形坐标更新相机位置
+            const r = spherical.radius;
+            const sinPhi = Math.sin(spherical.phi);
+            const cosPhi = Math.cos(spherical.phi);
+            const sinTheta = Math.sin(spherical.theta);
+            const cosTheta = Math.cos(spherical.theta);
+            threeRef.current.camera.position.set(
+              target.x + r * sinPhi * cosTheta,
+              target.y + r * cosPhi,
+              target.z + r * sinPhi * sinTheta
+            );
+            threeRef.current.camera.lookAt(target);
+            threeRef.current.renderer.render(threeRef.current.scene, threeRef.current.camera);
+          };
+          animate();
+        };
       }
 
       const grid = new THREE.GridHelper(200, 100, 0x333355, 0x222244);
@@ -109,6 +176,12 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
 
       threeRef.current = { scene, camera, renderer, controls, groups, animId: null };
       renderLoop();
+
+      // Three.js 就绪后，渲染之前缓存的数据
+      if (pendingDataRef.current) {
+        updateSceneInternal(pendingDataRef.current);
+        pendingDataRef.current = null;
+      }
     }
 
     function renderLoop() {
@@ -226,10 +299,14 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     await loadFrameDirect(idx);
   }, [bagPath, authFetch]);
 
-  // ── 更新 Three.js 场景 ──
-  const updateScene = useCallback((data) => {
+  // ── 更新 Three.js 场景（内部实现，不依赖 useCallback）──
+  const updateSceneInternal = (data) => {
     const THREE = window.THREE;
-    if (!THREE || !threeRef.current.scene) return;
+    if (!THREE || !threeRef.current.scene) {
+      // Three.js 尚未就绪，缓存数据待就绪后渲染
+      pendingDataRef.current = data;
+      return;
+    }
     const { groups, camera, controls } = threeRef.current;
 
     // 清除旧对象
@@ -324,6 +401,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         controls.update();
       }
     }
+  };
+
+  // ── 包装函数供 loadFrameDirect 调用 ──
+  const updateScene = useCallback((data) => {
+    updateSceneInternal(data);
   }, []);
 
   // ── 播放/暂停动画 ──
