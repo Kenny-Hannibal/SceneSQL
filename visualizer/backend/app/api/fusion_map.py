@@ -54,3 +54,48 @@ def fusion_map_frame_by_ts(
     也可同时传 ts_ns，让前端知道实际帧的时间戳与目标时间的偏差。
     """
     return find_frame_idx_by_ts(bag_path, ts_ns)
+
+
+@router.get("/fusion-map-frames-by-ts-range")
+def fusion_map_frames_by_ts_range(
+    bag_path: str = Query(..., description="bag 目录路径"),
+    start_ts_ns: int = Query(..., description="起始时间戳（纳秒）"),
+    end_ts_ns: int = Query(None, description="结束时间戳（纳秒），不传则返回起始帧索引"),
+):
+    """一次性查询 start_ts_ns 和 end_ts_ns 对应的帧索引
+
+    比 /fusion-map-frame-by-ts 调两次更高效：ts 索引只构建一次。
+    返回 {'start_frame_idx': int, 'end_frame_idx': int|null, 'total_frames': int}
+    """
+    import bisect
+    from app.services.fusion_map_parser import _get_offsets, _get_ts_ns_index
+    import os
+
+    bin_path = os.path.join(bag_path, 'bin', 'gac_enviro_model_fusion_map_plus.bin')
+    if not os.path.exists(bin_path):
+        return {'error': '文件不存在', 'start_frame_idx': 0}
+
+    offsets = _get_offsets(bin_path)
+    timestamps = _get_ts_ns_index(bin_path)
+    total = len(offsets)
+    if total == 0 or not timestamps:
+        return {'error': '无帧数据', 'start_frame_idx': 0, 'total_frames': 0}
+
+    # start
+    s_idx = bisect.bisect_right(timestamps, start_ts_ns) - 1
+    s_idx = max(0, min(s_idx, total - 1))
+
+    result = {
+        'start_frame_idx': s_idx,
+        'start_actual_ts_ns': timestamps[s_idx],
+        'total_frames': total,
+    }
+
+    # end
+    if end_ts_ns is not None:
+        e_idx = bisect.bisect_right(timestamps, end_ts_ns) - 1
+        e_idx = max(0, min(e_idx, total - 1))
+        result['end_frame_idx'] = e_idx
+        result['end_actual_ts_ns'] = timestamps[e_idx]
+
+    return result
