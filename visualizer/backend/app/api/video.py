@@ -81,6 +81,26 @@ def video_file(task_id: str):
     return FileResponse(video_path, media_type="video/mp4", filename=f"{task_id}.mp4")
 
 
+def _resolve_rosbag_path(bag_path: str) -> str:
+    """如果 bag_path 是目录且不含 bag.bag，自动查找子目录中的 bag.bag"""
+    if os.path.isfile(bag_path):
+        return bag_path
+    # 直接目录下有 bag.bag
+    direct = os.path.join(bag_path, "bag.bag")
+    if os.path.isfile(direct):
+        return direct
+    # 搜索一级子目录
+    if os.path.isdir(bag_path):
+        for entry in sorted(os.listdir(bag_path)):
+            sub = os.path.join(bag_path, entry)
+            if os.path.isdir(sub):
+                candidate = os.path.join(sub, "bag.bag")
+                if os.path.isfile(candidate):
+                    logger.info("Resolved rosbag: %s -> %s", bag_path, candidate)
+                    return candidate
+    return bag_path
+
+
 def _spawn_stream_worker(mode, bag_path, topic, start_ts, end_ts, fps):
     """
     启动 stream_worker.py 子进程，返回 Popen 对象。
@@ -89,9 +109,11 @@ def _spawn_stream_worker(mode, bag_path, topic, start_ts, end_ts, fps):
     父进程从 process.stdout 读取并通过 StreamingResponse 转发给浏览器。
     客户端断开后，父进程 kill 子进程，OS 回收所有资源（包括 gsbag 全局锁）。
     """
+    # 自动解析 rosbag 路径（em bin 目录 -> 子目录中的 bag.bag）
+    resolved_path = _resolve_rosbag_path(bag_path)
     cmd = [sys.executable, _STREAM_WORKER_SCRIPT,
            "--mode", mode,
-           "--bag-path", bag_path,
+           "--bag-path", resolved_path,
            "--topic", topic]
     if start_ts is not None:
         cmd.extend(["--start-ts", str(start_ts)])

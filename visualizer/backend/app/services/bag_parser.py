@@ -18,18 +18,45 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _find_metadata_and_bag(bag_path: str) -> tuple:
+    """查找 metadata.yaml 和 bag.bag 路径。
+    
+    bag_path 可能是:
+    - 直接包含 metadata.yaml 的目录（rosbag目录）
+    - 包含子目录的父目录（em bin目录，子目录里有 metadata.yaml + bag.bag）
+    
+    Returns: (metadata_path, bag_file_path or None)
+    """
+    metadata_path = os.path.join(bag_path, "metadata.yaml")
+    if os.path.exists(metadata_path):
+        bag_file = os.path.join(bag_path, "bag.bag") if os.path.isfile(os.path.join(bag_path, "bag.bag")) else None
+        return metadata_path, bag_file
+    
+    # 搜索一级子目录
+    for entry in sorted(os.listdir(bag_path)):
+        sub = os.path.join(bag_path, entry)
+        if os.path.isdir(sub):
+            mp = os.path.join(sub, "metadata.yaml")
+            if os.path.exists(mp):
+                bag_file = os.path.join(sub, "bag.bag") if os.path.isfile(os.path.join(sub, "bag.bag")) else None
+                return mp, bag_file
+    
+    return None, None
+
+
 def get_bag_info(bag_path: str) -> Dict:
     if not os.path.isdir(bag_path):
         raise BagNotFoundException(bag_path)
 
-    metadata_path = os.path.join(bag_path, "metadata.yaml")
-    if not os.path.exists(metadata_path):
+    metadata_path, bag_file_path = _find_metadata_and_bag(bag_path)
+    if not metadata_path:
         # 没有 metadata.yaml 时，仍然检测 bin 目录下的数据文件
         fusion_map_topic = None
         if os.path.isfile(os.path.join(bag_path, "bin", "gac_enviro_model_fusion_map_plus.bin")):
             fusion_map_topic = {"name": "/gac/enviro_model/fusion_map_plus", "type": "EFusionMap", "message_count": 0, "freq": 0}
         return {
             "bag_path": bag_path,
+            "rosbag_path": None,
             "topics": [],
             "fusion_map_topic": fusion_map_topic,
             "duration_sec": 0,
@@ -78,6 +105,7 @@ def get_bag_info(bag_path: str) -> Dict:
 
     return {
         "bag_path": bag_path,
+        "rosbag_path": bag_file_path,
         "topics": camera_topics,
         "fusion_map_topic": fusion_map_topic,
         "duration_sec": duration_sec,
