@@ -1775,7 +1775,7 @@ export default function AgentPanel() {
             ) : (
               <div style={{ marginBottom: 16 }}>
                 {/* ── 3D BEV 可视化 Topic ── */}
-                {topicModalData.fusionMapTopic && (
+                {topicModalData.fusionMapTopic ? (
                   <div
                     onClick={() => setSelectedTopic('fusion_map_plus')}
                     style={{
@@ -1791,6 +1791,20 @@ export default function AgentPanel() {
                       <div style={{ fontSize: 11, color: '#888' }}>fusion_map_plus · 障碍物/车道线/边界线 3D 渲染</div>
                     </div>
                   </div>
+                ) : (
+                  <div
+                    style={{
+                      padding: '10px 14px', marginBottom: 8, borderRadius: 6,
+                      border: '1px solid #e8e8e8', background: '#f5f5f5',
+                      display: 'flex', alignItems: 'center', gap: 10, opacity: 0.6,
+                    }}
+                  >
+                    <span style={{ fontSize: 20 }}>🗺️</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#999' }}>3D BEV 视图 (Fusion Map)</div>
+                      <div style={{ fontSize: 11, color: '#aaa' }}>此 bag 无 fusion_map_plus 数据</div>
+                    </div>
+                  </div>
                 )}
 
                 {/* ── Camera Topics ── */}
@@ -1800,11 +1814,11 @@ export default function AgentPanel() {
                       📹 Camera Topic:
                     </label>
                     <select
-                      value={selectedTopic.startsWith('/camera') || selectedTopic.startsWith('/cam') ? selectedTopic : ''}
+                      value={topicModalData.cameraTopics.includes(selectedTopic) ? selectedTopic : ''}
                       onChange={(e) => { if (e.target.value) setSelectedTopic(e.target.value); }}
                       style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
                     >
-                      <option value="" disabled>-- 选择摄像头 --</option>
+                      <option value="" disabled>{selectedTopic && !topicModalData.cameraTopics.includes(selectedTopic) ? selectedTopic : '-- 选择摄像头 --'}</option>
                       {topicModalData.cameraTopics.map((t) => (
                         <option key={t} value={t}>{t}</option>
                       ))}

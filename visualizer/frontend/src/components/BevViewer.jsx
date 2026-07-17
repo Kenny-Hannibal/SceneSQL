@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 const PLAYBACK_FPS = 10;  // fusion_map_plus 固定 10fps (帧间100ms)
 const PLAYBACK_INTERVAL = 1000 / PLAYBACK_FPS;  // 100ms
+const PREFETCH_BATCH = 50;  // 每次预加载50帧
+const PREFETCH_AHEAD = 30;  // 播放指针距离缓存尾部<30帧时触发预加载
 
 /**
  * BEV坐标系 → Three.js 映射:
@@ -35,6 +37,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const playTimerRef = useRef(null);
   const playingRef = useRef(false);
   const lastPlayTimeRef = useRef(0);  // 上次播放的时间戳(ms)
+
+  // ── 帧缓存：批量预加载，播放时从本地缓存读取 ──
+  const frameCacheRef = useRef(new Map());  // frame_idx → frame_data
+  const prefetchingRef = useRef(false);     // 是否正在预加载中
+  const prefetchEndRef = useRef(-1);        // 当前缓存到的最大帧索引
 
   const threeRef = useRef({
     scene: null, camera: null, renderer: null, controls: null, groups: {}, animId: null,
@@ -204,6 +211,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     setPlaying(false);
     playingRef.current = false;
     setFrameStats(null);
+    // 清空帧缓存
+    frameCacheRef.current.clear();
+    prefetchEndRef.current = -1;
+    prefetchingRef.current = false;
     try {
       const res = await fetchWithTimeout(`${API_BASE}/api/bag/fusion-map-info?bag_path=${encodeURIComponent(bagPath)}`, 30000);
       if (!res.ok) throw new Error(`fusion-map-info API 返回 ${res.status}`);
@@ -248,6 +259,8 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         playIdxRef.current = 0;
         try {
           await loadFrameDirect(0);
+          // 预加载首批帧（帧0已加载，从帧1开始预加载）
+          prefetchFrames(1, Math.min(PREFETCH_BATCH, data.total_frames - 1));
         } catch (e) {
           setError(`首帧加载失败: ${e.message}`);
         }
@@ -259,10 +272,64 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   }, [bagPath, fetchWithTimeout, startTsNs, endTsNs]);
 
-  // ── 加载并渲染单帧 ──
+  // ── 批量预加载帧到缓存 ──
+  const prefetchFrames = useCallback(async (fromIdx, toIdx) => {
+    if (prefetchingRef.current) return;
+    const maxIdx = (info?.total_frames || 1) - 1;
+    const end = Math.min(toIdx, maxIdx);
+    if (fromIdx > end) return;
+    prefetchingRef.current = true;
+    try {
+      // 用 fusion-map-frames-range 接口批量取，每次最多200帧
+      let cur = fromIdx;
+      while (cur <= end) {
+        const batchEnd = Math.min(cur + 199, end);  // API限制单次200帧
+        const res = await fetchWithTimeout(
+          `${API_BASE}/api/bag/fusion-map-frames-range?bag_path=${encodeURIComponent(bagPath)}&start=${cur}&end=${batchEnd + 1}`,
+          60000
+        );
+        if (!res.ok) break;
+        const result = await res.json();
+        if (result.error) break;
+        const frames = result.frames || [];
+        for (const f of frames) {
+          // f = {frame_idx, data: {obstacles, boundaries, ...}}
+          // 缓存 data 部分，和单帧API返回的 result.data 结构一致
+          if (f.frame_idx != null && f.data) {
+            frameCacheRef.current.set(f.frame_idx, f.data);
+          }
+        }
+        prefetchEndRef.current = batchEnd;
+        cur = batchEnd + 1;
+      }
+    } catch (e) {
+      // 预加载失败不影响播放
+    } finally {
+      prefetchingRef.current = false;
+    }
+  }, [bagPath, fetchWithTimeout, info]);
+
+  // ── 加载并渲染单帧（优先从缓存读取） ──
   const loadFrameDirect = async (idx) => {
     if (!bagPath) return;
     try {
+      // 优先从缓存读
+      const cached = frameCacheRef.current.get(idx);
+      if (cached) {
+        updateSceneInternal(cached);
+        setCurrentFrame(idx);
+        const d = cached;
+        setFrameStats({
+          obs: (d.obstacles || []).length,
+          bnd: (d.boundaries || []).length,
+          lane: (d.lanes || []).length,
+          path: (d.paths || []).length,
+          ts_ns: d.timestamp_ns,
+          veh: d.veh_loc ? `(${d.veh_loc.x.toFixed(1)},${d.veh_loc.y.toFixed(1)})` : 'None',
+        });
+        return d;
+      }
+      // 缓存未命中 → 单帧请求（降级）
       const res = await fetchWithTimeout(`${API_BASE}/api/bag/fusion-map-frame?bag_path=${encodeURIComponent(bagPath)}&frame_idx=${idx}`, 60000);
       if (!res.ok) throw new Error('Failed to load frame');
       const result = await res.json();
@@ -381,7 +448,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     });
   };
 
-  // ── 播放逻辑（用 ref 避免 stale closure，固定10fps）──
+  // ── 播放逻辑（缓存驱动，稳定10fps）──
   const playNextFrame = useCallback(async () => {
     if (!playingRef.current) return;
 
@@ -394,18 +461,24 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       return;
     }
 
-    const t0 = performance.now();
+    // 触发预加载：当播放指针距缓存尾部不足 PREFETCH_AHEAD 帧时
+    if (nextIdx + PREFETCH_AHEAD > prefetchEndRef.current && !prefetchingRef.current) {
+      const prefetchFrom = prefetchEndRef.current + 1;
+      const prefetchTo = Math.min(nextIdx + PREFETCH_AHEAD + PREFETCH_BATCH, endIdx);
+      prefetchFrames(prefetchFrom, prefetchTo);
+    }
 
+    const t0 = performance.now();
     const frameData = await loadFrame(nextIdx);
     if (!frameData || !playingRef.current) return;
 
     playIdxRef.current = nextIdx;
 
-    // 固定10fps: 无论网络耗时多少，下一帧延迟 = 100ms - 网络耗时
+    // 缓存命中时帧渲染<5ms，直接用固定间隔；未命中时按网络耗时补偿
     const elapsed = performance.now() - t0;
-    const delay = Math.max(0, PLAYBACK_INTERVAL - elapsed);
+    const delay = frameCacheRef.current.has(nextIdx) ? PLAYBACK_INTERVAL : Math.max(0, PLAYBACK_INTERVAL - elapsed);
     playTimerRef.current = setTimeout(playNextFrame, delay);
-  }, [endFrameIdx, info, loadFrame]);
+  }, [endFrameIdx, info, loadFrame, prefetchFrames]);
 
   // ── 播放/暂停控制 ──
   useEffect(() => {
