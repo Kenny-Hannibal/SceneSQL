@@ -274,8 +274,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   // ── 批量预加载帧到缓存（带进度回调） ──
   const prefetchFrames = useCallback(async (fromIdx, toIdx) => {
     if (prefetchingRef.current) return;
-    const maxIdx = (info?.total_frames || 1) - 1;
-    const end = Math.min(toIdx, maxIdx);
+    const end = toIdx;  // 调用者已确定范围，直接用
     if (fromIdx > end) return;
     prefetchingRef.current = true;
     try {
@@ -307,7 +306,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     } finally {
       prefetchingRef.current = false;
     }
-  }, [bagPath, fetchWithTimeout, info]);
+  }, [bagPath, fetchWithTimeout]);
 
   // ── 加载并渲染单帧（优先从缓存读取） ──
   const loadFrameDirect = async (idx) => {
