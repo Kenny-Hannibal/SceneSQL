@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SqlEditor from './SqlEditor';
 import BevViewer from './BevViewer';
+import MultiCameraPlayer from './MultiCameraPlayer';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -259,6 +260,8 @@ export default function AgentPanel() {
   // BEV 弹窗
   const [bevModalOpen, setBevModalOpen] = useState(false);
   const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
+  const [multiCameraOpen, setMultiCameraOpen] = useState(false);
+  const [multiCameraData, setMultiCameraData] = useState(null); // { topics, bagPath, mode, startTs, endTs, durationSec }
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -1870,6 +1873,36 @@ export default function AgentPanel() {
                 >
                   {selectedTopic === 'fusion_map_plus' ? '🗺️ 打开 BEV 视图' : '确认提取'}
                 </button>
+                {/* ── 多摄像头宫格按钮 ── */}
+                {topicModalData.cameraTopics.length > 1 && (
+                  <button
+                    onClick={() => {
+                      const { bagPath, startTs, endTs, cameraTopics } = topicModalData;
+                      const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
+                      const streamToken = localStorage.getItem('token');
+                      setMultiCameraData({
+                        topics: cameraTopics,
+                        bagPath,
+                        mode: forceH264 ? 'h264' : 'hevc',
+                        startTs,
+                        endTs,
+                        durationSec,
+                        apiBase: API_BASE,
+                        streamToken,
+                      });
+                      setMultiCameraOpen(true);
+                      setTopicModalOpen(false);
+                      setTopicModalData(null);
+                    }}
+                    disabled={topicModalData.loading}
+                    style={{
+                      padding: '8px 16px', fontSize: 13, borderRadius: 4, border: 'none',
+                      background: topicModalData.loading ? '#ccc' : '#722ed1', color: '#fff', cursor: topicModalData.loading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    📷 多摄像头宫格
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1906,6 +1939,21 @@ export default function AgentPanel() {
             />
           </div>
         </div>
+      )}
+
+      {/* ── 多摄像头宫格播放 ── */}
+      {multiCameraOpen && multiCameraData && (
+        <MultiCameraPlayer
+          topics={multiCameraData.topics}
+          bagPath={multiCameraData.bagPath}
+          mode={multiCameraData.mode}
+          startTs={multiCameraData.startTs}
+          endTs={multiCameraData.endTs}
+          durationSec={multiCameraData.durationSec}
+          apiBase={multiCameraData.apiBase}
+          streamToken={multiCameraData.streamToken}
+          onClose={() => { setMultiCameraOpen(false); setMultiCameraData(null); }}
+        />
       )}
 
       {/* SQL 执行进度弹窗 */}

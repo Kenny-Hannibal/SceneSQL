@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 _STREAM_WORKER_SCRIPT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "services", "stream_worker.py"
 ))
+_MULTI_STREAM_WORKER_SCRIPT = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "services", "multi_stream_worker.py"
+))
 
 
 @router.post("/extract", response_model=ExtractResponse)
@@ -363,6 +366,99 @@ async def stream_h264(
         return response
     except Exception as exc:
         logger.exception("H.264 stream failed")
+        from app.core.exceptions import AppException
+        raise AppException(str(exc), 500)
+
+
+@router.get("/stream-multi")
+async def stream_multi(
+    request: Request,
+    bag_path: str = Query(..., description="Rosbag path (should contain bag.bag)"),
+    topics: str = Query(..., description="Comma-separated camera topics"),
+    mode: str = Query("hevc", description="hevc or h264"),
+    start_ts: Optional[int] = Query(None, description="Start timestamp (ns)"),
+    end_ts: Optional[int] = Query(None, description="End timestamp (ns)"),
+    fps: Optional[float] = Query(None, description="Override FPS"),
+):
+    """多topic共享Reader流式播放。
+
+    1个gsbag_reader读bag，按topic路由到N个ffmpeg进程。
+    fMP4输出复用为单条二进制流，协议：
+      [topic_idx:1byte][data_len:4bytes LE][fMP4_data:data_len bytes]
+
+    前端demux后分别喂入各topic的MSE SourceBuffer。
+    """
+    topic_list = [t.strip() for t in topics.split(",") if t.strip()]
+    if not topic_list:
+        from app.core.exceptions import AppException
+        raise AppException("No topics specified", 400)
+    if mode not in ("hevc", "h264"):
+        from app.core.exceptions import AppException
+        raise AppException(f"Invalid mode: {mode}", 400)
+
+    logger.info(
+        "Starting multi-stream: bag=%s topics=%s mode=%s range=[%s, %s]",
+        bag_path, topic_list, mode, start_ts, end_ts,
+    )
+    try:
+        resolved_path = _resolve_rosbag_for_stream(bag_path)
+
+        cmd = [sys.executable, _MULTI_STREAM_WORKER_SCRIPT,
+               "--bag-path", resolved_path,
+               "--topics", ",".join(topic_list),
+               "--mode", mode]
+        if start_ts is not None:
+            cmd.extend(["--start-ts", str(start_ts)])
+        if end_ts is not None:
+            cmd.extend(["--end-ts", str(end_ts)])
+        if fps is not None:
+            cmd.extend(["--fps", str(fps)])
+
+        logger.info("Spawning multi-stream worker: %s", " ".join(cmd))
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=None,
+        )
+
+        # 检查子进程是否立刻失败
+        import time
+        time.sleep(0.1)
+        if process.poll() is not None:
+            stdout_out = process.stdout.read().decode("utf-8", errors="ignore") if process.stdout else ""
+            logger.error("Multi-stream worker exited immediately: %s", stdout_out)
+            raise RuntimeError(f"Multi-stream worker failed to start: {stdout_out[:500]}")
+
+        # 客户端断开后 kill 子进程
+        async def _watch_disconnect():
+            while process.poll() is None:
+                if await request.is_disconnected():
+                    logger.info("[multi-stream] Client disconnected, killing worker (pid=%s)", process.pid)
+                    _kill_worker(process)
+                    return
+                await asyncio.sleep(0.5)
+
+        _watch_task = asyncio.ensure_future(_watch_disconnect())
+
+        response = StreamingResponse(
+            _stream_from_worker(process, request),
+            media_type="application/octet-stream",
+            headers={
+                "X-Multi-Stream": "true",
+                "X-Topics": ",".join(topic_list),
+                "Content-Disposition": 'inline; filename="multi_stream.bin"',
+            },
+        )
+
+        async def _on_finish():
+            _watch_task.cancel()
+            if process.poll() is None:
+                _kill_worker(process)
+
+        response.background = _on_finish
+        return response
+    except Exception as exc:
+        logger.exception("Multi-stream failed")
         from app.core.exceptions import AppException
         raise AppException(str(exc), 500)
 
