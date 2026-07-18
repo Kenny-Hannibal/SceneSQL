@@ -261,7 +261,7 @@ export default function AgentPanel() {
   const [bevModalOpen, setBevModalOpen] = useState(false);
   const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
   const [multiCameraOpen, setMultiCameraOpen] = useState(false);
-  const [multiCameraData, setMultiCameraData] = useState(null); // { topics, bagPath, mode, startTs, endTs, durationSec }
+  const [multiCameraData, setMultiCameraData] = useState(null); // { allTopics, initialTopics, bagPath, mode, startTs, endTs, apiBase, streamToken }
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -1878,15 +1878,14 @@ export default function AgentPanel() {
                   <button
                     onClick={() => {
                       const { bagPath, startTs, endTs, cameraTopics } = topicModalData;
-                      const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
                       const streamToken = localStorage.getItem('token');
                       setMultiCameraData({
-                        topics: cameraTopics,
+                        allTopics: cameraTopics,
+                        initialTopics: [],
                         bagPath,
                         mode: forceH264 ? 'h264' : 'hevc',
                         startTs,
                         endTs,
-                        durationSec,
                         apiBase: API_BASE,
                         streamToken,
                       });
@@ -1944,12 +1943,12 @@ export default function AgentPanel() {
       {/* ── 多摄像头宫格播放 ── */}
       {multiCameraOpen && multiCameraData && (
         <MultiCameraPlayer
-          topics={multiCameraData.topics}
+          allTopics={multiCameraData.allTopics}
+          initialTopics={multiCameraData.initialTopics}
           bagPath={multiCameraData.bagPath}
           mode={multiCameraData.mode}
           startTs={multiCameraData.startTs}
           endTs={multiCameraData.endTs}
-          durationSec={multiCameraData.durationSec}
           apiBase={multiCameraData.apiBase}
           streamToken={multiCameraData.streamToken}
           onClose={() => { setMultiCameraOpen(false); setMultiCameraData(null); }}
