@@ -6,7 +6,8 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
-| 2026-07-16 | 双路径架构：em_bin_path(BEV) + rosbag_path(camera) 分离 | `changelog/2026-07-16_双路径架构em_bin_path-BEV-rosbag_path-camera分离.md` |
+|| 2026-07-18 | BEV并行解码+流式预加载：ThreadPoolExecutor 4线程解码 + 首批50帧即播 | `changelog/2026-07-18_BEV并行解码-流式预加载ThreadPoolExecutor-4线程解码-首批50帧即播.md` |
+|| 2026-07-16 | 双路径架构：em_bin_path(BEV) + rosbag_path(camera) 分离 | `changelog/2026-07-16_双路径架构em_bin_path-BEV-rosbag_path-camera分离.md` |
 | 2026-07-16 | BEV片段模式：只播SQL片段而非整个bag | `changelog/2026-07-16_BEV片段模式只播SQL片段而非整个bag.md` |
 || 2026-07-13 | Fix BevViewer API_BASE hardcoded localhost:8000 | `changelog/2026-07-13_Fix-BevViewer-API-BASE-hardcoded-localhost.md` |
 || 2026-07-13 | Changelog 重构：拆分为索引+条目模式 | `changelog/2026-07-13_Changlog-重构拆分为索引条目模式.md` |

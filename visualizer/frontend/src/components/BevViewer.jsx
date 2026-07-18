@@ -252,16 +252,22 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         setCurrentFrame(sIdx);
         playIdxRef.current = sIdx;
 
-        // ── 核心改动：先把所有帧加载到缓存，再显示首帧 ──
-        const framesToLoad = eIdx - sIdx + 1;
-        setIndexingMsg(`正在加载帧数据... 0/${framesToLoad} 帧 (0%)`);
-        await prefetchFrames(sIdx, eIdx);
+        // ── 流式预加载：首批50帧加载完即可播放，后台继续预加载 ──
+        const firstBatch = Math.min(sIdx + 50, eIdx + 1);
+        setIndexingMsg('正在加载首批帧数据...');
+        await prefetchFrames(sIdx, firstBatch - 1);
         setIndexingMsg('');
-        // 全部加载完后渲染首帧（从缓存读取，瞬时完成）
+
+        // 首批加载完，立即显示首帧
         try {
           await loadFrameDirect(sIdx);
         } catch (e) {
           setError(`首帧加载失败: ${e.message}`);
+        }
+
+        // 后台继续预加载剩余帧（不阻塞播放）
+        if (firstBatch <= eIdx) {
+          prefetchFramesInBackground(firstBatch, eIdx);
         }
       }
     } catch (e) {
@@ -271,10 +277,10 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     }
   }, [bagPath, fetchWithTimeout, startTsNs, endTsNs]);
 
-  // ── 批量预加载帧到缓存（带进度回调） ──
+  // ── 批量预加载帧到缓存 ──
   const prefetchFrames = useCallback(async (fromIdx, toIdx) => {
     if (prefetchingRef.current) return;
-    const end = toIdx;  // 调用者已确定范围，直接用
+    const end = toIdx;
     if (fromIdx > end) return;
     prefetchingRef.current = true;
     try {
@@ -296,15 +302,43 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         }
         prefetchEndRef.current = batchEnd;
         cur = batchEnd + 1;
-        // 更新加载进度
-        const totalToLoad = end - fromIdx + 1;
-        const loaded = cur - fromIdx;
-        setIndexingMsg(`正在加载帧数据... ${loaded}/${totalToLoad} 帧 (${Math.round(loaded/totalToLoad*100)}%)`);
       }
     } catch (e) {
       // 预加载失败不影响播放
     } finally {
       prefetchingRef.current = false;
+    }
+  }, [bagPath, fetchWithTimeout]);
+
+  // ── 后台预加载（不阻塞，带进度显示） ──
+  const prefetchFramesInBackground = useCallback(async (fromIdx, toIdx) => {
+    if (fromIdx > toIdx) return;
+    try {
+      let cur = fromIdx;
+      while (cur <= toIdx) {
+        const batchEnd = Math.min(cur + 199, toIdx);
+        const res = await fetchWithTimeout(
+          `${API_BASE}/api/bag/fusion-map-frames-range?bag_path=${encodeURIComponent(bagPath)}&start=${cur}&end=${batchEnd + 1}`,
+          120000
+        );
+        if (!res.ok) break;
+        const result = await res.json();
+        if (result.error) break;
+        const frames = result.frames || [];
+        for (const f of frames) {
+          if (f.frame_idx != null && f.data) {
+            frameCacheRef.current.set(f.frame_idx, f.data);
+          }
+        }
+        prefetchEndRef.current = batchEnd;
+        cur = batchEnd + 1;
+        const totalToLoad = toIdx - fromIdx + 1;
+        const loaded = cur - fromIdx;
+        setIndexingMsg(`预加载中... ${loaded}/${totalToLoad} 帧 (${Math.round(loaded/totalToLoad*100)}%)`);
+      }
+      setIndexingMsg('');
+    } catch (e) {
+      setIndexingMsg('');
     }
   }, [bagPath, fetchWithTimeout]);
 
@@ -447,7 +481,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     });
   };
 
-  // ── 播放逻辑（全缓存模式，稳定10fps）──
+  // ── 播放逻辑（流式预加载模式：缓存命中→播放，未命中→等待后重试）──
   const playNextFrame = useCallback(() => {
     if (!playingRef.current) return;
 
@@ -460,9 +494,9 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       return;
     }
 
-    // 从缓存读取并渲染（全缓存模式下必命中）
     const cached = frameCacheRef.current.get(nextIdx);
     if (cached) {
+      // 缓存命中 → 渲染并继续
       updateSceneInternal(cached);
       setCurrentFrame(nextIdx);
       const d = cached;
@@ -475,9 +509,11 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
         veh: d.veh_loc ? `(${d.veh_loc.x.toFixed(1)},${d.veh_loc.y.toFixed(1)})` : 'None',
       });
       playIdxRef.current = nextIdx;
+      playTimerRef.current = setTimeout(playNextFrame, PLAYBACK_INTERVAL);
+    } else {
+      // 缓存未命中 → 预加载还在进行中，50ms后重试（不跳帧）
+      playTimerRef.current = setTimeout(playNextFrame, 50);
     }
-    // 固定10fps间隔
-    playTimerRef.current = setTimeout(playNextFrame, PLAYBACK_INTERVAL);
   }, [endFrameIdx, info]);
 
   // ── 播放/暂停控制 ──
