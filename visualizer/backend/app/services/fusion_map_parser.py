@@ -10,7 +10,7 @@ import os
 import struct
 import logging
 from typing import Dict, Optional, List
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -573,8 +573,14 @@ def _read_raw_frame(bin_path: str, offsets: list, idx: int) -> Optional[tuple]:
 
 
 def _decode_raw_frame(item: tuple) -> Optional[Dict]:
-    """解码单帧原始 protobuf 字节为可视化 JSON。"""
+    """解码单帧原始 protobuf 字节为可视化 JSON。
+
+    适用于 ProcessPoolExecutor: 每个子进程独立初始化 protobuf decoder。
+    返回纯 Python dict，可跨进程 pickle 传递。
+    """
     idx, raw_bytes = item
+    # 确保子进程中也初始化了 decoder（spawn 模式下需要）
+    _init_pb_decoders()
     decoded = _decode_efusionmap(raw_bytes)
     if decoded is not None:
         return {'frame_idx': idx, 'data': decoded}
@@ -617,17 +623,19 @@ def read_fusion_map_frames_range(bag_path: str, start: int, end: int) -> Dict:
         if not raw_items:
             return {'frames': [], 'total_frames': total}
 
-        # ── Step 2: 并行解码（4线程）──
-        # 小批量（≤10帧）时并行开销大于收益，直接顺序解码
-        if len(raw_items) <= 10:
+        # ── Step 2: 并行解码（4进程，绕过 GIL 真并行）──
+        # 小批量（≤20帧）时进程池开销大于收益，直接顺序解码
+        if len(raw_items) <= 20:
             frames = []
             for item in raw_items:
                 decoded = _decode_raw_frame(item)
                 if decoded is not None:
                     frames.append(decoded)
         else:
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                results = list(pool.map(_decode_raw_frame, raw_items))
+            # chunksize 减少进程间通信次数，每个 chunk 一次 IPC
+            chunk_size = max(1, len(raw_items) // 8)
+            with ProcessPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(_decode_raw_frame, raw_items, chunksize=chunk_size))
             frames = [r for r in results if r is not None]
 
         # 按 frame_idx 排序（并行解码可能乱序）
