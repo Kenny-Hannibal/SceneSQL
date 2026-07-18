@@ -163,11 +163,13 @@ def _drain_stderr(proc_stderr, log_prefix):
 
 # ── 复用协议：写入 stdout ──
 # [topic_idx:1byte][data_len:4bytes(Little-Endian)][data:data_len bytes]
+_mux_lock = threading.Lock()
 
 def _write_muxed(stdout_fd, topic_idx, data):
-    """写入一条复用帧到 stdout"""
+    """写入一条复用帧到 stdout（线程安全，header+data 原子写入）"""
     header = struct.pack('<BI', topic_idx, len(data))
-    os.write(stdout_fd, header + data)
+    with _mux_lock:
+        os.write(stdout_fd, header + data)
 
 
 # ── 主流式提取逻辑 ──
