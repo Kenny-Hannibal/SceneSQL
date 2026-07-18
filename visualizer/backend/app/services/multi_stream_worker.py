@@ -191,17 +191,16 @@ def run_multi_stream(bag_path, topics, mode, start_ts, end_ts, fps):
         sys.exit(1)
 
     bag_path = _resolve_bag_path(bag_path)
-    bag_file = _find_bag_file(bag_path)
-    if not bag_file or not os.path.exists(bag_file):
-        _write_error(f'Bag file not found: {bag_path}')
+    if not bag_path or not os.path.exists(bag_path):
+        _write_error(f'Bag path not found: {bag_path}')
         sys.exit(1)
 
     n_topics = len(topics)
     topic_to_idx = {t: i for i, t in enumerate(topics)}
-    logger.info('Starting multi-stream: %d topics, mode=%s, bag=%s', n_topics, mode, bag_file)
+    logger.info('Starting multi-stream: %d topics, mode=%s, bag=%s', n_topics, mode, bag_path)
 
-    # 1. gsbag reader — 过滤全部需要的 topic
-    reader = gsbag_reader.GsBagReader(bag_file)
+    # 1. gsbag reader — 过滤全部需要的 topic（gsbag_reader 直接接受目录路径）
+    reader = gsbag_reader.GsBagReader(bag_path)
     reader.set_topic_filter(topics)
 
     # 2. 每个topic的FPS配置
