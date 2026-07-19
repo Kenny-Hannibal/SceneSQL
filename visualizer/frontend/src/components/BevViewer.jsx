@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -18,7 +18,19 @@ function vehToThree(vx, vy) {
   return [-(vy || 0), -(vx || 0)];
 }
 
-export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
+/**
+ * BevViewer — BEV 3D渲染组件
+ *
+ * Props:
+ *   bagPath, authFetch, startTsNs, endTsNs — 数据源
+ *   compact — 紧凑模式：只渲染canvas，不渲染标题/控件/进度条，canvas填满父容器
+ *
+ * Ref (useImperativeHandle):
+ *   play() / pause() / togglePlay() — 播放控制
+ *   seekToRatio(ratio) — 跳到 0~1 位置
+ *   getProgress() → { current: 0~1, frameIdx, totalFrames, playing }
+ */
+const BevViewer = forwardRef(function BevViewer({ bagPath, authFetch, startTsNs, endTsNs, compact }, ref) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -47,6 +59,37 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const pendingDataRef = useRef(null);
   const threeInitializedRef = useRef(false);
 
+  // ── 暴露给父组件的命令式接口 ──
+  useImperativeHandle(ref, () => ({
+    play: () => { setPlaying(true); },
+    pause: () => { setPlaying(false); },
+    togglePlay: () => { setPlaying(p => !p); },
+    seekToRatio: (ratio) => {
+      const total = info?.total_frames || 0;
+      const start = startFrameIdx;
+      const end = endFrameIdx != null ? endFrameIdx : total - 1;
+      const range = end - start + 1;
+      const idx = Math.round(start + ratio * (range - 1));
+      const clampedIdx = Math.max(start, Math.min(end, idx));
+      setCurrentFrame(clampedIdx);
+      playIdxRef.current = clampedIdx;
+      loadFrame(clampedIdx);
+    },
+    getProgress: () => {
+      const total = info?.total_frames || 0;
+      const start = startFrameIdx;
+      const end = endFrameIdx != null ? endFrameIdx : total - 1;
+      const range = end - start + 1;
+      const current = currentFrame - start;
+      return {
+        current: range > 0 ? current / (range - 1) : 0,
+        frameIdx: currentFrame,
+        totalFrames: range,
+        playing: playing,
+      };
+    },
+  }), [info, startFrameIdx, endFrameIdx, currentFrame, playing]);
+
   // ── 初始化 Three.js 场景 ──
   const initThreeJS = useCallback(() => {
     const canvas = canvasRef.current;
@@ -54,7 +97,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     threeInitializedRef.current = true;
 
     const w = canvas.clientWidth || 800;
-    const h = canvas.clientHeight || 450;
+    const h = canvas.clientHeight || (compact ? 400 : 450);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a1a);
@@ -150,7 +193,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       updateSceneInternal(pendingDataRef.current);
       pendingDataRef.current = null;
     }
-  }, []);
+  }, [compact]);
 
   // ── canvas出现时初始化Three.js ──
   useEffect(() => {
@@ -166,7 +209,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       const canvas = canvasRef.current;
       if (!renderer || !canvas) return;
       const w = canvas.clientWidth || 800;
-      const h = canvas.clientHeight || 450;
+      const h = canvas.clientHeight || (compact ? 400 : 450);
       renderer.setSize(w, h);
       if (camera.isOrthographicCamera) {
         const aspect = w / h;
@@ -183,7 +226,7 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
-  }, [info]);
+  }, [info, compact]);
 
   // ── 带超时的 fetch ──
   const fetchWithTimeout = useCallback(async (url, timeoutMs = 30000) => {
@@ -558,6 +601,29 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
   const baseTs = info?.first_ts_ns || 0;
   const tsSec = frameStats?.ts_ns ? ((frameStats.ts_ns - baseTs) / 1e9).toFixed(3) : '--';
 
+  // ── Compact 模式：只渲染 canvas，填满父容器 ──
+  if (compact) {
+    return (
+      <>
+        <canvas
+          ref={canvasRef}
+          style={{ width: '100%', height: '100%', background: '#0a0a1a', display: 'block' }}
+        />
+        {loading && (
+          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#1890ff', fontSize: 13 }}>
+            ⏳ Loading BEV...
+          </div>
+        )}
+        {error && (
+          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#ff4d4f', fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ── 完整模式（独立使用） ──
   return (
     <div style={{ background: '#fff', borderRadius: 8, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
       <h2>🗺️ 3D BEV View (Fusion Map)</h2>
@@ -629,4 +695,6 @@ export default function BevViewer({ bagPath, authFetch, startTsNs, endTsNs }) {
       )}
     </div>
   );
-}
+});
+
+export default BevViewer;

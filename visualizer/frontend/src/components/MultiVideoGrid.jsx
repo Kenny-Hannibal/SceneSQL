@@ -2,15 +2,16 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import BevViewer from './BevViewer';
 
 /**
- * MultiVideoGrid — 宫格模式：N个video同时播放
+ * MultiVideoGrid — 宫格模式：N个video+BEV同时播放
  *
  * 核心逻辑：
- *   - 使用 /stream-multi 端点（共享Reader + N路ffmpeg + 复用协议）
+ *   - 视频topic：使用 /stream-multi 端点（共享Reader + N路ffmpeg + 复用协议）
+ *   - BEV topic：compact BevViewer（只渲染canvas），受grid共享进度条/控件控制
  *   - 二进制demux：[topic_idx:1B][data_len:4B LE][fMP4_data]
- *   - 每个topic独立的MediaSource + SourceBuffer
+ *   - 每个视频topic独立的MediaSource + SourceBuffer
  *   - 全局播放/暂停/倍速同步
  *   - 进度条：用 buffered.end() 作为总时长（MSE流 duration=Infinity）
- *   - 所有topic都有数据后才一起播放
+ *   - 所有视频topic都有数据后才一起播放
  */
 
 const COLORS = ['#ff4d4f','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2','#eb2f96','#fa8c16'];
@@ -33,6 +34,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [allVideosEnded, setAllVideosEnded] = useState(false);
 
+  // BEV refs — 每个BEV topic一个ref
+  const bevRefs = useRef({});
+
   // ── Codec ──
   const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
   const h264Mime = 'video/mp4; codecs="avc1.64001f"';
@@ -54,7 +58,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   // ── 进度条：MSE流 duration=Infinity，改用 buffered.end() ──
   useEffect(() => {
     const tick = setInterval(() => {
-      const firstTopic = displayOrder[0];
+      const firstTopic = videoTopics[0];
       const v = videoRefs.current[firstTopic];
       if (!v) return;
       // currentTime 直接读
@@ -84,16 +88,22 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     if (!bufferedEnd) return;
     const t = ratio * bufferedEnd;
     displayOrder.forEach(topic => {
-      const v = videoRefs.current[topic];
-      if (v) {
-        try {
-          if (v.buffered && v.buffered.length > 0) {
-            const maxTime = v.buffered.end(v.buffered.length - 1);
-            v.currentTime = Math.min(t, maxTime);
-          }
-        } catch (e) {}
-        // seek后浏览器可能自动恢复播放，强制暂停
-        try { v.pause(); } catch (e) {}
+      if (topic.includes('fusion_map')) {
+        // BEV topic — 通过ref控制
+        const ref = bevRefs.current[topic];
+        if (ref) ref.seekToRatio(ratio);
+      } else {
+        const v = videoRefs.current[topic];
+        if (v) {
+          try {
+            if (v.buffered && v.buffered.length > 0) {
+              const maxTime = v.buffered.end(v.buffered.length - 1);
+              v.currentTime = Math.min(t, maxTime);
+            }
+          } catch (e) {}
+          // seek后浏览器可能自动恢复播放，强制暂停
+          try { v.pause(); } catch (e) {}
+        }
       }
     });
     setCurrentTime(t);
@@ -167,7 +177,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     drainQueue(topic);
   };
 
-  // ── 启动流（只对视频topic，BEV topic只渲染BevViewer不走MSE流） ──
+  // ── 启动流（只对视频topic，BEV topic只渲染compact BevViewer不走MSE流） ──
   const startStream = useCallback(() => {
     // 只对视频topic启动MSE流
     if (videoTopics.length === 0) return;
@@ -305,52 +315,54 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     }
   };
 
-  // ── 播放/暂停 ──
+  // ── 播放/暂停（视频+BEV统一控制） ──
   const togglePlay = useCallback(() => {
-    const videos = displayOrder.map(t => videoRefs.current[t]).filter(Boolean);
-    if (videos.length === 0) return;
-
-    // 直接检测实际状态：是否所有video都在播放
-    const allPlaying = videos.every(v => !v.paused && !v.ended);
+    const videoList = videoTopics.map(t => videoRefs.current[t]).filter(Boolean);
+    const allPlaying = videoList.length > 0 && videoList.every(v => !v.paused && !v.ended);
 
     if (allPlaying) {
-      // 暂停全部
-      videos.forEach(v => { try { v.pause(); } catch (e) {} });
+      // 暂停全部视频
+      videoList.forEach(v => { try { v.pause(); } catch (e) {} });
+      // 暂停全部BEV
+      bevTopics.forEach(t => {
+        const ref = bevRefs.current[t];
+        if (ref) ref.pause();
+      });
       setIsPlaying(false);
     } else {
-      // 播放全部：逐个play，确保同步
+      // 播放全部视频
       let anyFailed = false;
-      videos.forEach(v => {
-        // 先暂停确保状态干净，再play
+      videoList.forEach(v => {
         try { v.pause(); } catch (e) {}
         const p = v.play();
-        if (p) {
-          p.catch(() => { anyFailed = true; });
-        }
+        if (p) p.catch(() => { anyFailed = true; });
+      });
+      // 播放全部BEV
+      bevTopics.forEach(t => {
+        const ref = bevRefs.current[t];
+        if (ref) ref.play();
       });
       // 给play()一点时间完成，再检查状态
       setTimeout(() => {
-        const nowAllPlaying = videos.every(v => !v.paused);
+        const nowAllPlaying = videoList.every(v => !v.paused);
         setIsPlaying(nowAllPlaying);
         if (!nowAllPlaying) {
-          // 有些失败了，重试一次
-          videos.forEach(v => {
-            if (v.paused) {
-              v.play().catch(() => {});
-            }
+          videoList.forEach(v => {
+            if (v.paused) v.play().catch(() => {});
           });
           setTimeout(() => {
-            setIsPlaying(videos.every(v => !v.paused));
+            setIsPlaying(videoList.every(v => !v.paused));
           }, 200);
         }
       }, 100);
     }
-  }, [displayOrder]);
+  }, [displayOrder, videoTopics, bevTopics]);
 
   // ── 速度同步 ──
   useEffect(() => {
-    displayOrder.forEach(t => { const v = videoRefs.current[t]; if (v) v.playbackRate = speed; });
-  }, [speed, displayOrder]);
+    videoTopics.forEach(t => { const v = videoRefs.current[t]; if (v) v.playbackRate = speed; });
+    // BEV是固定10fps，速度控制暂不支持（跳帧实现复杂）
+  }, [speed, displayOrder, videoTopics]);
 
   // ── 拖拽 ──
   const handleDragStart = (e, idx) => {
@@ -385,9 +397,12 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
 
   // ── 渲染 ──
   const progress = allVideosEnded ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
+  const hasVideo = videoTopics.length > 0;
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
-      {/* 进度条 */}
+      {/* 进度条（仅在有视频topic时显示，BEV独占时用BevViewer自带的） */}
+      {hasVideo && (
+      <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexShrink: 0 }}>
         <span style={{ color: '#aaa', fontSize: 11, minWidth: 42, textAlign: 'right' }}>{fmtTime(currentTime)}</span>
         <div
@@ -445,6 +460,8 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
           {isFullscreen ? '⤓ 退出全屏' : '⤢ 全屏'}
         </button>
       </div>
+      </>
+      )}
 
       {/* 宫格 */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
@@ -470,15 +487,15 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
               }}
             >
               {topic.includes('fusion_map') ? (
-                /* BEV 渲染 BevViewer */
-                <div style={{ width: '100%', height: '100%', background: '#0a0a2e' }}>
-                  <BevViewer
-                    bagPath={emBinPath || bagPath}
-                    startTsNs={startTs}
-                    endTsNs={endTs}
-                    compact={true}
-                  />
-                </div>
+                /* BEV 渲染 compact BevViewer */
+                <BevViewer
+                  ref={el => { bevRefs.current[topic] = el; }}
+                  compact
+                  bagPath={emBinPath || bagPath}
+                  authFetch={(url, opts) => fetch(url, opts)}  // grid模式下无authFetch，用原生fetch
+                  startTsNs={startTs}
+                  endTsNs={endTs}
+                />
               ) : (
                 <video
                   ref={el => { videoRefs.current[topic] = el; }}
@@ -492,7 +509,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
                 padding: '1px 6px', borderRadius: 2, fontSize: 10, fontWeight: 'bold', color: '#fff',
                 textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none',
               }}>
-                {shortName(topic)}
+                {topic.includes('fusion_map') ? '🗺️ ' : ''}{shortName(topic)}
               </div>
               <div style={{ position: 'absolute', top: 2, right: 2, color: 'rgba(255,255,255,0.2)', fontSize: 12, pointerEvents: 'none' }}>⠿</div>
             </div>

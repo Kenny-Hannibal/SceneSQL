@@ -260,9 +260,40 @@ export default function AgentPanel() {
   // BEV 已统一到 playerModal（is_bev 标记），不再需要独立弹窗
   const [playerGridMode, setPlayerGridMode] = useState(false);       // 宫格模式（多topic同时播放）
   const [playerGridTopics, setPlayerGridTopics] = useState([]);     // 宫格模式选中的topics
+  const bevViewerRef = useRef(null);  // BevViewer 的 ref（compact 模式下由外层控件控制）
+  const [bevProgress, setBevProgress] = useState({ current: 0, playing: false });  // BEV 播放进度
+  const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);  // playerModal 全屏状态
+  const playerContentRef = useRef(null);  // playerModal 内容区 DOM（全屏用）
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
+
+  // ── BEV 进度轮询（单topic BEV模式下，每200ms从ref读取进度） ──
+  useEffect(() => {
+    if (!playerModalOpen || !playerData?.is_bev || playerGridMode || !bevViewerRef.current) return;
+    const tick = setInterval(() => {
+      try {
+        const p = bevViewerRef.current.getProgress();
+        if (p) setBevProgress(p);
+      } catch (e) {}
+    }, 200);
+    return () => clearInterval(tick);
+  }, [playerModalOpen, playerData?.is_bev, playerGridMode]);
+
+  // ── playerModal 全屏切换 ──
+  const togglePlayerFullscreen = () => {
+    if (!playerContentRef.current) return;
+    if (!document.fullscreenElement) {
+      playerContentRef.current.requestFullscreen().then(() => setIsPlayerFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsPlayerFullscreen(false)).catch(() => {});
+    }
+  };
+  useEffect(() => {
+    const handler = () => setIsPlayerFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   // 监听手动路径输入，自动推断 queryMode
   useEffect(() => {
@@ -2160,6 +2191,7 @@ export default function AgentPanel() {
             )}
 
             {/* ── 内容区域 ── */}
+            <div ref={playerContentRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             {playerGridMode && playerGridTopics.length > 1 ? (
               /* 宫格模式：N个video + BEV，用 /stream-multi */
               <MultiVideoGrid
@@ -2173,19 +2205,59 @@ export default function AgentPanel() {
                 streamToken={localStorage.getItem('token')}
               />
             ) : playerData.is_bev ? (
-              /* 单topic BEV 模式：渲染 BevViewer */
-              <div style={{ background: '#fff', borderRadius: 4, padding: 8, minWidth: 700, maxWidth: 900, maxHeight: '80vh', overflowY: 'auto' }}>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
-                  Bag: {playerData._multiViewMeta?.emBinPath || playerData._multiViewMeta?.bagPath}
-                  {playerData._multiViewMeta?.startTs != null && <> · 起始: {(playerData._multiViewMeta.startTs / 1e9).toFixed(2)}s</>}
+              /* 单topic BEV 模式：compact BevViewer + 共享控件 */
+              <>
+                <div style={{ flex: 1, position: 'relative', minHeight: 400, background: '#0a0a1a', borderRadius: 4, overflow: 'hidden' }}>
+                  <BevViewer
+                    ref={bevViewerRef}
+                    compact
+                    bagPath={playerData._multiViewMeta?.emBinPath || playerData._multiViewMeta?.bagPath}
+                    authFetch={authFetch}
+                    startTsNs={playerData._multiViewMeta?.startTs}
+                    endTsNs={playerData._multiViewMeta?.endTs}
+                  />
                 </div>
-                <BevViewer
-                  bagPath={playerData._multiViewMeta?.emBinPath || playerData._multiViewMeta?.bagPath}
-                  authFetch={authFetch}
-                  startTsNs={playerData._multiViewMeta?.startTs}
-                  endTsNs={playerData._multiViewMeta?.endTs}
-                />
-              </div>
+                {/* ── BEV 共享控件 ── */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexShrink: 0 }}>
+                  <button
+                    onClick={() => { if (bevViewerRef.current) bevViewerRef.current.togglePlay(); }}
+                    style={{
+                      padding: '4px 12px', fontSize: 12, borderRadius: 3, border: 'none',
+                      background: bevProgress.playing ? '#da3633' : '#238636', color: '#fff', cursor: 'pointer',
+                    }}
+                  >
+                    {bevProgress.playing ? '⏸ 暂停' : '▶ 播放'}
+                  </button>
+                  {/* 进度条 */}
+                  <div
+                    onClick={e => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                      if (bevViewerRef.current) bevViewerRef.current.seekToRatio(ratio);
+                    }}
+                    style={{ flex: 1, height: 6, background: '#333', borderRadius: 3, cursor: 'pointer', position: 'relative' }}
+                  >
+                    <div style={{ width: `${(bevProgress.current || 0) * 100}%`, height: '100%', background: '#1890ff', borderRadius: 3 }} />
+                    <div style={{
+                      position: 'absolute', left: `${(bevProgress.current || 0) * 100}%`, top: '50%', transform: 'translate(-50%,-50%)',
+                      width: 10, height: 10, borderRadius: '50%', background: '#1890ff', border: '2px solid #fff',
+                      pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,0.5)',
+                    }} />
+                  </div>
+                  <span style={{ color: '#aaa', fontSize: 11, minWidth: 60, textAlign: 'right' }}>
+                    {bevProgress.frameIdx != null ? `${bevProgress.frameIdx + 1}/${bevProgress.totalFrames || 0}` : '--'}
+                  </span>
+                  <button
+                    onClick={togglePlayerFullscreen}
+                    style={{
+                      padding: '2px 8px', fontSize: 12, borderRadius: 3, border: '1px solid #555',
+                      background: 'transparent', color: '#ccc', cursor: 'pointer',
+                    }}
+                  >
+                    {isPlayerFullscreen ? '⤓ 退出全屏' : '⤢ 全屏'}
+                  </button>
+                </div>
+              </>
             ) : playerData.video_url ? (
               <video
                 src={playerData.video_url}
@@ -2201,6 +2273,7 @@ export default function AgentPanel() {
                 style={{ maxWidth: '85vw', maxHeight: '80vh', borderRadius: 4 }}
               />
             )}
+            </div>
           </div>
         </div>
       )}
