@@ -80,26 +80,33 @@ export default function MultiCameraPlayer({
     });
   };
 
-  // ── 开始/重启播放 ──
+  // ── 开始/重启播放（仅设置 order，真正初始化在 useEffect 里） ──
+  const [streamRequested, setStreamRequested] = useState(false);
+
   const startStream = useCallback(() => {
     if (selected.length === 0) return;
-
-    // 清理旧的
     cleanup();
+    setOrder([...selected]);
+    setStreamRequested(true);  // 触发 useEffect 初始化 MSE
+  }, [selected, cleanup]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const topics = [...selected];
-    setOrder(topics);
-    setLoadingStatus('connecting');
+  // ── 当 order 更新且 streamRequested=true 时，初始化 MSE + 启动流 ──
+  // 此时 video 元素已挂载，videoRefs 可用
+  useEffect(() => {
+    if (!streamRequested || order.length === 0) return;
+    setStreamRequested(false);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    setLoadingStatus('connecting');
 
-    // 延迟到 video 元素挂载后再初始化 MSE
-    // 用 requestAnimationFrame 等一帧
-    requestAnimationFrame(() => {
-      initMSEAndStream(topics, controller);
+    // 等一帧确保 ref 回调已执行
+    const raf = requestAnimationFrame(() => {
+      initMSEAndStream(order, controller);
     });
-  }, [selected, bagPath, actualMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => cancelAnimationFrame(raf);
+  }, [streamRequested, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 初始化 MSE + 启动流 ──
   const initMSEAndStream = async (topics, controller) => {
@@ -145,12 +152,30 @@ export default function MultiCameraPlayer({
     setLoadingStatus('streaming');
 
     // 3. 绑定 updateend 回调（处理队列）
+    // 首次有数据追加后自动播放
+    let autoPlayed = false;
+    const tryAutoPlay = () => {
+      if (autoPlayed) return;
+      autoPlayed = true;
+      // 稍等一小段让首帧 fMP4 init segment 被 MSE 解析
+      setTimeout(() => {
+        topics.forEach(topic => {
+          const video = videoRefs.current[topic];
+          if (video && video.paused) {
+            video.play().catch(() => {});
+          }
+        });
+        setIsPlaying(true);
+      }, 300);
+    };
+
     topics.forEach(topic => {
       const state = states[topic];
       if (!state?.sourceBuffer) return;
       state.sourceBuffer.addEventListener('updateend', () => {
         state.isUpdating = false;
         drainQueue(topic);
+        tryAutoPlay();
       });
       state.sourceBuffer.addEventListener('error', () => {
         state.isUpdating = false;
