@@ -25,7 +25,7 @@ const SPEEDS = [0.5, 1, 2, 4];
 const COLORS = ['#ff4d4f','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2','#eb2f96','#fa8c16'];
 
 export default function MultiCameraPlayer({
-  allTopics,
+  allTopics = [],
   initialTopics = [],
   bagPath,
   mode = 'hevc',
@@ -79,6 +79,29 @@ export default function MultiCameraPlayer({
       return next;
     });
   };
+
+  // ── 清理 MSE ──
+  const cleanup = useCallback(() => {
+    Object.values(mseStatesRef.current).forEach(state => {
+      if (!state) return;
+      try { state.sourceBuffer?.abort(); } catch (e) {}
+      try { if (state.mediaSource?.readyState === 'open') state.mediaSource.endOfStream(); } catch (e) {}
+      try { if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); } catch (e) {}
+    });
+    mseStatesRef.current = {};
+    // 清除所有 video src
+    Object.values(videoRefs.current).forEach(video => {
+      try { video?.pause(); } catch (e) {}
+      try { video?.removeAttribute('src'); video?.load(); } catch (e) {}
+    });
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoadingStatus('idle');
+    setIsPlaying(false);
+    setError(null);
+  }, []);
 
   // ── 开始/重启播放（仅设置 order，真正初始化在 useEffect 里） ──
   const [streamRequested, setStreamRequested] = useState(false);
@@ -268,29 +291,6 @@ export default function MultiCameraPlayer({
       state.queue.unshift(chunk); // 放回队列重试
     }
   };
-
-  // ── 清理 MSE ──
-  const cleanup = useCallback(() => {
-    Object.values(mseStatesRef.current).forEach(state => {
-      if (!state) return;
-      try { state.sourceBuffer?.abort(); } catch (e) {}
-      try { if (state.mediaSource?.readyState === 'open') state.mediaSource.endOfStream(); } catch (e) {}
-      try { if (state.objectUrl) URL.revokeObjectURL(state.objectUrl); } catch (e) {}
-    });
-    mseStatesRef.current = {};
-    // 清除所有 video src
-    Object.values(videoRefs.current).forEach(video => {
-      try { video?.pause(); } catch (e) {}
-      try { video?.removeAttribute('src'); video?.load(); } catch (e) {}
-    });
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setLoadingStatus('idle');
-    setIsPlaying(false);
-    setError(null);
-  }, []);
 
   // ── 播放/暂停（全局同步） ──
   const togglePlay = useCallback(() => {
