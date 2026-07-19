@@ -30,9 +30,13 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   const containerRef = useRef(null);
   const [displayOrder, setDisplayOrder] = useState(topics);
   const [currentTime, setCurrentTime] = useState(0);
-  const [bufferedEnd, setBufferedEnd] = useState(0);  // 用bufferedEnd替代duration
+  const [bufferedEnd, setBufferedEnd] = useState(0);  // MSE实际缓冲范围，用于seek
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [allVideosEnded, setAllVideosEnded] = useState(false);
+
+  // ── 根据 startTs/endTs 计算预期总时长（秒） ──
+  // 这是进度条的"总秒数"，不依赖实时推流结果
+  const durationSec = (startTs != null && endTs != null) ? (endTs - startTs) / 1e9 : 0;
 
   // BEV refs — 每个BEV topic一个ref
   const bevRefs = useRef({});
@@ -92,9 +96,10 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   // ── Seek（所有视频+BEV同步跳转） ──
   // 如果当前正在播放，seek完成后自动恢复播放
   const seekTo = (ratio) => {
-    if (!bufferedEnd) return;
+    const total = durationSec || bufferedEnd;
+    if (!total) return;
     const wasPlaying = isPlaying;
-    const t = ratio * bufferedEnd;
+    const t = ratio * total;
     displayOrder.forEach(topic => {
       if (topic.includes('fusion_map')) {
         // BEV topic — 通过ref控制
@@ -481,7 +486,8 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = allVideosEnded ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
+  const totalDuration = durationSec || bufferedEnd;  // 优先用计算值，fallback到MSE实际值
+  const progress = allVideosEnded ? 1 : (totalDuration > 0 ? currentTime / totalDuration : 0);
   const hasVideo = videoTopics.length > 0;
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
@@ -508,7 +514,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
             pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,0.5)',
           }} />
         </div>
-        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(bufferedEnd)}</span>
+        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(totalDuration)}</span>
       </div>
 
       {/* 工具栏 */}

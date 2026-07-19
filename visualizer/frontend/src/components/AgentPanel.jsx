@@ -1279,15 +1279,8 @@ export default function AgentPanel() {
     mediaSource.addEventListener('sourceopen', async () => {
       if (aborted) return;
       try {
-        // 预先设置预期总时长，避免进度条在加载过程中跳动
-        if (playerData.durationSec && playerData.durationSec > 0) {
-          try {
-            mediaSource.duration = playerData.durationSec;
-            console.log('[HEVC诊断] 预设视频时长:', playerData.durationSec, '秒');
-          } catch (e) {
-            console.warn('[HEVC诊断] 设置 duration 失败:', e);
-          }
-        }
+        // 不预设 mediaSource.duration —— 让 endOfStream() 根据实际缓冲数据自动计算
+        // 预设值 (endTs-startTs)/1e9 可能比实际视频多1秒，导致进度条 8→7 跳变
 
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
         sourceBuffer.addEventListener('error', onSourceBufferError);
