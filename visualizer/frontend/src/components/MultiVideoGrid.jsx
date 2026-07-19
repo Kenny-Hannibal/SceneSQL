@@ -312,6 +312,33 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
         }
         if (offset > 0) buffer = buffer.slice(offset);
       }
+
+      // 流读取完毕 — 排空残余队列，然后 endOfStream 关闭所有 MediaSource
+      // 不调用 endOfStream 会导致 duration=Infinity，暂停后无法恢复播放
+      await new Promise(r => setTimeout(r, 200)); // 等待最后的 appendBuffer 完成
+      for (const topic of topicList) {
+        const s = mseStatesRef.current[topic];
+        if (!s?.mediaSource || s.mediaSource.readyState !== 'open') continue;
+        // 先排空队列
+        if (s.queue.length > 0 && !s.isUpdating && s.sourceBuffer) {
+          try { drainQueue(topic); } catch (e) {}
+          await new Promise(r => setTimeout(r, 100));
+        }
+        // 等待 sourceBuffer 不再 updating
+        let waitCount = 0;
+        while (s.isUpdating && waitCount < 20) {
+          await new Promise(r => setTimeout(r, 100));
+          waitCount++;
+        }
+        try {
+          if (s.mediaSource.readyState === 'open') {
+            s.mediaSource.endOfStream();
+          }
+        } catch (e) {
+          console.warn('[MultiVideoGrid] endOfStream error for', topic, e);
+        }
+      }
+
       setLoadingStatus('done');
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -351,11 +378,10 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
           v.play().catch(() => { anyFailed = true; });
         } catch (e) { anyFailed = true; }
       });
-      // 播放全部BEV（如果已结束，seek回开头）
+      // 播放全部BEV（仅ended时seek回开头）
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
         if (ref) {
-          ref.seekToRatio(0);
           ref.play();
         }
       });
