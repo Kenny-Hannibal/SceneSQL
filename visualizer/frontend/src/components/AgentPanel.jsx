@@ -807,6 +807,9 @@ export default function AgentPanel() {
                 bagEndNs = info.end_time_ns;
                 cameraTopics = (info.topics || []).map((t) => t.name).filter(Boolean);
                 fusionMapTopic = info.fusion_map_topic || null;
+                // 统一：fusion_map_plus 加入 topic 列表，过滤 bev_obstacle_raw
+                if (fusionMapTopic && !cameraTopics.includes(fusionMapTopic.name)) cameraTopics.push(fusionMapTopic.name);
+                cameraTopics = cameraTopics.filter(t => !t.includes('bev_obstacle_raw'));
               } else if (data.stage === 'error') {
                 // 降级：使用非流式 API
                 throw new Error(data.message);
@@ -827,6 +830,9 @@ export default function AgentPanel() {
           bagEndNs = bagInfo.end_time_ns;
           cameraTopics = (bagInfo.topics || []).map((t) => t.name).filter(Boolean);
           fusionMapTopic = bagInfo.fusion_map_topic || null;
+          // 统一：fusion_map_plus 加入 topic 列表，过滤 bev_obstacle_raw
+          if (fusionMapTopic && !cameraTopics.includes(fusionMapTopic.name)) cameraTopics.push(fusionMapTopic.name);
+          cameraTopics = cameraTopics.filter(t => !t.includes('bev_obstacle_raw'));
         }
       } catch (e2) {
         // bag info 不可用，跳过
@@ -1779,59 +1785,26 @@ export default function AgentPanel() {
               </div>
             ) : (
               <div style={{ marginBottom: 16 }}>
-                {/* ── 3D BEV 可视化 Topic ── */}
-                {topicModalData.fusionMapTopic ? (
-                  <div
-                    onClick={() => setSelectedTopic('fusion_map_plus')}
-                    style={{
-                      padding: '10px 14px', marginBottom: 8, borderRadius: 6, cursor: 'pointer',
-                      border: selectedTopic === 'fusion_map_plus' ? '2px solid #1890ff' : '1px solid #d9d9d9',
-                      background: selectedTopic === 'fusion_map_plus' ? '#e6f7ff' : '#fafafa',
-                      display: 'flex', alignItems: 'center', gap: 10,
-                    }}
-                  >
-                    <span style={{ fontSize: 20 }}>🗺️</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>3D BEV 视图 (Fusion Map)</div>
-                      <div style={{ fontSize: 11, color: '#888' }}>fusion_map_plus · 障碍物/车道线/边界线 3D 渲染</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      padding: '10px 14px', marginBottom: 8, borderRadius: 6,
-                      border: '1px solid #e8e8e8', background: '#f5f5f5',
-                      display: 'flex', alignItems: 'center', gap: 10, opacity: 0.6,
-                    }}
-                  >
-                    <span style={{ fontSize: 20 }}>🗺️</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#999' }}>3D BEV 视图 (Fusion Map)</div>
-                      <div style={{ fontSize: 11, color: '#aaa' }}>此 bag 无 fusion_map_plus 数据</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Camera Topics ── */}
+                {/* ── 统一 Topic 选择 ── */}
                 {topicModalData.cameraTopics.length > 0 ? (
                   <div>
                     <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>
-                      📹 Camera Topic:
+                      📹 Topic:
                     </label>
                     <select
                       value={topicModalData.cameraTopics.includes(selectedTopic) ? selectedTopic : ''}
                       onChange={(e) => { if (e.target.value) setSelectedTopic(e.target.value); }}
                       style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
                     >
-                      <option value="" disabled>{selectedTopic && !topicModalData.cameraTopics.includes(selectedTopic) ? selectedTopic : '-- 选择摄像头 --'}</option>
+                      <option value="" disabled>{selectedTopic && !topicModalData.cameraTopics.includes(selectedTopic) ? selectedTopic : '-- 选择 Topic --'}</option>
                       {topicModalData.cameraTopics.map((t) => (
-                        <option key={t} value={t}>{t}</option>
+                        <option key={t} value={t}>{t.includes('fusion_map') ? '🗺️ ' : ''}{t}</option>
                       ))}
                     </select>
                   </div>
-                ) : !topicModalData.fusionMapTopic ? (
+                ) : (
                   <div>
-                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Camera Topic:</label>
+                    <label style={{ fontSize: 13, color: '#555', fontWeight: 500, display: 'block', marginBottom: 6 }}>输入 Topic:</label>
                     <input
                       type="text"
                       value={selectedTopic}
@@ -1840,7 +1813,7 @@ export default function AgentPanel() {
                       style={{ width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #ccc' }}
                     />
                   </div>
-                ) : null}
+                )}
               </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -1876,18 +1849,20 @@ export default function AgentPanel() {
                   {selectedTopic === 'fusion_map_plus' ? '🗺️ 打开 BEV 视图' : '确认提取'}
                 </button>
                 {/* ── 多摄像头宫格按钮 ── */}
-                {topicModalData.cameraTopics.length > 1 && (
+                {topicModalData.cameraTopics.filter(t => !t.includes('fusion_map')).length > 1 && (
                   <button
                     onClick={() => {
                       // 复用 playerModal，进入宫格模式
                       const { bagPath, startTs, endTs, cameraTopics, row } = topicModalData;
+                      // 宫格只包含视频topic（过滤掉 BEV/fusion_map）
+                      const videoTopics = cameraTopics.filter(t => !t.includes('fusion_map'));
+                      if (videoTopics.length === 0) return;
                       const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
                       const h264Mime = 'video/mp4; codecs="avc1.64001f"';
                       const codec = forceH264 ? h264Mime : (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime) ? hevcMime : h264Mime);
                       const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
-                      const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics };
-                      // 选第一个 topic 作为 playerData.topic（单视频区占位），宫格模式会用多流
-                      const defaultTopic = cameraTopics[0] || '';
+                      const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics: videoTopics };
+                      const defaultTopic = videoTopics[0] || '';
                       setPlayerData({
                         stream_url: '',
                         row,
@@ -1898,7 +1873,7 @@ export default function AgentPanel() {
                         _multiViewMeta,
                       });
                       setPlayerGridMode(true);
-                      setPlayerGridTopics(cameraTopics); // 默认全选
+                      setPlayerGridTopics(videoTopics); // 只选视频topic
                       setPlayerError(null);
                       setTopicModalOpen(false);
                       setTopicModalData(null);

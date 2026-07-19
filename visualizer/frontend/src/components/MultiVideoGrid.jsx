@@ -371,7 +371,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
+  const progress = loadingStatus === 'done' ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
       {/* 进度条 */}
@@ -388,7 +388,6 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
         >
           <div style={{
             width: `${progress * 100}%`, height: '100%', background: '#1890ff', borderRadius: 3,
-            transition: 'width 0.2s linear',
           }} />
           <div style={{
             position: 'absolute', left: `${progress * 100}%`, top: '50%', transform: 'translate(-50%,-50%)',
