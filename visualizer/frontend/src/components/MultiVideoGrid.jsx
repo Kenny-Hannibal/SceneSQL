@@ -31,6 +31,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   const [currentTime, setCurrentTime] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);  // 用bufferedEnd替代duration
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [allVideosEnded, setAllVideosEnded] = useState(false);
 
   // ── Codec ──
   const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
@@ -42,6 +43,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
     mimeCodec = supportsHevcMSE ? hevcMime : h264Mime;
   }
+
+  const videoTopics = topics.filter(t => !t.includes('fusion_map'));
+  const bevTopics = topics.filter(t => t.includes('fusion_map'));
 
   const cols = displayOrder.length <= 1 ? 1 : displayOrder.length <= 4 ? 2 : displayOrder.length <= 9 ? 3 : 4;
 
@@ -66,9 +70,14 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
           }
         }
       } catch (e) {}
+      // 检查是否所有视频都已 ended
+      const vids = videoTopics.map(t => videoRefs.current[t]).filter(Boolean);
+      if (vids.length > 0 && vids.every(v => v.ended)) {
+        setAllVideosEnded(true);
+      }
     }, 300);
     return () => clearInterval(tick);
-  }, [displayOrder]);
+  }, [displayOrder, videoTopics]);
 
   // ── Seek（所有视频同步跳转，seek后强制暂停） ──
   const seekTo = (ratio) => {
@@ -89,6 +98,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     });
     setCurrentTime(t);
     setIsPlaying(false);
+    setAllVideosEnded(false);
   };
 
   // ── 全屏 ──
@@ -133,6 +143,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     setError(null);
     setCurrentTime(0);
     setBufferedEnd(0);
+    setAllVideosEnded(false);
   }, []);
 
   // ── SourceBuffer 队列 ──
@@ -156,9 +167,10 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     drainQueue(topic);
   };
 
-  // ── 启动流 ──
+  // ── 启动流（只对视频topic，BEV topic只渲染BevViewer不走MSE流） ──
   const startStream = useCallback(() => {
-    if (displayOrder.length === 0) return;
+    // 只对视频topic启动MSE流
+    if (videoTopics.length === 0) return;
     cleanup();
     setLoadingStatus('connecting');
 
@@ -167,9 +179,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
 
     // 延迟1帧确保video元素已挂载
     requestAnimationFrame(() => {
-      initMSEAndStream(displayOrder, controller);
+      initMSEAndStream(videoTopics, controller);
     });
-  }, [displayOrder, cleanup]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [videoTopics, cleanup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 初始化MSE + 启动流 ──
   const initMSEAndStream = async (topicList, controller) => {
@@ -362,9 +374,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     setDisplayOrder(topics);
   }, [topics]);
 
-  // ── 挂载时自动开始流 ──
+  // ── 挂载时自动开始流（有视频topic时才启动MSE流） ──
   useEffect(() => {
-    if (displayOrder.length > 0) {
+    if (videoTopics.length > 0) {
       const raf = requestAnimationFrame(() => startStream());
       return () => { cancelAnimationFrame(raf); cleanup(); };
     }
@@ -372,7 +384,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
+  const progress = allVideosEnded ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
       {/* 进度条 */}

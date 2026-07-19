@@ -862,7 +862,28 @@ export default function AgentPanel() {
   // ── 多视图 Tab：切换 camera topic ──
   const handleSwitchTopic = (newTopic) => {
     if (!playerData?._multiViewMeta || newTopic === playerData.topic) return;
-    const { bagPath, startTs, endTs } = playerData._multiViewMeta;
+    const { bagPath, emBinPath, startTs, endTs } = playerData._multiViewMeta;
+
+    // ── 切换到 BEV topic → 关闭视频流，打开 BevViewer ──
+    if (newTopic.includes('fusion_map')) {
+      // 先关闭当前视频流
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+      }
+      setPlayerModalOpen(false);
+      setPlayerData(null);
+      // 打开 BEV 弹窗
+      const bevBagPath = emBinPath || bagPath;
+      setBevData({
+        bagPath: bevBagPath,
+        startTsNs: startTs,
+        endTsNs: endTs,
+      });
+      setBevModalOpen(true);
+      return;
+    }
+
     const streamToken = localStorage.getItem('token');
     const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
     const h264Mime = 'video/mp4; codecs="avc1.64001f"';
