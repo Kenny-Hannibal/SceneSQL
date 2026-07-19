@@ -30,9 +30,16 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   const containerRef = useRef(null);
   const [displayOrder, setDisplayOrder] = useState(topics);
   const [currentTime, setCurrentTime] = useState(0);
-  const [bufferedEnd, setBufferedEnd] = useState(0);  // MSE实际缓冲终点，用于进度条总秒数
+  const [bufferedEnd, setBufferedEnd] = useState(0);  // MSE实际缓冲终点（endOfStream后精确）
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [allVideosEnded, setAllVideosEnded] = useState(false);
+
+  // ── 根据 startTs/endTs 计算预期总时长（秒），一开就有，不会变 ──
+  const durationSec = (startTs != null && endTs != null) ? (endTs - startTs) / 1e9 : 0;
+
+  // ── 总时长：优先用 bufferedEnd（MSE精确值），但不超过 durationSec（避免比实际多1秒） ──
+  // 推流完成前用 durationSec（预估），推流完成后用 min(bufferedEnd, durationSec)（精确）
+  const totalDuration = bufferedEnd > 0 ? Math.min(bufferedEnd, durationSec || Infinity) : (durationSec || 0);
 
   // BEV refs — 每个BEV topic一个ref
   const bevRefs = useRef({});
@@ -56,7 +63,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
 
   const shortName = (t) => (t.split('/').pop() || t).replace('_encoded', '');
 
-  // ── 进度条：300ms tick 更新 currentTime；bufferedEnd 只在 updateend/endOfStream 时更新 ──
+  // ── 进度条：300ms tick 更新 currentTime ──
   // 用 ref 存储 videoTopics，避免 useEffect 依赖不稳定数组导致 interval 反复重建
   const videoTopicsRef = useRef(videoTopics);
   videoTopicsRef.current = videoTopics;
@@ -67,7 +74,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       const firstTopic = vts[0];
       const v = videoRefs.current[firstTopic];
       if (!v) return;
-      // currentTime 直接读
+      // currentTime 直接读 DOM
       if (v.currentTime && isFinite(v.currentTime)) {
         setCurrentTime(v.currentTime);
       }
@@ -83,9 +90,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   // ── Seek（所有视频+BEV同步跳转） ──
   // 如果当前正在播放，seek完成后自动恢复播放
   const seekTo = (ratio) => {
-    if (!bufferedEnd) return;
+    if (!totalDuration) return;
     const wasPlaying = isPlaying;
-    const t = ratio * bufferedEnd;
+    const t = ratio * totalDuration;
     displayOrder.forEach(topic => {
       if (topic.includes('fusion_map')) {
         // BEV topic — 通过ref控制
@@ -294,16 +301,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
         if (!readyTopics.has(topic)) {
           readyTopics.add(topic);
         }
-        // 更新 bufferedEnd（进度条总秒数）—— 只在新 chunk append 完成时更新
-        try {
-          const v = videoRefs.current[topic];
-          if (v && v.buffered && v.buffered.length > 0) {
-            const end = v.buffered.end(v.buffered.length - 1);
-            if (isFinite(end) && end > 0) {
-              setBufferedEnd(prev => Math.max(prev, end));
-            }
-          }
-        } catch (e) {}
+        // 不在此处更新 bufferedEnd —— 让总秒数保持 durationSec 预估值不变
         drainQueue(topic);
         tryAutoPlay();
       });
@@ -396,10 +394,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   };
 
   // ── 播放/暂停（视频+BEV统一控制） ──
-  // 核心策略：暂停时做 sync-seek（从 DOM 读实时值），播放时直接 play()
-  // 原因：endOfStream() 后 readyState 可能停在 HAVE_CURRENT_DATA，
-  //       直接 play() 静默失败。seek 刷新 readyState 后 play 才能生效。
-  //       在暂停时 seek 而非播放时 seek，避免 React state currentTime 过时导致位置漂移。
+  // 策略：暂停时做 micro-seek（每帧回退0.001s），强制刷新 readyState，
+  //       这样恢复播放时 play() 不会因 HAVE_CURRENT_DATA 而静默失败。
+  //       micro-seek 量极小（1ms），多次暂停/恢复累积误差 < 人眼可感知。
   const togglePlay = useCallback(() => {
     const videoList = videoTopics.map(t => videoRefs.current[t]).filter(Boolean);
     const allPlaying = videoList.length > 0 && videoList.every(v => !v.paused && !v.ended);
@@ -407,29 +404,22 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     if (allPlaying) {
       // ── 暂停 ──
       videoList.forEach(v => { try { v.pause(); } catch (e) {} });
-      // 暂停全部BEV
-      bevTopics.forEach(t => {
-        const ref = bevRefs.current[t];
-        if (ref) ref.pause();
-      });
+      bevTopics.forEach(t => { const ref = bevRefs.current[t]; if (ref) ref.pause(); });
       setIsPlaying(false);
 
-      // ── 暂停时 sync-seek：用 DOM 实时值（非 React state），刷新 readyState ──
-      // 这保证了后续 play() 能正常工作，无需在播放时再 seek
-      if (videoList.length > 0) {
-        const refTime = videoList[0].currentTime;
-        videoList.forEach(v => {
-          try {
-            if (v.buffered && v.buffered.length > 0) {
-              const maxTime = v.buffered.end(v.buffered.length - 1);
-              v.currentTime = Math.min(refTime, maxTime);
-            }
-          } catch (e) {}
-        });
-      }
+      // micro-seek：强制刷新 readyState（否则后续 play() 可能静默失败）
+      videoList.forEach(v => {
+        try {
+          if (v.buffered && v.buffered.length > 0) {
+            const ct = v.currentTime;
+            const start = v.buffered.start(0);
+            // 回退 0.001s，但不超过缓冲起点
+            v.currentTime = Math.max(start, ct - 0.001);
+          }
+        } catch (e) {}
+      });
     } else {
       // ── 恢复播放 ──
-      // 判断是否是"重播"（视频已结束）
       const anyEnded = videoList.some(v => v.ended);
 
       videoList.forEach(v => {
@@ -445,10 +435,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
         if (ref) {
-          if (anyEnded || allVideosEnded) {
-            // 重播：BEV 需要回到开头
-            ref.seekToRatio(0);
-          }
+          if (anyEnded || allVideosEnded) ref.seekToRatio(0);
           ref.play();
         }
       });
@@ -495,7 +482,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = allVideosEnded ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
+  const progress = allVideosEnded ? 1 : (totalDuration > 0 ? currentTime / totalDuration : 0);
   const hasVideo = videoTopics.length > 0;
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
@@ -522,7 +509,7 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
             pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,0.5)',
           }} />
         </div>
-        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(bufferedEnd)}</span>
+        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(totalDuration)}</span>
       </div>
 
       {/* 工具栏 */}
