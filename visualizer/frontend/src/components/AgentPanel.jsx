@@ -919,7 +919,7 @@ export default function AgentPanel() {
     if (!topicModalData || !selectedTopic) return;
 
     // ── 如果选择了 fusion_map_plus → 打开 BEV 弹窗 ──
-    if (selectedTopic === 'fusion_map_plus') {
+    if (selectedTopic.includes('fusion_map')) {
       setTopicModalOpen(false);
       setTopicModalData(null);
       // 优先使用 em bin 路径（fusion_map_plus.bin 在 em bin 目录下）
@@ -937,7 +937,7 @@ export default function AgentPanel() {
     const { bagPath, row, startTs, endTs, clampedMsg, cameraTopics } = topicModalData;
 
     // 多视图 Tab 所需的公共数据，会存入 playerData 供 Tab 切换时使用
-    const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics: cameraTopics || [] };
+    const _multiViewMeta = { bagPath, emBinPath: topicModalData.emBinPath, startTs, endTs, cameraTopics: cameraTopics || [] };
 
     // 记忆用户选择的 topic
     localStorage.setItem('lastSelectedTopic', selectedTopic);
@@ -1817,7 +1817,7 @@ export default function AgentPanel() {
               </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              {selectedTopic !== 'fusion_map_plus' && (
+              {!selectedTopic.includes('fusion_map') && (
               <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input
                   type="checkbox"
@@ -1846,22 +1846,20 @@ export default function AgentPanel() {
                     background: (!selectedTopic || topicModalData.loading) ? '#ccc' : '#1890ff', color: '#fff', cursor: (!selectedTopic || topicModalData.loading) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {selectedTopic === 'fusion_map_plus' ? '🗺️ 打开 BEV 视图' : '确认提取'}
+                  {selectedTopic.includes('fusion_map') ? '🗺️ 打开 BEV 视图' : '确认提取'}
                 </button>
                 {/* ── 多摄像头宫格按钮 ── */}
-                {topicModalData.cameraTopics.filter(t => !t.includes('fusion_map')).length > 1 && (
+                {topicModalData.cameraTopics.length > 1 && (
                   <button
                     onClick={() => {
                       // 复用 playerModal，进入宫格模式
                       const { bagPath, startTs, endTs, cameraTopics, row } = topicModalData;
-                      // 宫格只包含视频topic（过滤掉 BEV/fusion_map）
-                      const videoTopics = cameraTopics.filter(t => !t.includes('fusion_map'));
-                      if (videoTopics.length === 0) return;
+                      const videoTopics = cameraTopics; // 保留全部topic（含BEV），MultiVideoGrid中BEV会渲染BevViewer
                       const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
                       const h264Mime = 'video/mp4; codecs="avc1.64001f"';
                       const codec = forceH264 ? h264Mime : (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime) ? hevcMime : h264Mime);
                       const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
-                      const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics: videoTopics };
+                      const _multiViewMeta = { bagPath, emBinPath: topicModalData.emBinPath, startTs, endTs, cameraTopics: videoTopics };
                       const defaultTopic = videoTopics[0] || '';
                       setPlayerData({
                         stream_url: '',
@@ -2137,6 +2135,7 @@ export default function AgentPanel() {
               <MultiVideoGrid
                 topics={playerGridTopics}
                 bagPath={playerData._multiViewMeta?.bagPath}
+                emBinPath={playerData._multiViewMeta?.emBinPath}
                 startTs={playerData._multiViewMeta?.startTs}
                 endTs={playerData._multiViewMeta?.endTs}
                 mode={playerData.mse_codec?.includes('hvc1') ? 'hevc' : 'h264'}

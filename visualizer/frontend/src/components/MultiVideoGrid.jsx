@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import BevViewer from './BevViewer';
 
 /**
  * MultiVideoGrid — 宫格模式：N个video同时播放
@@ -14,7 +15,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 
 const COLORS = ['#ff4d4f','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2','#eb2f96','#fa8c16'];
 
-export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, apiBase, streamToken }) {
+export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, endTs, mode, apiBase, streamToken }) {
   const [loadingStatus, setLoadingStatus] = useState('idle');
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -371,7 +372,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = loadingStatus === 'done' ? 1 : (bufferedEnd > 0 ? currentTime / bufferedEnd : 0);
+  const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
       {/* 进度条 */}
@@ -456,11 +457,23 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
                 aspectRatio: '16/9', cursor: 'grab',
               }}
             >
-              <video
-                ref={el => { videoRefs.current[topic] = el; }}
-                muted playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-              />
+              {topic.includes('fusion_map') ? (
+                /* BEV 渲染 BevViewer */
+                <div style={{ width: '100%', height: '100%', background: '#0a0a2e' }}>
+                  <BevViewer
+                    bagPath={emBinPath || bagPath}
+                    startTsNs={startTs}
+                    endTsNs={endTs}
+                    compact={true}
+                  />
+                </div>
+              ) : (
+                <video
+                  ref={el => { videoRefs.current[topic] = el; }}
+                  muted playsInline
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                />
+              )}
               <div style={{
                 position: 'absolute', top: 2, left: 2,
                 background: COLORS[idx % COLORS.length],
