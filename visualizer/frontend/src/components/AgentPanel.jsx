@@ -257,9 +257,7 @@ export default function AgentPanel() {
   const [playerMode, setPlayerMode] = useState(null); // 'hevc-stream' | 'h264-file'
   const [playerError, setPlayerError] = useState(null);
   const [forceH264, setForceH264] = useState(false);
-  // BEV 弹窗
-  const [bevModalOpen, setBevModalOpen] = useState(false);
-  const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
+  // BEV 已统一到 playerModal（is_bev 标记），不再需要独立弹窗
   const [playerGridMode, setPlayerGridMode] = useState(false);       // 宫格模式（多topic同时播放）
   const [playerGridTopics, setPlayerGridTopics] = useState([]);     // 宫格模式选中的topics
 
@@ -859,31 +857,68 @@ export default function AgentPanel() {
     setSelectedTopic(defaultTopic);
   };
 
-  // ── 多视图 Tab：切换 camera topic ──
+  // ── 多视图 Tab：切换 camera/BEV topic ──
   const handleSwitchTopic = (newTopic) => {
     if (!playerData?._multiViewMeta || newTopic === playerData.topic) return;
     const { bagPath, emBinPath, startTs, endTs } = playerData._multiViewMeta;
 
-    // ── 切换到 BEV topic → 关闭视频流，打开 BevViewer ──
+    // ── 切换到 BEV topic → 更新 playerData，渲染 BevViewer ──
     if (newTopic.includes('fusion_map')) {
-      // 先关闭当前视频流
+      // 关闭当前视频流
       if (streamAbortControllerRef.current) {
         streamAbortControllerRef.current.abort();
         streamAbortControllerRef.current = null;
       }
-      setPlayerModalOpen(false);
-      setPlayerData(null);
-      // 打开 BEV 弹窗
-      const bevBagPath = emBinPath || bagPath;
-      setBevData({
-        bagPath: bevBagPath,
-        startTsNs: startTs,
-        endTsNs: endTs,
-      });
-      setBevModalOpen(true);
+      // 更新 playerData 为 BEV 模式
+      setPlayerData(prev => ({
+        ...prev,
+        stream_url: null,
+        topic: newTopic,
+        use_mse: false,
+        is_bev: true,
+      }));
+      setPlayerError(null);
+      localStorage.setItem('lastSelectedTopic', newTopic);
       return;
     }
 
+    // ── 从 BEV 切换到视频 topic → 重建视频流 ──
+    if (playerData.is_bev) {
+      // 离开 BEV 模式，重新构建视频流
+      const streamToken = localStorage.getItem('token');
+      const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+      const h264Mime = 'video/mp4; codecs="avc1.64001f"';
+
+      // 重新检测支持的 codec
+      const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
+      const supportsH264MSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(h264Mime);
+      const codec = supportsHevcMSE ? hevcMime : (supportsH264MSE ? h264Mime : h264Mime);
+      const isHevc = codec === hevcMime;
+      const endpoint = isHevc ? 'stream-hevc' : 'stream-h264';
+
+      const buildStreamUrl = (ep) => {
+        const params = new URLSearchParams({ bag_path: bagPath, topic: newTopic });
+        if (startTs !== null) params.append('start_ts', String(startTs));
+        if (endTs !== null) params.append('end_ts', String(endTs));
+        if (streamToken) params.append('token', streamToken);
+        return `${API_BASE}/api/video/${ep}?${params.toString()}`;
+      };
+
+      setPlayerData(prev => ({
+        ...prev,
+        stream_url: buildStreamUrl(endpoint),
+        topic: newTopic,
+        use_mse: true,
+        mse_codec: codec,
+        is_bev: false,
+        durationSec: (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null,
+      }));
+      setPlayerError(null);
+      localStorage.setItem('lastSelectedTopic', newTopic);
+      return;
+    }
+
+    // ── 视频 topic 之间切换（原有逻辑） ──
     const streamToken = localStorage.getItem('token');
     const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
     const h264Mime = 'video/mp4; codecs="avc1.64001f"';
@@ -939,26 +974,30 @@ export default function AgentPanel() {
   const handleExtractVideo = async () => {
     if (!topicModalData || !selectedTopic) return;
 
-    // ── 如果选择了 fusion_map_plus → 打开 BEV 弹窗 ──
-    if (selectedTopic.includes('fusion_map')) {
-      setTopicModalOpen(false);
-      setTopicModalData(null);
-      // 优先使用 em bin 路径（fusion_map_plus.bin 在 em bin 目录下）
-      // fallback 到 rosbag 路径（部分 upm_replay bag 里也包含 fusion_map_plus topic）
-      const bevBagPath = topicModalData.emBinPath || topicModalData.bagPath;
-      setBevData({
-        bagPath: bevBagPath,
-        startTsNs: topicModalData.startTs,
-        endTsNs: topicModalData.endTs,
-      });
-      setBevModalOpen(true);
-      return;
-    }
-
     const { bagPath, row, startTs, endTs, clampedMsg, cameraTopics } = topicModalData;
 
     // 多视图 Tab 所需的公共数据，会存入 playerData 供 Tab 切换时使用
     const _multiViewMeta = { bagPath, emBinPath: topicModalData.emBinPath, startTs, endTs, cameraTopics: cameraTopics || [] };
+
+    // ── 如果选择了 BEV topic → 走统一的 playerModal，视频区域渲染 BevViewer ──
+    if (selectedTopic.includes('fusion_map')) {
+      setTopicModalOpen(false);
+      setTopicModalData(null);
+      setPlayerError(null);
+      setPlayerMode(null);
+      setPlayerData({
+        stream_url: null,  // BEV 不需要 stream URL
+        row,
+        topic: selectedTopic,
+        use_mse: false,    // BEV 不走 MSE
+        is_bev: true,      // 标记为 BEV 模式
+        durationSec: (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null,
+        _multiViewMeta,
+      });
+      setPlayerModalOpen(true);
+      localStorage.setItem('lastSelectedTopic', selectedTopic);
+      return;
+    }
 
     // 记忆用户选择的 topic
     localStorage.setItem('lastSelectedTopic', selectedTopic);
@@ -1913,37 +1952,7 @@ export default function AgentPanel() {
         </div>
       )}
 
-      {/* ── 3D BEV 视图弹窗 ── */}
-      {bevModalOpen && bevData && (
-        <div
-          style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-          }}
-          onClick={(e) => { if (e.target === e.currentTarget) { setBevModalOpen(false); setBevData(null); } }}
-        >
-          <div style={{ background: '#fff', borderRadius: 8, padding: 20, minWidth: 700, maxWidth: 900, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>🗺️ 3D BEV View</h3>
-              <button
-                onClick={() => { setBevModalOpen(false); setBevData(null); }}
-                style={{ padding: '4px 10px', fontSize: 16, borderRadius: 4, border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', lineHeight: 1 }}
-                title="关闭"
-              >✕</button>
-            </div>
-            <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
-              Bag: {bevData.bagPath}
-              {bevData.startTsNs != null && <> · 起始: {(bevData.startTsNs / 1e9).toFixed(2)}s</>}
-            </div>
-            <BevViewer
-              bagPath={bevData.bagPath}
-              authFetch={authFetch}
-              startTsNs={bevData.startTsNs}
-              endTsNs={bevData.endTsNs}
-            />
-          </div>
-        </div>
-      )}
+      {/* ── 3D BEV 视图已统一到 playerModal，不再需要独立弹窗 ── */}
 
       {/* SQL 执行进度弹窗 */}
       {sqlExecModalOpen && (
@@ -2006,7 +2015,7 @@ export default function AgentPanel() {
           <div style={{ background: '#000', borderRadius: 8, padding: 16, maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ color: '#fff', fontSize: 14 }}>
-                📹 {playerData.row.bag_id || '未知'} | {playerGridMode ? '📷 宫格模式' : playerData.topic}
+                📹 {playerData.row.bag_id || '未知'} | {playerGridMode ? '📷 宫格模式' : (playerData.is_bev ? '🗺️ ' + (playerData.topic?.split('/').pop() || playerData.topic) : playerData.topic)}
                 {playerMode && (
                   <span style={{
                     marginLeft: 12,
@@ -2150,9 +2159,9 @@ export default function AgentPanel() {
               </div>
             )}
 
-            {/* ── 视频区域 ── */}
+            {/* ── 内容区域 ── */}
             {playerGridMode && playerGridTopics.length > 1 ? (
-              /* 宫格模式：N个video，用 /stream-multi */
+              /* 宫格模式：N个video + BEV，用 /stream-multi */
               <MultiVideoGrid
                 topics={playerGridTopics}
                 bagPath={playerData._multiViewMeta?.bagPath}
@@ -2163,6 +2172,20 @@ export default function AgentPanel() {
                 apiBase={API_BASE}
                 streamToken={localStorage.getItem('token')}
               />
+            ) : playerData.is_bev ? (
+              /* 单topic BEV 模式：渲染 BevViewer */
+              <div style={{ background: '#fff', borderRadius: 4, padding: 8, minWidth: 700, maxWidth: 900, maxHeight: '80vh', overflowY: 'auto' }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+                  Bag: {playerData._multiViewMeta?.emBinPath || playerData._multiViewMeta?.bagPath}
+                  {playerData._multiViewMeta?.startTs != null && <> · 起始: {(playerData._multiViewMeta.startTs / 1e9).toFixed(2)}s</>}
+                </div>
+                <BevViewer
+                  bagPath={playerData._multiViewMeta?.emBinPath || playerData._multiViewMeta?.bagPath}
+                  authFetch={authFetch}
+                  startTsNs={playerData._multiViewMeta?.startTs}
+                  endTsNs={playerData._multiViewMeta?.endTs}
+                />
+              </div>
             ) : playerData.video_url ? (
               <video
                 src={playerData.video_url}
