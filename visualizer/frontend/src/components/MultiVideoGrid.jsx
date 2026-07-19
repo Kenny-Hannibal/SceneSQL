@@ -372,16 +372,17 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       }
 
       // endOfStream 完成后，最终更新 bufferedEnd
-      // 此时 duration 从 Infinity 变为实际值，buffered.end() 是精确的
+      // 取所有 video topic 的 buffered.end() 最大值（不同topic时长可能不同）
       try {
-        const firstTopic = topicList.find(t => !t.includes('fusion_map'));
-        const v = firstTopic ? videoRefs.current[firstTopic] : null;
-        if (v && v.buffered && v.buffered.length > 0) {
-          const end = v.buffered.end(v.buffered.length - 1);
-          if (isFinite(end) && end > 0) {
-            setBufferedEnd(end);
+        let maxEnd = 0;
+        videoTopics.forEach(t => {
+          const v = videoRefs.current[t];
+          if (v && v.buffered && v.buffered.length > 0) {
+            const end = v.buffered.end(v.buffered.length - 1);
+            if (isFinite(end) && end > maxEnd) maxEnd = end;
           }
-        }
+        });
+        if (maxEnd > 0) setBufferedEnd(maxEnd);
       } catch (e) {}
 
       setLoadingStatus('done');
