@@ -8,7 +8,8 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
  *   - 二进制demux：[topic_idx:1B][data_len:4B LE][fMP4_data]
  *   - 每个topic独立的MediaSource + SourceBuffer
  *   - 全局播放/暂停/倍速同步
- *   - CSS Grid自适应 + 纵向滚动
+ *   - 进度条：用 buffered.end() 作为总时长（MSE流 duration=Infinity）
+ *   - 所有topic都有数据后才一起播放
  */
 
 const COLORS = ['#ff4d4f','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2','#eb2f96','#fa8c16'];
@@ -24,10 +25,10 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   const mseStatesRef = useRef({});
   const abortRef = useRef(null);
   const dragSrcIdx = useRef(null);
-  const containerRef = useRef(null);  // 全屏用
+  const containerRef = useRef(null);
   const [displayOrder, setDisplayOrder] = useState(topics);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [bufferedEnd, setBufferedEnd] = useState(0);  // 用bufferedEnd替代duration
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // ── Codec ──
@@ -45,27 +46,43 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
 
   const shortName = (t) => (t.split('/').pop() || t).replace('_encoded', '');
 
-  // ── 进度条：从第一个video取 currentTime/duration ──
+  // ── 进度条：MSE流 duration=Infinity，改用 buffered.end() ──
   useEffect(() => {
     const tick = setInterval(() => {
       const firstTopic = displayOrder[0];
       const v = videoRefs.current[firstTopic];
-      if (v && v.duration && isFinite(v.duration)) {
+      if (!v) return;
+      // currentTime 直接读
+      if (v.currentTime && isFinite(v.currentTime)) {
         setCurrentTime(v.currentTime);
-        setDuration(v.duration);
       }
-    }, 500);
+      // 用 buffered 范围作为"总时长"
+      try {
+        if (v.buffered && v.buffered.length > 0) {
+          const end = v.buffered.end(v.buffered.length - 1);
+          if (isFinite(end) && end > 0) {
+            setBufferedEnd(end);
+          }
+        }
+      } catch (e) {}
+    }, 300);
     return () => clearInterval(tick);
   }, [displayOrder]);
 
   // ── Seek（所有视频同步跳转） ──
   const seekTo = (ratio) => {
-    if (!duration) return;
-    const t = ratio * duration;
+    if (!bufferedEnd) return;
+    const t = ratio * bufferedEnd;
     displayOrder.forEach(topic => {
       const v = videoRefs.current[topic];
-      if (v && v.duration && isFinite(v.duration)) {
-        v.currentTime = t;
+      if (v) {
+        // 安全seek：不能超出buffered范围
+        try {
+          if (v.buffered && v.buffered.length > 0) {
+            const maxTime = v.buffered.end(v.buffered.length - 1);
+            v.currentTime = Math.min(t, maxTime);
+          }
+        } catch (e) {}
       }
     });
     setCurrentTime(t);
@@ -111,6 +128,8 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
     setLoadingStatus('idle');
     setIsPlaying(false);
     setError(null);
+    setCurrentTime(0);
+    setBufferedEnd(0);
   }, []);
 
   // ── SourceBuffer 队列 ──
@@ -158,7 +177,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
       const ms = new MediaSource();
       const url = URL.createObjectURL(ms);
       video.src = url;
-      states[topic] = { mediaSource: ms, sourceBuffer: null, objectUrl: url, queue: [], isUpdating: false };
+      states[topic] = { mediaSource: ms, sourceBuffer: null, objectUrl: url, queue: [], isUpdating: false, hasData: false };
     }
     mseStatesRef.current = states;
 
@@ -179,26 +198,40 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
 
     setLoadingStatus('streaming');
 
-    // 首次数据append后自动播放
+    // ── 等所有topic都有数据后才一起播放 ──
+    const readyTopics = new Set();
     let autoPlayed = false;
     const tryAutoPlay = () => {
       if (autoPlayed) return;
+      // 检查是否所有topic都已收到数据
+      const allReady = topicList.every(t => readyTopics.has(t));
+      if (!allReady) return;
       autoPlayed = true;
+      // 等一小段时间让最后一个SourceBuffer完成append
       setTimeout(() => {
         topicList.forEach(topic => {
           const v = videoRefs.current[topic];
-          if (v && v.paused) v.play().catch(() => {});
+          if (v && v.paused) {
+            v.play().then(() => {
+              setIsPlaying(true);
+            }).catch(() => {
+              // 浏览器autoplay策略拒绝 — 需要用户手动点播放
+              console.warn('[MultiVideoGrid] autoplay blocked for', topic);
+            });
+          }
         });
-        setIsPlaying(true);
-      }, 300);
+      }, 200);
     };
 
-    // 绑定updateend
+    // 绑定updateend — 跟踪每个topic是否已有数据
     topicList.forEach(topic => {
       const s = states[topic];
       if (!s?.sourceBuffer) return;
       s.sourceBuffer.addEventListener('updateend', () => {
         s.isUpdating = false;
+        if (!readyTopics.has(topic)) {
+          readyTopics.add(topic);
+        }
         drainQueue(topic);
         tryAutoPlay();
       });
@@ -250,13 +283,24 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
     }
   };
 
-  // ── 播放/暂停 ──
-  const togglePlay = () => {
+  // ── 播放/暂停（修复：确保play成功才更新状态） ──
+  const togglePlay = useCallback(() => {
     const videos = displayOrder.map(t => videoRefs.current[t]).filter(Boolean);
-    const anyPlaying = videos.some(v => !v.paused);
-    videos.forEach(v => anyPlaying ? v.pause() : v.play().catch(() => {}));
-    setIsPlaying(!anyPlaying);
-  };
+    if (videos.length === 0) return;
+
+    if (isPlaying) {
+      // 暂停
+      videos.forEach(v => { try { v.pause(); } catch (e) {} });
+      setIsPlaying(false);
+    } else {
+      // 播放 — Promise.all确认全部成功
+      Promise.all(videos.map(v => v.play().catch(() => null)))
+        .then(results => {
+          const anySucceeded = results.some(r => r !== null);
+          setIsPlaying(anySucceeded);
+        });
+    }
+  }, [isPlaying, displayOrder]);
 
   // ── 速度同步 ──
   useEffect(() => {
@@ -288,7 +332,6 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   // ── 挂载时自动开始流 ──
   useEffect(() => {
     if (displayOrder.length > 0) {
-      // 等video元素挂载
       const raf = requestAnimationFrame(() => startStream());
       return () => { cancelAnimationFrame(raf); cleanup(); };
     }
@@ -296,7 +339,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
-  const progress = duration > 0 ? currentTime / duration : 0;
+  const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
       {/* 进度条 */}
@@ -313,7 +356,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
         >
           <div style={{
             width: `${progress * 100}%`, height: '100%', background: '#1890ff', borderRadius: 3,
-            transition: 'width 0.3s linear',
+            transition: 'width 0.2s linear',
           }} />
           <div style={{
             position: 'absolute', left: `${progress * 100}%`, top: '50%', transform: 'translate(-50%,-50%)',
@@ -321,7 +364,7 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
             pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,0.5)',
           }} />
         </div>
-        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(duration)}</span>
+        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(bufferedEnd)}</span>
       </div>
 
       {/* 工具栏 */}
