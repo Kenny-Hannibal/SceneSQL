@@ -89,9 +89,11 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     return () => clearInterval(tick);
   }, []); // 依赖为空：interval 只创建一次，通过 ref 读取最新 videoTopics
 
-  // ── Seek（所有视频同步跳转，seek后强制暂停） ──
+  // ── Seek（所有视频+BEV同步跳转） ──
+  // 如果当前正在播放，seek完成后自动恢复播放
   const seekTo = (ratio) => {
     if (!bufferedEnd) return;
+    const wasPlaying = isPlaying;
     const t = ratio * bufferedEnd;
     displayOrder.forEach(topic => {
       if (topic.includes('fusion_map')) {
@@ -107,14 +109,40 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
               v.currentTime = Math.min(t, maxTime);
             }
           } catch (e) {}
-          // seek后浏览器可能自动恢复播放，强制暂停
           try { v.pause(); } catch (e) {}
         }
       }
     });
     setCurrentTime(t);
-    setIsPlaying(false);
     setAllVideosEnded(false);
+
+    if (wasPlaying) {
+      // seek完成后恢复播放
+      // 视频需要等 seeked 事件后 play 才能可靠工作
+      const videoList = videoTopics.map(tp => videoRefs.current[tp]).filter(Boolean);
+      let seekDone = false;
+      const resumePlay = () => {
+        if (seekDone) return;
+        seekDone = true;
+        videoList.forEach(v => { try { v.play().catch(() => {}); } catch (e) {} });
+        bevTopics.forEach(tp => {
+          const ref = bevRefs.current[tp];
+          if (ref) ref.play();
+        });
+        setIsPlaying(true);
+      };
+      // 等 seeked 事件或超时兜底
+      let seekedCount = 0;
+      videoList.forEach(v => {
+        v.addEventListener('seeked', () => {
+          seekedCount++;
+          if (seekedCount >= videoList.length) resumePlay();
+        }, { once: true });
+      });
+      setTimeout(resumePlay, 300);
+    } else {
+      setIsPlaying(false);
+    }
   };
 
   // ── 全屏 ──
@@ -258,6 +286,11 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
             });
           }
         });
+        // 同时启动BEV播放
+        bevTopics.forEach(t => {
+          const ref = bevRefs.current[t];
+          if (ref) ref.play();
+        });
       }, 300);
     };
 
@@ -382,7 +415,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       }
     } else {
       // ── 恢复播放 ──
-      // 暂停时已做 sync-seek，readyState 正常，直接 play
+      // 判断是否是"重播"（视频已结束）
+      const anyEnded = videoList.some(v => v.ended);
+
       videoList.forEach(v => {
         try {
           if (v.ended) {
@@ -395,12 +430,18 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       });
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
-        if (ref) ref.play();
+        if (ref) {
+          if (anyEnded || allVideosEnded) {
+            // 重播：BEV 需要回到开头
+            ref.seekToRatio(0);
+          }
+          ref.play();
+        }
       });
       setAllVideosEnded(false);
       setIsPlaying(true);
     }
-  }, [videoTopics, bevTopics]);
+  }, [videoTopics, bevTopics, allVideosEnded]);
 
   // ── 速度同步 ──
   useEffect(() => {
