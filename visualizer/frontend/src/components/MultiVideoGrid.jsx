@@ -24,7 +24,11 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   const mseStatesRef = useRef({});
   const abortRef = useRef(null);
   const dragSrcIdx = useRef(null);
+  const containerRef = useRef(null);  // 全屏用
   const [displayOrder, setDisplayOrder] = useState(topics);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // ── Codec ──
   const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
@@ -40,6 +44,55 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   const cols = displayOrder.length <= 1 ? 1 : displayOrder.length <= 4 ? 2 : displayOrder.length <= 9 ? 3 : 4;
 
   const shortName = (t) => (t.split('/').pop() || t).replace('_encoded', '');
+
+  // ── 进度条：从第一个video取 currentTime/duration ──
+  useEffect(() => {
+    const tick = setInterval(() => {
+      const firstTopic = displayOrder[0];
+      const v = videoRefs.current[firstTopic];
+      if (v && v.duration && isFinite(v.duration)) {
+        setCurrentTime(v.currentTime);
+        setDuration(v.duration);
+      }
+    }, 500);
+    return () => clearInterval(tick);
+  }, [displayOrder]);
+
+  // ── Seek（所有视频同步跳转） ──
+  const seekTo = (ratio) => {
+    if (!duration) return;
+    const t = ratio * duration;
+    displayOrder.forEach(topic => {
+      const v = videoRefs.current[topic];
+      if (v && v.duration && isFinite(v.duration)) {
+        v.currentTime = t;
+      }
+    });
+    setCurrentTime(t);
+  };
+
+  // ── 全屏 ──
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  // ── 格式化时间 ──
+  const fmtTime = (s) => {
+    if (!s || !isFinite(s)) return '00:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  };
 
   // ── 清理 MSE ──
   const cleanup = useCallback(() => {
@@ -243,8 +296,34 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 渲染 ──
+  const progress = duration > 0 ? currentTime / duration : 0;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh' }}>
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', width: '85vw', maxHeight: '80vh', background: isFullscreen ? '#000' : 'transparent' }}>
+      {/* 进度条 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexShrink: 0 }}>
+        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42, textAlign: 'right' }}>{fmtTime(currentTime)}</span>
+        <div
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            seekTo(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
+          }}
+          style={{
+            flex: 1, height: 6, background: '#333', borderRadius: 3, cursor: 'pointer', position: 'relative',
+          }}
+        >
+          <div style={{
+            width: `${progress * 100}%`, height: '100%', background: '#1890ff', borderRadius: 3,
+            transition: 'width 0.3s linear',
+          }} />
+          <div style={{
+            position: 'absolute', left: `${progress * 100}%`, top: '50%', transform: 'translate(-50%,-50%)',
+            width: 10, height: 10, borderRadius: '50%', background: '#1890ff', border: '2px solid #fff',
+            pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,0.5)',
+          }} />
+        </div>
+        <span style={{ color: '#aaa', fontSize: 11, minWidth: 42 }}>{fmtTime(duration)}</span>
+      </div>
+
       {/* 工具栏 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexShrink: 0 }}>
         <button onClick={togglePlay} style={{
@@ -271,6 +350,13 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
           }
         </span>
         {error && <span style={{ color: '#ff4d4f', fontSize: 11 }}> {error}</span>}
+        <div style={{ flex: 1 }} />
+        <button onClick={toggleFullscreen} style={{
+          padding: '2px 8px', fontSize: 12, borderRadius: 3, border: '1px solid #555',
+          background: 'transparent', color: '#ccc', cursor: 'pointer',
+        }}>
+          {isFullscreen ? '⤓ 退出全屏' : '⤢ 全屏'}
+        </button>
       </div>
 
       {/* 宫格 */}
