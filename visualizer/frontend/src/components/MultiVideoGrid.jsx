@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import BevViewer from './BevViewer';
 
 /**
@@ -48,17 +48,23 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
     mimeCodec = supportsHevcMSE ? hevcMime : h264Mime;
   }
 
-  const videoTopics = topics.filter(t => !t.includes('fusion_map'));
-  const bevTopics = topics.filter(t => t.includes('fusion_map'));
+  // ── 用 useMemo 稳定 videoTopics/bevTopics 引用，避免每渲染产生新数组 ──
+  const videoTopics = useMemo(() => topics.filter(t => !t.includes('fusion_map')), [topics]);
+  const bevTopics = useMemo(() => topics.filter(t => t.includes('fusion_map')), [topics]);
 
   const cols = displayOrder.length <= 1 ? 1 : displayOrder.length <= 4 ? 2 : displayOrder.length <= 9 ? 3 : 4;
 
   const shortName = (t) => (t.split('/').pop() || t).replace('_encoded', '');
 
   // ── 进度条：MSE流 duration=Infinity，改用 buffered.end() ──
+  // 用 ref 存储 videoTopics，避免 useEffect 依赖不稳定数组导致 interval 反复重建
+  const videoTopicsRef = useRef(videoTopics);
+  videoTopicsRef.current = videoTopics;
+
   useEffect(() => {
     const tick = setInterval(() => {
-      const firstTopic = videoTopics[0];
+      const vts = videoTopicsRef.current;
+      const firstTopic = vts[0];
       const v = videoRefs.current[firstTopic];
       if (!v) return;
       // currentTime 直接读
@@ -75,13 +81,13 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
         }
       } catch (e) {}
       // 检查是否所有视频都已 ended
-      const vids = videoTopics.map(t => videoRefs.current[t]).filter(Boolean);
+      const vids = vts.map(t => videoRefs.current[t]).filter(Boolean);
       if (vids.length > 0 && vids.every(v => v.ended)) {
         setAllVideosEnded(true);
       }
     }, 300);
     return () => clearInterval(tick);
-  }, [displayOrder, videoTopics]);
+  }, []); // 依赖为空：interval 只创建一次，通过 ref 读取最新 videoTopics
 
   // ── Seek（所有视频同步跳转，seek后强制暂停） ──
   const seekTo = (ratio) => {
@@ -330,18 +336,30 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       });
       setIsPlaying(false);
     } else {
-      // 播放全部视频
+      // 播放全部视频（如果已结束，先seek回开头）
       let anyFailed = false;
       videoList.forEach(v => {
-        try { v.pause(); } catch (e) {}
-        const p = v.play();
-        if (p) p.catch(() => { anyFailed = true; });
+        try {
+          if (v.ended) {
+            // 视频播放完毕后需要先回到开头才能重新播放
+            try {
+              if (v.buffered && v.buffered.length > 0) {
+                v.currentTime = v.buffered.start(0);
+              }
+            } catch (e) {}
+          }
+          v.play().catch(() => { anyFailed = true; });
+        } catch (e) { anyFailed = true; }
       });
-      // 播放全部BEV
+      // 播放全部BEV（如果已结束，seek回开头）
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
-        if (ref) ref.play();
+        if (ref) {
+          ref.seekToRatio(0);
+          ref.play();
+        }
       });
+      setAllVideosEnded(false);
       // 给play()一点时间完成，再检查状态
       setTimeout(() => {
         const nowAllPlaying = videoList.every(v => !v.paused);
@@ -356,13 +374,13 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
         }
       }, 100);
     }
-  }, [displayOrder, videoTopics, bevTopics]);
+  }, [videoTopics, bevTopics]);
 
   // ── 速度同步 ──
   useEffect(() => {
     videoTopics.forEach(t => { const v = videoRefs.current[t]; if (v) v.playbackRate = speed; });
     // BEV是固定10fps，速度控制暂不支持（跳帧实现复杂）
-  }, [speed, displayOrder, videoTopics]);
+  }, [speed, videoTopics]);
 
   // ── 拖拽 ──
   const handleDragStart = (e, idx) => {
