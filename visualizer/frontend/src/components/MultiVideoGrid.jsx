@@ -363,44 +363,76 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
       });
       setIsPlaying(false);
     } else {
-      // 播放全部视频（如果已结束，先seek回开头）
-      let anyFailed = false;
+      // ── 恢复播放 ──
+      // 关键：endOfStream()后，暂停的视频 readyState 可能停留在 HAVE_CURRENT_DATA，
+      // 直接 play() 会静默失败。必须先 seek 刷新 readyState，play 才能生效。
+      // 这也是"拖动进度条后才能播放"的根因——seek 强制浏览器重新找关键帧+预缓冲。
+      const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
+      const targetTime = progress * bufferedEnd;
+
+      // Phase 1: sync-seek 所有视频到当前时间点
       videoList.forEach(v => {
         try {
           if (v.ended) {
-            // 视频播放完毕后需要先回到开头才能重新播放
+            // 已结束 → seek回开头
             try {
               if (v.buffered && v.buffered.length > 0) {
                 v.currentTime = v.buffered.start(0);
               }
             } catch (e) {}
+          } else {
+            // 暂停恢复 → seek到当前时间刷新 readyState
+            try {
+              if (v.buffered && v.buffered.length > 0) {
+                const maxTime = v.buffered.end(v.buffered.length - 1);
+                v.currentTime = Math.min(targetTime || v.currentTime, maxTime);
+              }
+            } catch (e) {}
           }
-          v.play().catch(() => { anyFailed = true; });
-        } catch (e) { anyFailed = true; }
+        } catch (e) {}
       });
-      // 播放全部BEV（仅ended时seek回开头）
+      // BEV 同步
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
-        if (ref) {
-          ref.play();
-        }
+        if (ref) ref.seekToRatio(progress);
       });
-      setAllVideosEnded(false);
-      // 给play()一点时间完成，再检查状态
-      setTimeout(() => {
-        const nowAllPlaying = videoList.every(v => !v.paused);
-        setIsPlaying(nowAllPlaying);
-        if (!nowAllPlaying) {
-          videoList.forEach(v => {
-            if (v.paused) v.play().catch(() => {});
-          });
-          setTimeout(() => {
-            setIsPlaying(videoList.every(v => !v.paused));
-          }, 200);
-        }
-      }, 100);
+
+      // Phase 2: seek完成后 play（等 seeked 事件或超时）
+      let played = false;
+      const doPlay = () => {
+        if (played) return;
+        played = true;
+        videoList.forEach(v => {
+          try { v.play().catch(() => {}); } catch (e) {}
+        });
+        bevTopics.forEach(t => {
+          const ref = bevRefs.current[t];
+          if (ref) ref.play();
+        });
+        setAllVideosEnded(false);
+        // 延迟确认 isPlaying 状态
+        setTimeout(() => {
+          setIsPlaying(videoList.every(v => !v.paused));
+        }, 150);
+      };
+
+      // 方式1：等所有视频 seeked 事件
+      let seekedCount = 0;
+      const totalVids = videoList.length;
+      if (totalVids === 0) {
+        doPlay();
+      } else {
+        videoList.forEach(v => {
+          v.addEventListener('seeked', () => {
+            seekedCount++;
+            if (seekedCount >= totalVids) doPlay();
+          }, { once: true });
+        });
+        // 方式2：超时兜底（某些浏览器 seek 同位置可能不触发 seeked）
+        setTimeout(doPlay, 300);
+      }
     }
-  }, [videoTopics, bevTopics]);
+  }, [videoTopics, bevTopics, currentTime, bufferedEnd]);
 
   // ── 速度同步 ──
   useEffect(() => {
