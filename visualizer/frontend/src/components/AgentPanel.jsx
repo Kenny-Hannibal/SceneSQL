@@ -2203,6 +2203,7 @@ export default function AgentPanel() {
                 mode={playerData.mse_codec?.includes('hvc1') ? 'hevc' : 'h264'}
                 apiBase={API_BASE}
                 streamToken={localStorage.getItem('token')}
+                authFetch={authFetch}
               />
             ) : playerData.is_bev ? (
               /* 单topic BEV 模式：compact BevViewer + 共享控件 */
