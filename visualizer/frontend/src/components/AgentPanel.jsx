@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SqlEditor from './SqlEditor';
 import BevViewer from './BevViewer';
-import MultiCameraPlayer from './MultiCameraPlayer';
+import MultiVideoGrid from './MultiVideoGrid';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
@@ -260,8 +260,8 @@ export default function AgentPanel() {
   // BEV 弹窗
   const [bevModalOpen, setBevModalOpen] = useState(false);
   const [bevData, setBevData] = useState(null); // { bagPath, startTs, endTs }
-  const [multiCameraOpen, setMultiCameraOpen] = useState(false);
-  const [multiCameraData, setMultiCameraData] = useState(null); // { allTopics, initialTopics, bagPath, mode, startTs, endTs, apiBase, streamToken }
+  const [playerGridMode, setPlayerGridMode] = useState(false);       // 宫格模式（多topic同时播放）
+  const [playerGridTopics, setPlayerGridTopics] = useState([]);     // 宫格模式选中的topics
 
   const addProgress = (msg) => setProgress((prev) => [...prev, msg]);
   const clearProgress = () => setProgress([]);
@@ -733,6 +733,8 @@ export default function AgentPanel() {
     setPlayerModalOpen(false);
     setPlayerData(null);
     setVideoRows([]);
+    setPlayerGridMode(false);
+    setPlayerGridTopics([]);
 
     // 给浏览器/后端一点时间彻底释放旧 video stream 的 TCP 连接和 ffmpeg 进程
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -1877,21 +1879,30 @@ export default function AgentPanel() {
                 {topicModalData.cameraTopics.length > 1 && (
                   <button
                     onClick={() => {
-                      const { bagPath, startTs, endTs, cameraTopics } = topicModalData;
-                      const streamToken = localStorage.getItem('token');
-                      setMultiCameraData({
-                        allTopics: cameraTopics,
-                        initialTopics: [],
-                        bagPath,
-                        mode: forceH264 ? 'h264' : 'hevc',
-                        startTs,
-                        endTs,
-                        apiBase: API_BASE,
-                        streamToken,
+                      // 复用 playerModal，进入宫格模式
+                      const { bagPath, startTs, endTs, cameraTopics, row } = topicModalData;
+                      const hevcMime = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
+                      const h264Mime = 'video/mp4; codecs="avc1.64001f"';
+                      const codec = forceH264 ? h264Mime : (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime) ? hevcMime : h264Mime);
+                      const durationSec = (endTs !== null && startTs !== null) ? (endTs - startTs) / 1e9 : null;
+                      const _multiViewMeta = { bagPath, startTs, endTs, cameraTopics };
+                      // 选第一个 topic 作为 playerData.topic（单视频区占位），宫格模式会用多流
+                      const defaultTopic = cameraTopics[0] || '';
+                      setPlayerData({
+                        stream_url: '',
+                        row,
+                        topic: defaultTopic,
+                        use_mse: true,
+                        mse_codec: codec,
+                        durationSec,
+                        _multiViewMeta,
                       });
-                      setMultiCameraOpen(true);
+                      setPlayerGridMode(true);
+                      setPlayerGridTopics(cameraTopics); // 默认全选
+                      setPlayerError(null);
                       setTopicModalOpen(false);
                       setTopicModalData(null);
+                      setPlayerModalOpen(true);
                     }}
                     disabled={topicModalData.loading}
                     style={{
@@ -1938,21 +1949,6 @@ export default function AgentPanel() {
             />
           </div>
         </div>
-      )}
-
-      {/* ── 多摄像头宫格播放 ── */}
-      {multiCameraOpen && multiCameraData && (
-        <MultiCameraPlayer
-          allTopics={multiCameraData.allTopics}
-          initialTopics={multiCameraData.initialTopics}
-          bagPath={multiCameraData.bagPath}
-          mode={multiCameraData.mode}
-          startTs={multiCameraData.startTs}
-          endTs={multiCameraData.endTs}
-          apiBase={multiCameraData.apiBase}
-          streamToken={multiCameraData.streamToken}
-          onClose={() => { setMultiCameraOpen(false); setMultiCameraData(null); }}
-        />
       )}
 
       {/* SQL 执行进度弹窗 */}
@@ -2016,7 +2012,7 @@ export default function AgentPanel() {
           <div style={{ background: '#000', borderRadius: 8, padding: 16, maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ color: '#fff', fontSize: 14 }}>
-                📹 {playerData.row.bag_id || '未知'} | {playerData.topic}
+                📹 {playerData.row.bag_id || '未知'} | {playerGridMode ? '📷 宫格模式' : playerData.topic}
                 {playerMode && (
                   <span style={{
                     marginLeft: 12,
@@ -2031,7 +2027,7 @@ export default function AgentPanel() {
                 )}
               </span>
               <button
-                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } }}
+                onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); setPlayerGridMode(false); setPlayerGridTopics([]); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
               >
                 ✕ 关闭
@@ -2040,9 +2036,67 @@ export default function AgentPanel() {
 
             {/* ── 多视图 Tab 栏 ── */}
             {playerData._multiViewMeta?.cameraTopics?.length > 1 && (
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', background: '#1a1a1a', padding: '6px 8px', borderRadius: 4 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', background: '#1a1a1a', padding: '6px 8px', borderRadius: 4, alignItems: 'center' }}>
+                {/* 宫格切换按钮 */}
+                <button
+                  onClick={() => {
+                    if (playerGridMode) {
+                      // 退出宫格 → 切回当前选中的单topic
+                      setPlayerGridMode(false);
+                      const topic = playerGridTopics.length > 0 ? playerGridTopics[0] : playerData._multiViewMeta.cameraTopics[0];
+                      handleSwitchTopic(topic);
+                    } else {
+                      // 进入宫格 → 默认选全部topic
+                      setPlayerGridMode(true);
+                      setPlayerGridTopics(playerData._multiViewMeta.cameraTopics);
+                    }
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 12,
+                    borderRadius: 3,
+                    border: playerGridMode ? '1px solid #722ed1' : '1px solid #555',
+                    background: playerGridMode ? '#722ed1' : 'transparent',
+                    color: playerGridMode ? '#fff' : '#aaa',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    marginRight: 4,
+                  }}
+                >
+                  📷 宫格
+                </button>
+                <span style={{ color: '#666', fontSize: 11, marginRight: 4 }}>|</span>
                 {playerData._multiViewMeta.cameraTopics.map(t => {
                   const shortName = t.split('/').pop() || t;
+                  if (playerGridMode) {
+                    // 宫格模式：checkbox 样式
+                    const checked = playerGridTopics.includes(t);
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          setPlayerGridTopics(prev =>
+                            checked ? prev.filter(x => x !== t) : [...prev, t]
+                          );
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          borderRadius: 3,
+                          border: checked ? '1px solid #1890ff' : '1px solid #555',
+                          background: checked ? '#1890ff' : 'transparent',
+                          color: checked ? '#fff' : '#aaa',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          display: 'flex', alignItems: 'center', gap: 3,
+                        }}
+                        title={t}
+                      >
+                        {checked ? '☑' : '☐'} {shortName}
+                      </button>
+                    );
+                  }
+                  // 单 topic 模式：原有 Tab 行为
                   const active = t === playerData.topic;
                   return (
                     <button
@@ -2102,7 +2156,19 @@ export default function AgentPanel() {
               </div>
             )}
 
-            {playerData.video_url ? (
+            {/* ── 视频区域 ── */}
+            {playerGridMode && playerGridTopics.length > 1 ? (
+              /* 宫格模式：N个video，用 /stream-multi */
+              <MultiVideoGrid
+                topics={playerGridTopics}
+                bagPath={playerData._multiViewMeta?.bagPath}
+                startTs={playerData._multiViewMeta?.startTs}
+                endTs={playerData._multiViewMeta?.endTs}
+                mode={playerData.mse_codec?.includes('hvc1') ? 'hevc' : 'h264'}
+                apiBase={API_BASE}
+                streamToken={localStorage.getItem('token')}
+              />
+            ) : playerData.video_url ? (
               <video
                 src={playerData.video_url}
                 controls
