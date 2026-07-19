@@ -349,12 +349,16 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   };
 
   // ── 播放/暂停（视频+BEV统一控制） ──
+  // 核心策略：暂停时做 sync-seek（从 DOM 读实时值），播放时直接 play()
+  // 原因：endOfStream() 后 readyState 可能停在 HAVE_CURRENT_DATA，
+  //       直接 play() 静默失败。seek 刷新 readyState 后 play 才能生效。
+  //       在暂停时 seek 而非播放时 seek，避免 React state currentTime 过时导致位置漂移。
   const togglePlay = useCallback(() => {
     const videoList = videoTopics.map(t => videoRefs.current[t]).filter(Boolean);
     const allPlaying = videoList.length > 0 && videoList.every(v => !v.paused && !v.ended);
 
     if (allPlaying) {
-      // 暂停全部视频
+      // ── 暂停 ──
       videoList.forEach(v => { try { v.pause(); } catch (e) {} });
       // 暂停全部BEV
       bevTopics.forEach(t => {
@@ -362,77 +366,41 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
         if (ref) ref.pause();
       });
       setIsPlaying(false);
+
+      // ── 暂停时 sync-seek：用 DOM 实时值（非 React state），刷新 readyState ──
+      // 这保证了后续 play() 能正常工作，无需在播放时再 seek
+      if (videoList.length > 0) {
+        const refTime = videoList[0].currentTime;
+        videoList.forEach(v => {
+          try {
+            if (v.buffered && v.buffered.length > 0) {
+              const maxTime = v.buffered.end(v.buffered.length - 1);
+              v.currentTime = Math.min(refTime, maxTime);
+            }
+          } catch (e) {}
+        });
+      }
     } else {
       // ── 恢复播放 ──
-      // 关键：endOfStream()后，暂停的视频 readyState 可能停留在 HAVE_CURRENT_DATA，
-      // 直接 play() 会静默失败。必须先 seek 刷新 readyState，play 才能生效。
-      // 这也是"拖动进度条后才能播放"的根因——seek 强制浏览器重新找关键帧+预缓冲。
-      const progress = bufferedEnd > 0 ? currentTime / bufferedEnd : 0;
-      const targetTime = progress * bufferedEnd;
-
-      // Phase 1: sync-seek 所有视频到当前时间点
+      // 暂停时已做 sync-seek，readyState 正常，直接 play
       videoList.forEach(v => {
         try {
           if (v.ended) {
-            // 已结束 → seek回开头
-            try {
-              if (v.buffered && v.buffered.length > 0) {
-                v.currentTime = v.buffered.start(0);
-              }
-            } catch (e) {}
-          } else {
-            // 暂停恢复 → seek到当前时间刷新 readyState
-            try {
-              if (v.buffered && v.buffered.length > 0) {
-                const maxTime = v.buffered.end(v.buffered.length - 1);
-                v.currentTime = Math.min(targetTime || v.currentTime, maxTime);
-              }
-            } catch (e) {}
+            if (v.buffered && v.buffered.length > 0) {
+              v.currentTime = v.buffered.start(0);
+            }
           }
+          v.play().catch(() => {});
         } catch (e) {}
       });
-      // BEV 同步
       bevTopics.forEach(t => {
         const ref = bevRefs.current[t];
-        if (ref) ref.seekToRatio(progress);
+        if (ref) ref.play();
       });
-
-      // Phase 2: seek完成后 play（等 seeked 事件或超时）
-      let played = false;
-      const doPlay = () => {
-        if (played) return;
-        played = true;
-        videoList.forEach(v => {
-          try { v.play().catch(() => {}); } catch (e) {}
-        });
-        bevTopics.forEach(t => {
-          const ref = bevRefs.current[t];
-          if (ref) ref.play();
-        });
-        setAllVideosEnded(false);
-        // 延迟确认 isPlaying 状态
-        setTimeout(() => {
-          setIsPlaying(videoList.every(v => !v.paused));
-        }, 150);
-      };
-
-      // 方式1：等所有视频 seeked 事件
-      let seekedCount = 0;
-      const totalVids = videoList.length;
-      if (totalVids === 0) {
-        doPlay();
-      } else {
-        videoList.forEach(v => {
-          v.addEventListener('seeked', () => {
-            seekedCount++;
-            if (seekedCount >= totalVids) doPlay();
-          }, { once: true });
-        });
-        // 方式2：超时兜底（某些浏览器 seek 同位置可能不触发 seeked）
-        setTimeout(doPlay, 300);
-      }
+      setAllVideosEnded(false);
+      setIsPlaying(true);
     }
-  }, [videoTopics, bevTopics, currentTime, bufferedEnd]);
+  }, [videoTopics, bevTopics]);
 
   // ── 速度同步 ──
   useEffect(() => {
