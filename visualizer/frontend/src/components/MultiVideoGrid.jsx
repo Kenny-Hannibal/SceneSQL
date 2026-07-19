@@ -69,23 +69,25 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
     return () => clearInterval(tick);
   }, [displayOrder]);
 
-  // ── Seek（所有视频同步跳转） ──
+  // ── Seek（所有视频同步跳转，seek后强制暂停） ──
   const seekTo = (ratio) => {
     if (!bufferedEnd) return;
     const t = ratio * bufferedEnd;
     displayOrder.forEach(topic => {
       const v = videoRefs.current[topic];
       if (v) {
-        // 安全seek：不能超出buffered范围
         try {
           if (v.buffered && v.buffered.length > 0) {
             const maxTime = v.buffered.end(v.buffered.length - 1);
             v.currentTime = Math.min(t, maxTime);
           }
         } catch (e) {}
+        // seek后浏览器可能自动恢复播放，强制暂停
+        try { v.pause(); } catch (e) {}
       }
     });
     setCurrentTime(t);
+    setIsPlaying(false);
   };
 
   // ── 全屏 ──
@@ -209,18 +211,25 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
       autoPlayed = true;
       // 等一小段时间让最后一个SourceBuffer完成append
       setTimeout(() => {
+        // 先暂停所有video确保状态干净
         topicList.forEach(topic => {
           const v = videoRefs.current[topic];
-          if (v && v.paused) {
+          if (v) try { v.pause(); } catch (e) {}
+        });
+        // 统一play
+        let playCount = 0;
+        topicList.forEach(topic => {
+          const v = videoRefs.current[topic];
+          if (v) {
             v.play().then(() => {
-              setIsPlaying(true);
+              playCount++;
+              if (playCount === topicList.length) setIsPlaying(true);
             }).catch(() => {
-              // 浏览器autoplay策略拒绝 — 需要用户手动点播放
               console.warn('[MultiVideoGrid] autoplay blocked for', topic);
             });
           }
         });
-      }, 200);
+      }, 300);
     };
 
     // 绑定updateend — 跟踪每个topic是否已有数据
@@ -283,24 +292,47 @@ export default function MultiVideoGrid({ topics, bagPath, startTs, endTs, mode, 
     }
   };
 
-  // ── 播放/暂停（修复：确保play成功才更新状态） ──
+  // ── 播放/暂停 ──
   const togglePlay = useCallback(() => {
     const videos = displayOrder.map(t => videoRefs.current[t]).filter(Boolean);
     if (videos.length === 0) return;
 
-    if (isPlaying) {
-      // 暂停
+    // 直接检测实际状态：是否所有video都在播放
+    const allPlaying = videos.every(v => !v.paused && !v.ended);
+
+    if (allPlaying) {
+      // 暂停全部
       videos.forEach(v => { try { v.pause(); } catch (e) {} });
       setIsPlaying(false);
     } else {
-      // 播放 — Promise.all确认全部成功
-      Promise.all(videos.map(v => v.play().catch(() => null)))
-        .then(results => {
-          const anySucceeded = results.some(r => r !== null);
-          setIsPlaying(anySucceeded);
-        });
+      // 播放全部：逐个play，确保同步
+      let anyFailed = false;
+      videos.forEach(v => {
+        // 先暂停确保状态干净，再play
+        try { v.pause(); } catch (e) {}
+        const p = v.play();
+        if (p) {
+          p.catch(() => { anyFailed = true; });
+        }
+      });
+      // 给play()一点时间完成，再检查状态
+      setTimeout(() => {
+        const nowAllPlaying = videos.every(v => !v.paused);
+        setIsPlaying(nowAllPlaying);
+        if (!nowAllPlaying) {
+          // 有些失败了，重试一次
+          videos.forEach(v => {
+            if (v.paused) {
+              v.play().catch(() => {});
+            }
+          });
+          setTimeout(() => {
+            setIsPlaying(videos.every(v => !v.paused));
+          }, 200);
+        }
+      }, 100);
     }
-  }, [isPlaying, displayOrder]);
+  }, [displayOrder]);
 
   // ── 速度同步 ──
   useEffect(() => {
