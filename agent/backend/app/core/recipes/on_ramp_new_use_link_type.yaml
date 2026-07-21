@@ -1,0 +1,38 @@
+name: on_ramp_new_use_link_type
+version: '1.0'
+description: on_ramp：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: on_ramp
+    output_tag_name: on_ramp
+    raw_sql: "-- 查询自车从入口匝道汇入主路的场景\n-- 过滤掉在Intersection标签时间范围内的场景\nWITH ramp_links\
+      \ AS (\n    -- 找出所有入口匝道的 static_link\n    SELECT\n        link_id,\n       \
+      \ link_successor\n    FROM static_link\n    WHERE link_type = '入口匝道'\n),\nego_with_next\
+      \ AS (\n    -- 获取每个时间点的当前link和下一个link\n    SELECT\n        e.ts,\n        e.ego_static_map_link_id\
+      \ AS current_link_id,\n        LEAD(e.ego_static_map_link_id) OVER (ORDER BY\
+      \ e.ts) AS next_link_id,\n        LEAD(e.ts) OVER (ORDER BY e.ts) AS next_ts\n\
+      \    FROM ego e\n    WHERE e.ego_static_map_link_id IS NOT NULL\n      AND e.ego_static_map_link_id\
+      \ != -1\n),\nmerge_candidates AS (\n    -- 自车当前在入口匝道上，且进入了下一个link（主路）\n    SELECT\n\
+      \        ewn.ts AS exit_ts,\n        ewn.current_link_id,\n        ewn.next_link_id,\n\
+      \        ewn.next_ts\n    FROM ego_with_next ewn\n    INNER JOIN ramp_links\
+      \ rl ON ewn.current_link_id = CAST(rl.link_id AS INTEGER)\n    WHERE ewn.next_link_id\
+      \ IS NOT NULL\n      AND ewn.next_link_id != ewn.current_link_id\n      AND\
+      \ ewn.next_link_id != -1\n),\ncurrent_link_info AS (\n    -- 确认当前link是入口匝道\n\
+      \    SELECT\n        mc.*,\n        sl.link_type AS current_link_type,\n   \
+      \     sl.link_class AS current_link_class\n    FROM merge_candidates mc\n  \
+      \  INNER JOIN static_link sl ON mc.current_link_id = CAST(sl.link_id AS INTEGER)\n\
+      ),\nnext_link_info AS (\n    -- 确认下一个link是主路/主干道\n    SELECT\n        cli.*,\n\
+      \        sl.link_type AS next_link_type,\n        sl.link_class AS next_link_class\n\
+      \    FROM current_link_info cli\n    LEFT JOIN static_link sl ON cli.next_link_id\
+      \ = CAST(sl.link_id AS INTEGER)\n),\nno_intersection AS (\n    -- 过滤掉在Intersection标签时间范围内的场景\n\
+      \    SELECT\n        nli.*\n    FROM next_link_info nli\n    WHERE NOT EXISTS\
+      \ (\n        SELECT 1\n        FROM range_tag rt\n        WHERE rt.tag_name\
+      \ = 'Intersection'\n          AND rt.start_ts <= nli.exit_ts\n          AND\
+      \ rt.end_ts >= nli.exit_ts\n    )\n)\nSELECT\n    'on_ramp_merge' AS tag_name,\n\
+      \    current_link_id,\n    current_link_type,\n    current_link_class,\n   \
+      \ next_link_id,\n    next_link_type,\n    next_link_class,\n    exit_ts - 8\
+      \ AS start_ts,\n    next_ts + 3 AS end_ts,\n    (next_ts - exit_ts) AS duration\n\
+      FROM no_intersection\nWHERE\n    -- 当前link是入口匝道\n    current_link_type IN ('入口匝道',\
+      \ '匝道', '互通立交')\n    -- 下一个link是主干道或主路\n    AND next_link_type IN ('主干道', '主路')\n\
+      \    AND next_link_class IN ('高速道路', '主要大街/城市快速道')\nORDER BY exit_ts"

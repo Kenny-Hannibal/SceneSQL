@@ -1,0 +1,27 @@
+blocks: []
+created_at: 1784526341.8443336
+description: ''
+keywords:
+- Y型路口
+name: Y型路口
+updated_at: 1784526341.8443336
+variants:
+  default:
+    raw_sql: "WITH ego_first_ts AS (\nSELECT MIN(ts) AS package_start_ts,\nMAX(ts)\
+      \ AS package_end_ts FROM ego\n),\nraw_tags AS (\nSELECT start_ts, end_ts, end_ts\
+      \ - start_ts AS duration\nFROM range_tag\nWHERE tag_name = 'topology_intersection_y_junction'\n\
+      ),\n-- 碎片合并：间隔≤3秒的归为同一事件\ntags_with_gap AS (\nSELECT\nstart_ts, end_ts, duration,\n\
+      CASE\nWHEN LAG(end_ts) OVER (ORDER BY start_ts) IS NULL THEN 1\nWHEN start_ts\
+      \ - LAG(end_ts) OVER (ORDER BY start_ts) > 3 THEN 1\nELSE 0\nEND AS is_new_group\n\
+      FROM raw_tags\n),\ntags_grouped AS (\nSELECT\nstart_ts, end_ts, duration,\n\
+      SUM(is_new_group) OVER (ORDER BY start_ts ROWS UNBOUNDED PRECEDING) AS group_id\n\
+      FROM tags_with_gap\n),\nmerged AS (\nSELECT\ngroup_id,\nMIN(start_ts) AS scene_start_ts,\n\
+      MAX(end_ts)   AS scene_end_ts,\nSUM(duration) AS total_duration\nFROM tags_grouped\n\
+      GROUP BY group_id\n)\nSELECT\n'intersection_y_junction' AS tag_name,\nCASE \n\
+      \  WHEN e.package_start_ts > scene_start_ts - 10 \n  THEN e.package_start_ts\
+      \ \n  ELSE scene_start_ts - 10 \nEND AS start_ts,\n\nCASE \n  WHEN e.package_end_ts\
+      \ < scene_end_ts + 5 \n  THEN e.package_end_ts \n  ELSE scene_end_ts + 5 \n\
+      END AS end_ts,\ntotal_duration AS duration\nFROM merged, ego_first_ts e\nORDER\
+      \ BY scene_start_ts;"
+    tag_name: intersection_y_junction
+version: '1.0'

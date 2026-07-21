@@ -1,0 +1,11 @@
+name: binok
+version: '1.0'
+description: binok：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: binok
+    output_tag_name: binok
+    raw_sql: "SELECT start_ts, end_ts, param, 'bin_ok' AS tag_name\nFROM range_tag\n\
+      WHERE json_extract(param, '$.name') = 'BinCounter' \n    AND json_extract(param,\
+      \ '$.sub_tag') = 'BinOK'"

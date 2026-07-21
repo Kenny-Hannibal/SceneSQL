@@ -1,0 +1,59 @@
+# Block: obstacle_proximity
+# Purpose: Detect nearby static or dynamic objects within a rectangular proximity zone.
+# Input: static_obj or dynamic_obj
+# Output: detect_ts, obj_id, x, y, type
+
+name: obstacle_proximity
+version: "1.0"
+description: |
+  检测自车前方矩形区域内的静态或动态障碍物。按obj_table选择输入表，
+  用x_min/x_max/y_max定义检测区域，输出每个检测帧中障碍物的时间戳、ID、
+  相对坐标和类型。
+
+input_tables:
+  - static_obj
+  - dynamic_obj
+
+output_columns:
+  - detect_ts
+  - obj_id
+  - x
+  - y
+  - type
+
+parameters:
+  obj_table:
+    type: string
+    default: "static_obj"
+    description: "目标表名，可选static_obj或dynamic_obj"
+    examples: ["static_obj", "dynamic_obj"]
+  obj_type:
+    type: string
+    required: false
+    description: "可选的对象类型过滤，如'vehicle', 'pedestrian', 'cyclist'"
+  x_min:
+    type: float
+    default: 0
+    description: "纵向最小距离(米)，自车前方"
+  x_max:
+    type: float
+    default: 15
+    description: "纵向最大距离(米)"
+  y_max:
+    type: float
+    default: 1.5
+    description: "横向最大绝对距离(米)，左右对称"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          ts AS detect_ts,
+          obj_id,
+          x,
+          y,
+          type
+      FROM {obj_table}
+      WHERE x BETWEEN {x_min} AND {x_max}
+        AND ABS(y) <= {y_max}
+          {obj_type_filter}
+  )

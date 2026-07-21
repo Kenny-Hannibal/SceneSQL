@@ -1,0 +1,14 @@
+name: ego_navigation_turn_right
+version: '1.0'
+description: ego_navigation_turn_right：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: ego_navigation_turn_right
+    output_tag_name: ego_navigation_turn_right
+    raw_sql: "SELECT \n    'ego_navigation_turn_right' as tag_name,\n    start_ts,\n\
+      \    end_ts,\n    param,\n    end_ts - start_ts as duration\nFROM range_tag\n\
+      WHERE tag_name = 'Intersection'\n    AND json_extract(param, '$.sub_tag')='RightIntersection'\n\
+      \    AND end_ts - start_ts > 5 \n    AND (\n          SELECT COUNT(*)\n    \
+      \      FROM ego e\n          WHERE e.ts BETWEEN start_ts AND end_ts\n      \
+      \      AND e.steering_angle < -1\n      ) > 2"

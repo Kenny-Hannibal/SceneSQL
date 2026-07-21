@@ -1,0 +1,50 @@
+name: intersection_with_trafficlight
+version: '1.0'
+description: intersection_with_trafficlight：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: intersection_with_trafficlight
+    output_tag_name: intersection_with_trafficlight
+    raw_sql: "WITH intersection_candidates AS (\n    SELECT\n        'intersection_with_trafficlight'\
+      \ AS tag_name,\n        rt.start_ts AS original_start_ts,\n        rt.end_ts,\n\
+      \        rt.end_ts - rt.start_ts AS original_duration\n    FROM range_tag rt\n\
+      \    WHERE rt.tag_name = 'Intersection'\n    AND rt.end_ts - rt.start_ts > 2\n\
+      \    AND (\n        SELECT SUM(e.latest_traffic_light_status != '未知')\n    \
+      \    FROM ego e\n        WHERE e.ts BETWEEN rt.start_ts - 5 AND rt.end_ts +\
+      \ 5\n    ) > 0\n),\nstart_ts_with_distance AS (\n    -- 获取原始 start_ts 的累计行驶距离\n\
+      \    SELECT\n        ic.tag_name,\n        ic.original_start_ts,\n        ic.end_ts,\n\
+      \        ic.original_duration,\n        (\n            SELECT e.cumulative_distance\n\
+      \            FROM ego e\n            WHERE e.ts = ic.original_start_ts\n   \
+      \         LIMIT 1\n        ) AS start_cumulative_distance\n    FROM intersection_candidates\
+      \ ic\n),\nend_ts_with_distance AS (\n    -- 获取原始 end_ts 的累计行驶距离\n    SELECT\n\
+      \        swd.tag_name,\n        swd.original_start_ts,\n        swd.end_ts,\n\
+      \        swd.original_duration,\n        swd.start_cumulative_distance,\n  \
+      \      (\n            SELECT e.cumulative_distance\n            FROM ego e\n\
+      \            WHERE e.ts = swd.end_ts\n            LIMIT 1\n        ) AS end_cumulative_distance\n\
+      \    FROM start_ts_with_distance swd\n),\nnew_start_ts_finder AS (\n    -- 找到满足条件的倒推时刻（往前60m）\n\
+      \    -- 如果包刚开始时距离不足60m，则取最早的ego记录\n    SELECT\n        ewd.tag_name,\n     \
+      \   ewd.original_start_ts,\n        ewd.end_ts,\n        ewd.original_duration,\n\
+      \        ewd.start_cumulative_distance,\n        ewd.end_cumulative_distance,\n\
+      \        COALESCE(\n            -- 尝试找到往前60m的时刻\n            (\n           \
+      \     SELECT MAX(e.ts)\n                FROM ego e\n                WHERE e.ts\
+      \ < ewd.original_start_ts\n                AND e.cumulative_distance IS NOT\
+      \ NULL\n                AND ewd.start_cumulative_distance - e.cumulative_distance\
+      \ >= 60\n            ),\n            -- 如果找不到（距离不足60m），则取最早的ego记录\n        \
+      \    (\n                SELECT MIN(e.ts)\n                FROM ego e\n     \
+      \           WHERE e.cumulative_distance IS NOT NULL\n            )\n       \
+      \ ) AS new_start_ts\n    FROM end_ts_with_distance ewd\n),\nnew_end_ts_finder\
+      \ AS (\n    -- 找到满足条件的前推时刻（从end_ts往后5m）\n    -- 如果包结束时距离不足5m，则取最晚的ego记录\n  \
+      \  SELECT\n        nst.tag_name,\n        nst.new_start_ts,\n        nst.original_start_ts,\n\
+      \        nst.end_ts,\n        nst.original_duration,\n        nst.start_cumulative_distance,\n\
+      \        nst.end_cumulative_distance,\n        COALESCE(\n            -- 尝试找到往后5m的时刻\n\
+      \            (\n                SELECT MIN(e.ts)\n                FROM ego e\n\
+      \                WHERE e.ts > nst.end_ts\n                AND e.cumulative_distance\
+      \ IS NOT NULL\n                AND e.cumulative_distance - nst.end_cumulative_distance\
+      \ >= 5\n            ),\n            -- 如果找不到（距离不足5m），则取最晚的ego记录\n          \
+      \  (\n                SELECT MAX(e.ts)\n                FROM ego e\n       \
+      \         WHERE e.cumulative_distance IS NOT NULL\n            )\n        )\
+      \ AS new_end_ts\n    FROM new_start_ts_finder nst\n    WHERE nst.new_start_ts\
+      \ IS NOT NULL\n)\nSELECT\n    net.tag_name,\n    net.new_start_ts AS start_ts,\n\
+      \    net.new_end_ts AS end_ts,\n    net.new_end_ts - net.new_start_ts AS duration\n\
+      FROM new_end_ts_finder net\nWHERE net.new_end_ts IS NOT NULL\nORDER BY net.new_start_ts;"

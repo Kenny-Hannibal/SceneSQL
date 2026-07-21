@@ -1,0 +1,60 @@
+# Block: steering_change_detect
+# Purpose: Detect turn + counter-turn pattern in steering angle from ego data.
+# Input: ego
+# Output: turn_start, counter_turn_start, turn_duration
+
+name: steering_change_detect
+version: "1.0"
+description: |
+  从ego表中检测转向角变化模式：先达到initial_angle_threshold的转向，
+  随后在lookback_seconds内出现达到counter_angle_threshold的反向转向。
+  输出每次转向开始时间、反向转向开始时间和转向持续时间。
+
+input_tables:
+  - ego
+
+output_columns:
+  - turn_start
+  - counter_turn_start
+  - turn_duration
+
+parameters:
+  initial_angle_threshold:
+    type: float
+    default: 0.2618
+    description: "初始转向角度阈值(弧度)，约15度"
+  counter_angle_threshold:
+    type: float
+    default: 0.1
+    description: "反向转向角度阈值(弧度)，约5.7度"
+  lookback_seconds:
+    type: float
+    default: 10.0
+    description: "在初始转向后多少秒内查找反向转向"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          t1.ts AS turn_start,
+          t2.ts AS counter_turn_start,
+          (t2.ts - t1.ts) AS turn_duration
+      FROM (
+          SELECT ts, steering_angle
+          FROM ego
+          WHERE ABS(steering_angle) >= {initial_angle_threshold}
+      ) t1
+      JOIN (
+          SELECT ts, steering_angle
+          FROM ego
+          WHERE ABS(steering_angle) >= {counter_angle_threshold}
+      ) t2
+        ON t2.ts > t1.ts
+        AND t2.ts <= t1.ts + {lookback_seconds}
+        AND SIGN(t2.steering_angle) != SIGN(t1.steering_angle)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM ego e
+          WHERE e.ts > t1.ts AND e.ts < t2.ts
+            AND ABS(e.steering_angle) >= {initial_angle_threshold}
+            AND SIGN(e.steering_angle) = SIGN(t1.steering_angle)
+      )
+  )

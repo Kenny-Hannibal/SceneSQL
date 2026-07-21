@@ -1,0 +1,13 @@
+name: continuous_lane_change
+version: '1.0'
+description: continuous_lane_change：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: continuous_lane_change
+    output_tag_name: continuous_lane_change
+    raw_sql: "WITH lane_change AS (\n    SELECT *\n    FROM range_tag \n    WHERE\
+      \ tag_name = 'LANECHANGE_NAVIGATION'\n)\n\nSELECT\n    'continuous_lane_change'\
+      \ AS tag_name,\n    l1.start_ts AS start_ts,  -- 整体开始\n    l2.end_ts   AS end_ts\
+      \     -- 整体结束\nFROM lane_change l1\nJOIN lane_change l2\n    ON l2.start_ts\
+      \ between l1.end_ts and l1.end_ts+6   --第二次换道发生在第一次结束后0~6秒内"

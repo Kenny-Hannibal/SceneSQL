@@ -1,0 +1,71 @@
+# Block: static_link_segment
+# Purpose: JOIN ego with static_link, filter by link_type (and optionally link_turn_type),
+#          then apply continuous segment grouping on the joined results.
+# Input: ego, static_link
+# Output: start_ts, end_ts, link_id, link_type, link_turn_type, duration
+
+name: static_link_segment
+version: "1.0"
+description: |
+  将ego与static_link表JOIN，按link_type（可选link_turn_type）筛选，
+  然后对满足条件的连续帧使用ROW_NUMBER间隙与孤岛技术分组，
+  输出每个连续路段段的起止时间、link信息和持续时间。
+
+input_tables:
+  - ego
+  - static_link
+
+output_columns:
+  - start_ts
+  - end_ts
+  - link_id
+  - link_type
+  - link_turn_type
+  - duration
+
+parameters:
+  link_type:
+    type: string
+    required: true
+    description: "static_link的link_type过滤值，如'highway', 'urban'"
+    examples: ["highway", "urban", "ramp"]
+  link_turn_type:
+    type: string
+    required: false
+    description: "可选的link_turn_type过滤值，如'left', 'right', 'straight'"
+  pre_pad:
+    type: float
+    default: 0.0
+    description: "start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 0.0
+    description: "end_ts后扩秒数"
+  min_duration:
+    type: float
+    default: 0
+    description: "最小持续时间(秒)，短于此的段将被过滤"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          MIN(e.ts) - {pre_pad} AS start_ts,
+          MAX(e.ts) + {post_pad} AS end_ts,
+          sl.link_id,
+          sl.link_type,
+          sl.link_turn_type,
+          (MAX(e.ts) + {post_pad}) - (MIN(e.ts) - {pre_pad}) AS duration
+      FROM (
+          SELECT
+              e.ts,
+              e.link_id,
+              ROW_NUMBER() OVER (ORDER BY e.ts) -
+                  ROW_NUMBER() OVER (PARTITION BY sl.link_type {link_turn_partition} ORDER BY e.ts) AS grp
+          FROM ego e
+          JOIN static_link sl ON e.link_id = sl.link_id
+          WHERE sl.link_type = '{link_type}'
+              {link_turn_filter}
+      ) sub
+      GROUP BY grp, link_id, link_type, link_turn_type
+      HAVING (MAX(ts) - MIN(ts)) >= {min_duration}
+  )

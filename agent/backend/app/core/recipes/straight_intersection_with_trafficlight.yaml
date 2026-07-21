@@ -1,0 +1,152 @@
+name: straight_intersection_with_trafficlight
+version: '1.0'
+description: straight_intersection_with_trafficlight：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: straight_intersection_with_trafficlight
+    output_tag_name: straight_intersection_with_trafficlight
+    raw_sql: 'WITH ego_first_ts AS (
+
+      SELECT MIN(ts) AS package_start_ts,
+
+      MAX(ts) AS package_end_ts FROM ego
+
+      ),
+
+      raw_tags AS (
+
+      SELECT start_ts, end_ts, end_ts - start_ts AS duration
+
+      FROM range_tag
+
+      WHERE tag_name = ''topology_intersection_straight_intersection''
+
+      AND end_ts - start_ts > 2
+
+      ),
+
+      with_traffic_light AS (
+
+      SELECT rt.start_ts, rt.end_ts, rt.duration
+
+      FROM raw_tags rt
+
+      WHERE (
+
+      SELECT SUM(CASE WHEN ego.latest_traffic_light_status != ''未知'' THEN 1 ELSE 0
+      END)
+
+      FROM ego
+
+      WHERE ego.ts BETWEEN rt.start_ts AND rt.end_ts
+
+      ) > 0
+
+      ),
+
+      -- 统计每个标签时段内各 successor_count 的帧数
+
+      succ_distribution AS (
+
+      SELECT
+
+      wt.start_ts,
+
+      wt.end_ts,
+
+      wt.duration,
+
+      CASE WHEN sl.link_successor IS NOT NULL AND sl.link_successor != ''[]''
+
+      THEN json_array_length(sl.link_successor) ELSE 0 END AS successor_count
+
+      FROM with_traffic_light wt
+
+      INNER JOIN ego e ON e.ts BETWEEN wt.start_ts AND wt.end_ts
+
+      LEFT JOIN static_link sl ON CAST(e.ego_static_map_link_id AS TEXT) = sl.link_id
+
+      WHERE e.ego_static_map_link_id IS NOT NULL
+
+      AND e.ego_static_map_link_id != -1
+
+      ),
+
+      succ_count_per_tag AS (
+
+      SELECT
+
+      start_ts,
+
+      end_ts,
+
+      duration,
+
+      successor_count,
+
+      COUNT(*) AS frame_count
+
+      FROM succ_distribution
+
+      GROUP BY start_ts, end_ts, duration, successor_count
+
+      ),
+
+      -- 取众数：帧数最多的 successor_count
+
+      mode_per_tag AS (
+
+      SELECT
+
+      start_ts,
+
+      end_ts,
+
+      duration,
+
+      successor_count AS mode_successor_count,
+
+      frame_count,
+
+      ROW_NUMBER() OVER (PARTITION BY start_ts ORDER BY frame_count DESC) AS rn
+
+      FROM succ_count_per_tag
+
+      ),
+
+      filtered AS (
+
+      SELECT start_ts, end_ts, duration
+
+      FROM mode_per_tag
+
+      WHERE rn = 1 AND mode_successor_count = 1
+
+      )
+
+      SELECT
+
+      ''straight_intersection_with_trafficlight'' AS tag_name,
+
+      CASE
+
+      WHEN e.package_start_ts > start_ts - 10 THEN e.package_start_ts
+
+      ELSE start_ts - 10
+
+      END AS start_ts,
+
+      CASE
+
+      WHEN e.package_end_ts < end_ts + 10 THEN e.package_end_ts
+
+      ELSE end_ts + 10
+
+      END AS end_ts,
+
+      duration
+
+      FROM filtered, ego_first_ts e
+
+      ORDER BY start_ts;'

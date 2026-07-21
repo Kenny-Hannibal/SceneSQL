@@ -1,0 +1,14 @@
+name: large_curvature_road
+version: '1.0'
+description: large_curvature_road：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: large_curvature_road
+    output_tag_name: large_curvature_road
+    raw_sql: "select start_ts,end_ts from (\n    SELECT\n        MIN(ts) AS start_ts,\n\
+      \        MAX(ts) AS end_ts\n    FROM (\n        SELECT\n            ts,\n  \
+      \          ts - ROW_NUMBER() OVER (ORDER BY ts) AS grp\n        FROM (\n   \
+      \         select round(ts) ts\n            from ego\n            where \n  \
+      \            abs(steering_angle)>0.6 \n              and speed>25\n        )\n\
+      \    ) a\n    GROUP BY grp\n    ORDER BY start_ts\n) where end_ts-start_ts>=8"

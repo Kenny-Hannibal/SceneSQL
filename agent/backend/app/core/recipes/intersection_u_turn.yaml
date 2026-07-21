@@ -1,0 +1,36 @@
+name: intersection_u_turn
+version: '1.0'
+description: intersection_u_turn：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: intersection_u_turn
+    output_tag_name: intersection_u_turn
+    raw_sql: "WITH ego_first_ts AS (\n    SELECT MIN(ts) as package_start_ts FROM\
+      \ ego\n),\nraw_intersection_tags AS (\n    SELECT\n        start_ts,\n     \
+      \   end_ts,\n        end_ts - start_ts AS duration\n    FROM range_tag\n   \
+      \ WHERE tag_name = 'topology_intersection'\n    AND end_ts - start_ts > 4\n\
+      ),\nintersection_with_gap AS (\n    SELECT\n        start_ts,\n        end_ts,\n\
+      \        duration,\n        CASE\n            WHEN LAG(end_ts) OVER (ORDER BY\
+      \ start_ts) IS NULL THEN 1\n            WHEN (start_ts - LAG(end_ts) OVER (ORDER\
+      \ BY start_ts)) > 5 THEN 1\n            ELSE 0\n        END as is_new_group\n\
+      \    FROM raw_intersection_tags\n),\nintersection_grouped AS (\n    SELECT\n\
+      \        start_ts,\n        end_ts,\n        duration,\n        SUM(is_new_group)\
+      \ OVER (ORDER BY start_ts ROWS UNBOUNDED PRECEDING) as group_id\n    FROM intersection_with_gap\n\
+      ),\naggregated_intersections AS (\n    SELECT\n        group_id,\n        MIN(start_ts)\
+      \ as intersection_start_ts,\n        MAX(end_ts) as intersection_end_ts,\n \
+      \       SUM(duration) as total_duration\n    FROM intersection_grouped\n   \
+      \ GROUP BY group_id\n),\nintersections_with_turn_left AS (\n    SELECT\n   \
+      \     ai.group_id,\n        ai.intersection_start_ts,\n        ai.intersection_end_ts,\n\
+      \        ai.total_duration,\n        EXISTS (\n            SELECT 1\n      \
+      \      FROM range_tag r\n            WHERE r.tag_name = 'Turning'\n        \
+      \    AND json_extract(r.param, '$.sub_tag') = 'uturn'\n            AND r.start_ts\
+      \ <= ai.intersection_end_ts\n            AND r.end_ts >= ai.intersection_start_ts\n\
+      \        ) as has_turn_left_in_range\n    FROM aggregated_intersections ai\n\
+      ),\nfiltered_intersections AS (\n    SELECT\n        group_id,\n        intersection_start_ts,\n\
+      \        intersection_end_ts,\n        total_duration\n    FROM intersections_with_turn_left\n\
+      \    WHERE has_turn_left_in_range = 1\n)\nSELECT\n    'intersection_u_turn'\
+      \ AS tag_name,\n    CASE\n        WHEN fi.intersection_start_ts - 10 < e.package_start_ts\
+      \ THEN e.package_start_ts\n        ELSE fi.intersection_start_ts - 10\n    END\
+      \ AS start_ts,\n    fi.intersection_end_ts AS end_ts,\n    fi.total_duration\
+      \ as duration\nFROM filtered_intersections fi, ego_first_ts e\nORDER BY fi.intersection_start_ts;"

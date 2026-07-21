@@ -54,6 +54,39 @@ class AgentResult:
     sql_source: str = "llm"  # "recipe" or "llm"
 
 
+
+def _parse_hybrid_llm_output(raw_text: str, required_blocks: list) -> dict:
+    """Parse LLM output for hybrid assembly.
+
+    Expected LLM output format:
+    ---CUSTOM_CTE---
+    <cte_name> AS (
+        ...
+    )
+    ---FINAL_SELECT---
+    SELECT ...
+
+    If LLM output doesn't follow this format, treat entire output as final_select
+    with no custom CTEs (all blocks are auto-assembled).
+    """
+    result = {"extra_auto_blocks": [], "custom_ctes": [], "final_select": ""}
+
+    if "---CUSTOM_CTE---" in raw_text and "---FINAL_SELECT---" in raw_text:
+        parts = raw_text.split("---CUSTOM_CTE---", 1)[1]
+        cte_part, select_part = parts.split("---FINAL_SELECT---", 1)
+        result["custom_ctes"] = [c.strip() for c in cte_part.strip().split("---END_CTE---") if c.strip()]
+        result["final_select"] = select_part.strip()
+    elif "---FINAL_SELECT---" in raw_text:
+        _, select_part = raw_text.split("---FINAL_SELECT---", 1)
+        result["final_select"] = select_part.strip()
+    else:
+        # Fallback: treat entire output as final SELECT
+        result["final_select"] = raw_text.strip()
+
+    return result
+
+
+
 class AgentEngine:
     # 可通过环境变量 MAX_CORRECTIONS 配置，默认 3
     MAX_CORRECTIONS = int(os.environ.get("MAX_CORRECTIONS", "3"))
@@ -761,6 +794,49 @@ class AgentEngine:
                             recipe_name, recipe_variant, len(sql))
             except Exception as e:
                 logger.warning("Recipe assembly failed, fallback to Round 2: %s", e)
+                sql = None
+
+        # ── Layer 3: Hybrid Block Assembly ──
+        # 当 Round1 识别出 required_blocks 但没有匹配 recipe 时，
+        # 先用 assemble_hybrid 拼装已知 block，再用 LLM 生成胶水 CTE + final SELECT
+        required_blocks = r1_result.get("required_blocks", [])
+        if sql is None and required_blocks:
+            try:
+                from agent.backend.app.core.block_assembler import BlockAssembler
+                from agent.backend.app.core.concept_router import build_hybrid_round2_messages
+                assembler = BlockAssembler()
+
+                # Step 1: 构建 auto_blocks 定义列表
+                auto_blocks = []
+                for bname in required_blocks:
+                    block_def = {"name": bname, "cte_name": bname}
+                    # 如果 Round1 的 analysis_description 包含参数信息，尝试提取
+                    auto_blocks.append(block_def)
+
+                # Step 2: 用 LLM 生成胶水 CTE + final SELECT
+                schema_text = format_schema_for_prompt(self.schema)
+                r2_messages = build_hybrid_round2_messages(
+                    question, required_blocks, auto_blocks, schema_text, assembler
+                )
+                raw_sql = await self.llm.chat(
+                    r2_messages[0]["content"],
+                    r2_messages[1]["content"],
+                    temperature=0.0,
+                )
+                # Step 3: 解析 LLM 输出为 auto_blocks + custom_ctes + final_select
+                hybrid_result = _parse_hybrid_llm_output(raw_sql, required_blocks)
+
+                sql = assembler.assemble_hybrid(
+                    recipe_name="hybrid_" + "_".join(required_blocks),
+                    variant_name="default",
+                    auto_blocks=auto_blocks + hybrid_result.get("extra_auto_blocks", []),
+                    custom_ctes_sql=hybrid_result.get("custom_ctes", []),
+                    final_select_sql=hybrid_result.get("final_select", "SELECT 1"),
+                )
+                sql_source = "hybrid"
+                logger.info("Hybrid assembled: blocks=%s sql_len=%d", required_blocks, len(sql))
+            except Exception as e:
+                logger.warning("Hybrid assembly failed, fallback to Round 2: %s", e)
                 sql = None
 
         # ── Fallback: Round 2 LLM 生成 ──

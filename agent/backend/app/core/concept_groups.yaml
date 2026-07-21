@@ -1,354 +1,515 @@
-# concept_groups.yaml — NL概念 → tag_name 桥梁层
-# 用途：Round 1 LLM识别用户NL中涉及的概念，本表提供概念→tag_name的精确映射
-# 设计原则：
-#   - 概念是用户视角的语义单元，tag_name是数据库视角的存储单元
-#   - 一个概念可映射多个tag_name（上位/下位/同义）
-#   - tag_patterns 支持 LIKE 模式（如 INTERSECTION_%），覆盖车端命名规律
-#   - query_table 标明该概念查哪张表，决定组合规则的JOIN方式
-
-version: "1.0.0"
-
+version: 1.0.0
 concept_groups:
-  # ===== 路口相关 =====
   路口:
-    nl_variants: [路口, 交叉路口, 十字路口, 交叉口]
+    nl_variants:
+    - 路口
+    - 交叉路口
+    - 十字路口
+    - 交叉口
     query_table: range_tag
     tag_names:
-      - Intersection          # 云端：通用路口（含子标签 IsIntersection/LeftIntersection/RightIntersection）
-      - TrafficIntersection   # 云端：红绿灯路口
+    - Intersection
+    - TrafficIntersection
     tag_patterns:
-      - "INTERSECTION_%"      # 车端：INTERSECTION_STRAIGHT/LEFTTURN/RIGHTTURN/UTURN
-
+    - INTERSECTION_%
   路口直行:
-    nl_variants: [路口直行, 直行过路口]
+    nl_variants:
+    - 路口直行
+    - 直行过路口
     query_table: range_tag
-    tag_names: [INTERSECTION_STRAIGHT]
-
+    tag_names:
+    - INTERSECTION_STRAIGHT
   路口左转:
-    nl_variants: [路口左转, 左转, 左转弯]
+    nl_variants:
+    - 路口左转
+    - 左转
+    - 左转弯
     query_table: range_tag
-    tag_names: [INTERSECTION_LEFTTURN]
-
+    tag_names:
+    - INTERSECTION_LEFTTURN
+    recipe: intersection_turn_left
   路口右转:
-    nl_variants: [路口右转, 右转, 右转弯]
+    nl_variants:
+    - 路口右转
+    - 右转
+    - 右转弯
     query_table: range_tag
-    tag_names: [INTERSECTION_RIGHTTURN]
-
+    tag_names:
+    - INTERSECTION_RIGHTTURN
+    recipe: intersection_turn_right
   掉头:
-    nl_variants: [掉头, 路口掉头, U型掉头, 掉头转弯]
+    nl_variants:
+    - 掉头
+    - 路口掉头
+    - U型掉头
+    - 掉头转弯
     query_table: range_tag
-    tag_names: [INTERSECTION_UTURN]
-
-  # ===== 红绿灯相关 =====
+    tag_names:
+    - INTERSECTION_UTURN
+    recipe: u_turn_left_1
   红绿灯:
-    nl_variants: [红绿灯, 交通灯, 信号灯, 红绿灯路口]
+    nl_variants:
+    - 红绿灯
+    - 交通灯
+    - 信号灯
+    - 红绿灯路口
     query_table: range_tag
     tag_names:
-      - TrafficLightAbnormal           # 红绿灯异常
-      - RunRedLight                    # 闯红灯
-      - CrossStopLineOnYellowLight     # 黄灯过线
-      - GreenLightNotProceeding        # 绿灯不走
-      - YellowLightStop                # 黄灯停车
-      - STOPANDGO_FIRSTCARSTOPATREDLIGHT    # 红灯停车
-      - STOPANDGO_FIRSTCARSTARTATGREENLIGHT # 绿灯起步
-
+    - TrafficLightAbnormal
+    - RunRedLight
+    - CrossStopLineOnYellowLight
+    - GreenLightNotProceeding
+    - YellowLightStop
+    - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+    - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
   绿灯:
-    nl_variants: [绿灯, 绿灯通行, 绿灯起步, 绿灯亮]
+    nl_variants:
+    - 绿灯
+    - 绿灯通行
+    - 绿灯起步
+    - 绿灯亮
     query_table: range_tag
     tag_names:
-      - STOPANDGO_FIRSTCARSTARTATGREENLIGHT  # 红绿灯路口首车绿灯起步
-      - GreenLightNotProceeding              # 绿灯亮起后车辆未及时起步通行
-      - STOPANDGO_TRAFFICLIGHTGREENFLASHGO   # 绿灯闪烁通行
-
+    - STOPANDGO_FIRSTCARSTARTATGREENLIGHT
+    - GreenLightNotProceeding
+    - STOPANDGO_TRAFFICLIGHTGREENFLASHGO
   红灯:
-    nl_variants: [红灯, 红灯停车, 红灯等待, 红灯停]
+    nl_variants:
+    - 红灯
+    - 红灯停车
+    - 红灯等待
+    - 红灯停
     query_table: range_tag
     tag_names:
-      - STOPANDGO_FIRSTCARSTOPATREDLIGHT     # 红绿灯路口首车红灯停车
-      - RunRedLight                           # 闯红灯（红灯时越线）
-      - STOPANDGO_TRAFFICLIGHTREDSTART        # 红灯起步
-      - STOPANDGO_TRAFFICLIGHTREDWAIT         # 红灯等待
-
+    - STOPANDGO_FIRSTCARSTOPATREDLIGHT
+    - RunRedLight
+    - STOPANDGO_TRAFFICLIGHTREDSTART
+    - STOPANDGO_TRAFFICLIGHTREDWAIT
   闯红灯:
-    nl_variants: [闯红灯]
+    nl_variants:
+    - 闯红灯
     query_table: range_tag
-    tag_names: [RunRedLight]
-
+    tag_names:
+    - RunRedLight
   黄灯过线:
-    nl_variants: [黄灯过线, 抢黄灯]
+    nl_variants:
+    - 黄灯过线
+    - 抢黄灯
     query_table: range_tag
-    tag_names: [CrossStopLineOnYellowLight]
-
-  # ===== 变道/车道相关 =====
+    tag_names:
+    - CrossStopLineOnYellowLight
   变道:
-    nl_variants: [变道, 换道, 并线, 变换车道]
+    nl_variants:
+    - 变道
+    - 换道
+    - 并线
+    - 变换车道
     query_table: range_tag
     tag_names:
-      - LaneChange             # 云端：通用变道
-      - LANECHANGE_ABANDON     # 车端：放弃变道
-
+    - LaneChange
+    - LANECHANGE_ABANDON
+    recipe: lane_change
   切入:
-    nl_variants: [切入, 加塞, 插队, 他车切入]
-    query_table: range_tag
-    tag_names: [Cutin]
-
-  实线变道:
-    nl_variants: [实线变道, 压实线变道, 违规变道]
-    query_table: range_tag
-    tag_names: [SolidLaneChange]
-
-  异常变道:
-    nl_variants: [异常变道, 莫名变道]
+    nl_variants:
+    - 切入
+    - 加塞
+    - 插队
+    - 他车切入
     query_table: range_tag
     tag_names:
-      - AbnormalLaneChange
-      - AbnormalRightLaneChangeToRightestStopV3
-      - AbnormalRightLaneChangeToRightestStopV5
-
+    - Cutin
+    recipe: cutin_analysis
+  实线变道:
+    nl_variants:
+    - 实线变道
+    - 压实线变道
+    - 违规变道
+    query_table: range_tag
+    tag_names:
+    - SolidLaneChange
+  异常变道:
+    nl_variants:
+    - 异常变道
+    - 莫名变道
+    query_table: range_tag
+    tag_names:
+    - AbnormalLaneChange
+    - AbnormalRightLaneChangeToRightestStopV3
+    - AbnormalRightLaneChangeToRightestStopV5
   车道合并:
-    nl_variants: [车道合并, 合流, 汇入]
+    nl_variants:
+    - 车道合并
+    - 合流
+    - 汇入
     query_table: range_tag
-    tag_names: [LaneMerging]
-
-  # ===== 速度/制动相关 =====
+    tag_names:
+    - LaneMerging
   急刹:
-    nl_variants: [急刹, 急刹车, 猛踩刹车, 急减速]
+    nl_variants:
+    - 急刹
+    - 急刹车
+    - 猛踩刹车
+    - 急减速
     query_table: range_tag
-    tag_names: [Jerk]
-    tag_where_extra: "json_extract(param, '$.sub_tag') = 'brake'"
-
+    tag_names:
+    - Jerk
+    tag_where_extra: json_extract(param, '$.sub_tag') = 'brake'
   急加速:
-    nl_variants: [急加速, 猛踩油门, 突然加速]
+    nl_variants:
+    - 急加速
+    - 猛踩油门
+    - 突然加速
     query_table: range_tag
-    tag_names: [Jerk]
-    tag_where_extra: "json_extract(param, '$.sub_tag') = 'accel'"
-
+    tag_names:
+    - Jerk
+    tag_where_extra: json_extract(param, '$.sub_tag') = 'accel'
   跟车太近:
-    nl_variants: [跟车太近, 贴车, 紧跟, 近距离跟车]
+    nl_variants:
+    - 跟车太近
+    - 贴车
+    - 紧跟
+    - 近距离跟车
     query_table: range_tag
-    tag_names: [CloseFollow]
-
+    tag_names:
+    - CloseFollow
+    recipe: close_follow_analysis
   拥堵跟车:
-    nl_variants: [拥堵跟车, 堵车跟车]
+    nl_variants:
+    - 拥堵跟车
+    - 堵车跟车
     query_table: range_tag
-    tag_names: [CongestedFollow]
-
+    tag_names:
+    - CongestedFollow
   蠕行跟车:
-    nl_variants: [蠕行跟车, 走走停停]
+    nl_variants:
+    - 蠕行跟车
+    - 走走停停
     query_table: range_tag
-    tag_names: [CrawlingFollow]
-
+    tag_names:
+    - CrawlingFollow
   低TTC:
-    nl_variants: [低TTC, 碰撞风险高, TTC低]
+    nl_variants:
+    - 低TTC
+    - 碰撞风险高
+    - TTC低
     query_table: range_tag
-    tag_names: [LowTTC]
-
-  # ===== 避障相关 =====
+    tag_names:
+    - LowTTC
   避障借道:
-    nl_variants: [避障借道, 借道避让, 借道避障]
+    nl_variants:
+    - 避障借道
+    - 借道避让
+    - 借道避障
     query_table: range_tag
-    tag_names: [AvoidanceBorrowLane]
-
+    tag_names:
+    - AvoidanceBorrowLane
+    recipe: obstacle_avoidance
   车道内避障:
-    nl_variants: [车道内避障, 本道避让]
+    nl_variants:
+    - 车道内避障
+    - 本道避让
     query_table: range_tag
-    tag_names: [Avoidance_InLane]
-
+    tag_names:
+    - Avoidance_InLane
   多障碍物绕行:
-    nl_variants: [多障碍物绕行, 绕行避让]
+    nl_variants:
+    - 多障碍物绕行
+    - 绕行避让
     query_table: range_tag
-    tag_names: [AVOIDANCE_MULTIOBSTACLEAROUNDEGO]
-
-  # ===== VRU/碰撞相关 =====
+    tag_names:
+    - AVOIDANCE_MULTIOBSTACLEAROUNDEGO
   行人横穿:
-    nl_variants: [行人横穿, VRU横穿, 行人穿越]
+    nl_variants:
+    - 行人横穿
+    - VRU横穿
+    - 行人穿越
     query_table: range_tag
-    tag_names: [CrossVRUV1]
-
+    tag_names:
+    - CrossVRUV1
   侧方横穿:
-    nl_variants: [侧方横穿, 横穿车辆]
+    nl_variants:
+    - 侧方横穿
+    - 横穿车辆
     query_table: range_tag
-    tag_names: [CrossVehicle]
-
+    tag_names:
+    - CrossVehicle
   碰撞:
-    nl_variants: [碰撞, 撞车, 发生碰撞]
+    nl_variants:
+    - 碰撞
+    - 撞车
+    - 发生碰撞
     query_table: range_tag
-    tag_names: [ObstacleCollision]
-
+    tag_names:
+    - ObstacleCollision
   近碰:
-    nl_variants: [近碰, 差点碰撞, 擦碰]
+    nl_variants:
+    - 近碰
+    - 差点碰撞
+    - 擦碰
     query_table: range_tag
-    tag_names: [ObstacleNearMiss]
-
-  # ===== 匝道/道路类型 =====
+    tag_names:
+    - ObstacleNearMiss
   上匝道:
-    nl_variants: [上匝道, 进入匝道, 匝道汇入]
+    nl_variants:
+    - 上匝道
+    - 进入匝道
+    - 匝道汇入
     query_table: range_tag
-    tag_names: [OnRamp]
-
+    tag_names:
+    - OnRamp
+    recipe: on_ramp
   下匝道:
-    nl_variants: [下匝道, 驶出匝道, 匝道驶出]
+    nl_variants:
+    - 下匝道
+    - 驶出匝道
+    - 匝道驶出
     query_table: range_tag
-    tag_names: [OffRamp]
-
+    tag_names:
+    - OffRamp
+    recipe: off_ramp
   环岛:
-    nl_variants: [环岛, 转盘]
+    nl_variants:
+    - 环岛
+    - 转盘
     query_table: range_tag
-    tag_names: [Roundabout]
-
+    tag_names:
+    - Roundabout
+    recipe: roundabout
   坡道:
-    nl_variants: [坡道, 上坡, 下坡]
+    nl_variants:
+    - 坡道
+    - 上坡
+    - 下坡
     query_table: range_tag
-    tag_names: [Slope]
-
-  # ===== 天气相关 =====
+    tag_names:
+    - Slope
   下雨:
-    nl_variants: [下雨, 雨天, 降雨, 雨天行驶]
+    nl_variants:
+    - 下雨
+    - 雨天
+    - 降雨
+    - 雨天行驶
     query_table: range_tag
-    tag_names: [RainLevel, over_rain_level]
-
+    tag_names:
+    - RainLevel
+    - over_rain_level
   雨刮:
-    nl_variants: [雨刮, 雨刮器, 刮水]
+    nl_variants:
+    - 雨刮
+    - 雨刮器
+    - 刮水
     query_table: range_tag
-    tag_names: [ActiveWiperState]
-
-  # ===== 导航相关 =====
+    tag_names:
+    - ActiveWiperState
   导航左转:
-    nl_variants: [导航左转]
+    nl_variants:
+    - 导航左转
     query_table: range_tag
-    tag_names: [navi_turn_left]
-
+    tag_names:
+    - navi_turn_left
+    recipe: ego_navigation_turn_left
   导航右转:
-    nl_variants: [导航右转]
+    nl_variants:
+    - 导航右转
     query_table: range_tag
-    tag_names: [navi_turn_right]
-
+    tag_names:
+    - navi_turn_right
+    recipe: ego_navigation_turn_right
   导航掉头:
-    nl_variants: [导航掉头]
+    nl_variants:
+    - 导航掉头
     query_table: range_tag
-    tag_names: [navi_u_turn]
-
-  # ===== 车辆状态相关 =====
+    tag_names:
+    - navi_u_turn
+    recipe: ego_navigation_uturn
   超速:
-    nl_variants: [超速, 超速行驶]
+    nl_variants:
+    - 超速
+    - 超速行驶
     query_table: range_tag
-    tag_names: [OverSpeedLimit]
-
+    tag_names:
+    - OverSpeedLimit
   不追限速:
-    nl_variants: [不追限速, 速度不够, 低速行驶]
+    nl_variants:
+    - 不追限速
+    - 速度不够
+    - 低速行驶
     query_table: range_tag
-    tag_names: [NoSpeedIncrease]
-
+    tag_names:
+    - NoSpeedIncrease
   偏离车道中心:
-    nl_variants: [偏离中心, 不在中心, 偏离车道中心]
+    nl_variants:
+    - 偏离中心
+    - 不在中心
+    - 偏离车道中心
     query_table: range_tag
-    tag_names: [NotCenter]
-
+    tag_names:
+    - NotCenter
   猛打方向盘:
-    nl_variants: [猛打方向盘, 急转向]
+    nl_variants:
+    - 猛打方向盘
+    - 急转向
     query_table: range_tag
-    tag_names: [SteeringWheelSlam]
-
+    tag_names:
+    - SteeringWheelSlam
   转向:
-    nl_variants: [转向, 转弯]
+    nl_variants:
+    - 转向
+    - 转弯
     query_table: range_tag
-    tag_names: [Turning]
-
-# ===== 组合规则（SQL骨架模板）=====
-# 不是概念，而是告诉LLM如何把多个概念组装成SQL
+    tag_names:
+    - Turning
+  大曲率道路:
+    nl_variants:
+    - 大曲率道路
+    - 大曲率弯道
+    - 弯道
+    - 急弯
+    query_table: ego
+    recipe: large_curvature_road
+  合流:
+    nl_variants:
+    - 合流
+    - 汇入主路
+    - 匝道合流
+    - convergence
+    query_table: static_link
+    recipe: convergence
+  连续变道:
+    nl_variants:
+    - 连续变道
+    - 多次变道
+    - 连续换道
+    query_table: range_tag
+    tag_names:
+    - LANECHANGE_NAVIGATION
+    recipe: continuous_lane_change
+  Y型路口:
+    nl_variants:
+    - Y型路口
+    - Y字路口
+    - Y形路口
+    query_table: range_tag
+    tag_names:
+    - topology_intersection_y_junction
+    recipe: intersection_y_junction
+  直行红绿灯路口:
+    nl_variants:
+    - 直行红绿灯路口
+    - 有红绿灯的直行路口
+    query_table: range_tag
+    tag_names:
+    - topology_intersection_straight_intersection
+    recipe: straight_intersection_with_trafficlight
+  路口停车等灯:
+    nl_variants:
+    - 路口停车等灯
+    - 红绿灯前停车
+    - 路口等红绿灯
+    query_table: ego
+    recipe: intersection_with_trafficlight
+  binok:
+    nl_variants:
+    - binok
+    query_table: range_tag
+    tag_names:
+    - binok
+    recipe: binok
+  掉头不变道:
+    nl_variants:
+    - 掉头不变道
+    - 掉头无变道
+    query_table: range_tag
+    tag_names:
+    - Intersection
+    recipe: turn_back_without_lanechange
+  掉头一次变道:
+    nl_variants:
+    - 掉头一次变道
+    - 掉头一次换道
+    query_table: range_tag
+    tag_names:
+    - Intersection
+    recipe: trun_back_with_1_lanechange
+  掉头两次变道:
+    nl_variants:
+    - 掉头两次变道
+    - 掉头两次换道
+    query_table: range_tag
+    tag_names:
+    - Intersection
+    recipe: turn_back_with_2_lanechange
+  右转A:
+    nl_variants:
+    - 右转A
+    - 仅右转
+    query_table: static_link
+    recipe: right_turn_only
 composition_rules:
   single_tag:
-    description: "1个range_tag概念，直接查range_tag"
-    sql_template: |
-      SELECT start_ts, end_ts, tag_name, param
+    description: 1个range_tag概念，直接查range_tag
+    sql_template: 'SELECT start_ts, end_ts, tag_name, param
+
       FROM range_tag
+
       WHERE tag_name IN ({tag_names})
+
       ORDER BY start_ts
 
+      '
   multi_tag:
-    description: "2+个range_tag概念，需要时间窗口交叉（range_tag自连接）"
-    sql_template: |
-      SELECT r1.start_ts, r1.end_ts,
-             r1.tag_name AS {c1}_tag, r2.tag_name AS {c2}_tag
-      FROM range_tag r1
-      JOIN range_tag r2
-        ON r1.start_ts <= r2.end_ts AND r1.end_ts >= r2.start_ts
-      WHERE r1.tag_name IN ({c1_tags})
-        AND r2.tag_name IN ({c2_tags})
-      ORDER BY r1.start_ts
-
+    description: 2+个range_tag概念，需要时间窗口交叉（range_tag自连接）
+    sql_template: "SELECT r1.start_ts, r1.end_ts,\n       r1.tag_name AS {c1}_tag,\
+      \ r2.tag_name AS {c2}_tag\nFROM range_tag r1\nJOIN range_tag r2\n  ON r1.start_ts\
+      \ <= r2.end_ts AND r1.end_ts >= r2.start_ts\nWHERE r1.tag_name IN ({c1_tags})\n\
+      \  AND r2.tag_name IN ({c2_tags})\nORDER BY r1.start_ts\n"
   tag_join_ego:
-    description: "range_tag概念 + ego表字段（时间对齐JOIN）"
-    sql_template: |
-      SELECT r.start_ts, r.end_ts, r.tag_name, r.param,
-             e.{ego_fields}
-      FROM range_tag r
-      JOIN ego e
-        ON e.ts BETWEEN r.start_ts AND r.end_ts
-      WHERE r.tag_name IN ({tag_names})
-      ORDER BY r.start_ts, e.ts
-
+    description: range_tag概念 + ego表字段（时间对齐JOIN）
+    sql_template: "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       e.{ego_fields}\n\
+      FROM range_tag r\nJOIN ego e\n  ON e.ts BETWEEN r.start_ts AND r.end_ts\nWHERE\
+      \ r.tag_name IN ({tag_names})\nORDER BY r.start_ts, e.ts\n"
   tag_join_dynamic_obj:
-    description: "range_tag概念 + dynamic_obj表字段（时间对齐JOIN）"
-    sql_template: |
-      SELECT r.start_ts, r.end_ts, r.tag_name,
-             d.obj_id, d.x, d.y, d.type, d.heading,
-             d.absolute_velocity_x, d.absolute_velocity_y
-      FROM range_tag r
-      JOIN dynamic_obj d
-        ON d.ts BETWEEN r.start_ts AND r.end_ts
-      WHERE r.tag_name IN ({tag_names})
-        AND d.is_static = 0
-      ORDER BY r.start_ts, d.ts
-
+    description: range_tag概念 + dynamic_obj表字段（时间对齐JOIN）
+    sql_template: "SELECT r.start_ts, r.end_ts, r.tag_name,\n       d.obj_id, d.x,\
+      \ d.y, d.type, d.heading,\n       d.absolute_velocity_x, d.absolute_velocity_y\n\
+      FROM range_tag r\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts AND r.end_ts\n\
+      WHERE r.tag_name IN ({tag_names})\n  AND d.is_static = 0\nORDER BY r.start_ts,\
+      \ d.ts\n"
   cross_table:
-    description: "range_tag概念 + ego + dynamic_obj（多表JOIN）"
-    sql_template: |
-      SELECT r.start_ts, r.end_ts, r.tag_name,
-             e.{ego_fields},
-             d.obj_id, d.x, d.y, d.type
-      FROM range_tag r
-      JOIN ego e
-        ON e.ts BETWEEN r.start_ts AND r.end_ts
-      JOIN dynamic_obj d
-        ON d.ts BETWEEN r.start_ts AND r.end_ts
-      WHERE r.tag_name IN ({tag_names})
-        AND d.is_static = 0
-      ORDER BY r.start_ts, e.ts
-
+    description: range_tag概念 + ego + dynamic_obj（多表JOIN）
+    sql_template: "SELECT r.start_ts, r.end_ts, r.tag_name,\n       e.{ego_fields},\n\
+      \       d.obj_id, d.x, d.y, d.type\nFROM range_tag r\nJOIN ego e\n  ON e.ts\
+      \ BETWEEN r.start_ts AND r.end_ts\nJOIN dynamic_obj d\n  ON d.ts BETWEEN r.start_ts\
+      \ AND r.end_ts\nWHERE r.tag_name IN ({tag_names})\n  AND d.is_static = 0\nORDER\
+      \ BY r.start_ts, e.ts\n"
   tag_join_intersection_info:
-    description: "range_tag概念 + intersection_info表（路口详细属性）"
-    sql_template: |
-      SELECT r.start_ts, r.end_ts, r.tag_name, r.param,
-             i.intersection_id, i.lane_count, i.ego_lane_index, i.lane_info
-      FROM range_tag r
-      JOIN intersection_info i
-        ON json_extract(r.param, '$.intersection_id') = i.intersection_id
-      WHERE r.tag_name IN ({tag_names})
-      ORDER BY r.start_ts
-
+    description: range_tag概念 + intersection_info表（路口详细属性）
+    sql_template: "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       i.intersection_id,\
+      \ i.lane_count, i.ego_lane_index, i.lane_info\nFROM range_tag r\nJOIN intersection_info\
+      \ i\n  ON json_extract(r.param, '$.intersection_id') = i.intersection_id\nWHERE\
+      \ r.tag_name IN ({tag_names})\nORDER BY r.start_ts\n"
   tag_join_dynamic_lane:
-    description: "range_tag概念 + dynamic_lane表（车道级信息，时间对齐JOIN）"
-    sql_template: |
-      SELECT r.start_ts, r.end_ts, r.tag_name, r.param,
-             dl.lane_id, dl.lane_type, dl.lane_turn_type,
-             dl.ref_link_id, dl.predecessors, dl.successors
-      FROM range_tag r
-      JOIN dynamic_lane dl
-        ON dl.ts BETWEEN r.start_ts AND r.end_ts
-      WHERE r.tag_name IN ({tag_names})
-      ORDER BY r.start_ts, dl.ts
-
+    description: range_tag概念 + dynamic_lane表（车道级信息，时间对齐JOIN）
+    sql_template: "SELECT r.start_ts, r.end_ts, r.tag_name, r.param,\n       dl.lane_id,\
+      \ dl.lane_type, dl.lane_turn_type,\n       dl.ref_link_id, dl.predecessors,\
+      \ dl.successors\nFROM range_tag r\nJOIN dynamic_lane dl\n  ON dl.ts BETWEEN\
+      \ r.start_ts AND r.end_ts\nWHERE r.tag_name IN ({tag_names})\nORDER BY r.start_ts,\
+      \ dl.ts\n"
   ego_only:
-    description: "不涉及任何概念，直接查ego表"
-    sql_template: |
-      SELECT {ego_fields}
+    description: 不涉及任何概念，直接查ego表
+    sql_template: 'SELECT {ego_fields}
+
       FROM ego
+
       WHERE {ego_conditions}
+
       ORDER BY ts
 
+      '
   cte_analysis:
-    description: "复杂CTE分析：轨迹交叉、聚合统计、多步推理"
-    sql_template: |
-      WITH ... AS (...)
+    description: 复杂CTE分析：轨迹交叉、聚合统计、多步推理
+    sql_template: 'WITH ... AS (...)
+
       SELECT ... FROM ...
+
+      '

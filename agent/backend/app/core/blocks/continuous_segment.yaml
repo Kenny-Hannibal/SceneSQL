@@ -1,0 +1,59 @@
+# Block: continuous_segment
+# Purpose: Extract continuous time segments from ego table based on a where_condition,
+#          using ROW_NUMBER gap-and-island technique to group consecutive qualifying rows.
+# Input: ego
+# Output: start_ts, end_ts, duration, frame_count
+
+name: continuous_segment
+version: "1.0"
+description: |
+  从ego表提取满足where_condition的连续时间段。使用ROW_NUMBER间隙与孤岛技术：
+  对满足条件的行按ts排序，ROW_NUMBER OVER (ORDER BY ts)与行号之差作为分组依据，
+  相邻行差值相同则属于同一连续段。支持最小持续时间和前后扩展。
+
+input_tables:
+  - ego
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - frame_count
+
+parameters:
+  where_condition:
+    type: string
+    required: true
+    description: "SQL WHERE条件，用于筛选ego行，例如 ABS(steering_angle) > 0.6 AND speed > 25"
+    examples: ["ABS(steering_angle) > 0.6 AND speed > 25", "speed > 30", "acceleration < -2.0"]
+  min_duration:
+    type: float
+    default: 3.0
+    description: "最小持续时间(秒)，短于此的段将被过滤"
+  pre_pad:
+    type: float
+    default: 0.0
+    description: "start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 0.0
+    description: "end_ts后扩秒数"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          MIN(ts) - {pre_pad} AS start_ts,
+          MAX(ts) + {post_pad} AS end_ts,
+          (MAX(ts) + {post_pad}) - (MIN(ts) - {pre_pad}) AS duration,
+          COUNT(*) AS frame_count
+      FROM (
+          SELECT
+              ts,
+              ROW_NUMBER() OVER (ORDER BY ts) -
+                  ROW_NUMBER() OVER (ORDER BY ts) AS grp
+          FROM ego
+          WHERE {where_condition}
+      )
+      GROUP BY grp
+      HAVING (MAX(ts) - MIN(ts)) >= {min_duration}
+  )

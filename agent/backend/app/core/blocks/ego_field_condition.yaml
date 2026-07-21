@@ -1,0 +1,67 @@
+# Block: ego_field_condition
+# Purpose: General ego field filter with consecutive segment grouping.
+# Input: ego
+# Output: start_ts, end_ts, duration, frame_count
+
+name: ego_field_condition
+version: "1.0"
+description: |
+  通用ego字段条件筛选 + 连续段分组。对ego表应用where_condition筛选，
+  使用ROW_NUMBER间隙与孤岛技术将连续满足条件的帧分组为段。
+  类似continuous_segment但支持select_fields自定义和group_by_extra额外分组字段。
+
+input_tables:
+  - ego
+
+output_columns:
+  - start_ts
+  - end_ts
+  - duration
+  - frame_count
+
+parameters:
+  where_condition:
+    type: string
+    required: true
+    description: "SQL WHERE条件，用于筛选ego行"
+    examples: ["speed > 30", "acceleration < -2.0", "gear = 'D'", "brake_pressure > 0"]
+  select_fields:
+    type: string
+    default: "ts"
+    description: "SELECT中额外选择的字段(逗号分隔)，如'ts, speed, steering_angle'"
+  min_duration:
+    type: float
+    default: 3.0
+    description: "最小持续时间(秒)，短于此的段将被过滤"
+  pre_pad:
+    type: float
+    default: 0.0
+    description: "start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 0.0
+    description: "end_ts后扩秒秒数"
+  group_by_extra:
+    type: string
+    required: false
+    description: "可选的额外GROUP BY字段，如'gear'用于按档位分别分组"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          MIN(ts) - {pre_pad} AS start_ts,
+          MAX(ts) + {post_pad} AS end_ts,
+          (MAX(ts) + {post_pad}) - (MIN(ts) - {pre_pad}) AS duration,
+          COUNT(*) AS frame_count
+          {extra_select_fields}
+      FROM (
+          SELECT
+              {select_fields},
+              ROW_NUMBER() OVER (ORDER BY ts) -
+                  ROW_NUMBER() OVER ({extra_partition} ORDER BY ts) AS grp
+          FROM ego
+          WHERE {where_condition}
+      )
+      GROUP BY grp {extra_group_by}
+      HAVING (MAX(ts) - MIN(ts)) >= {min_duration}
+  )

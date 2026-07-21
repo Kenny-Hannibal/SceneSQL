@@ -1,0 +1,69 @@
+# Block: tag_gap_merge
+# Purpose: Merge range_tag fragments using gap-based grouping.
+#          Consecutive tag records within gap_seconds are merged into one group.
+# Input: range_tag
+# Output: scene_start_ts, scene_end_ts, total_duration, group_id
+
+name: tag_gap_merge
+version: "1.0"
+description: |
+  合并range_tag中指定tag_name的碎片片段。使用间隙分组：
+  按start_ts排序，如果当前行start_ts与前一行的end_ts间隔超过gap_seconds，
+  则开始新分组；否则属于同一组。支持最小持续时间、前后扩展和sub_tag过滤。
+
+input_tables:
+  - range_tag
+
+output_columns:
+  - scene_start_ts
+  - scene_end_ts
+  - total_duration
+  - group_id
+
+parameters:
+  tag_name:
+    type: string
+    required: true
+    description: "range_tag中的tag_name"
+    examples: ["CongestedFollow", "LaneChange", "Cutin"]
+  gap_seconds:
+    type: float
+    default: 3.0
+    description: "间隙阈值(秒)，相邻片段间隔超过此值则分到不同组"
+  min_duration:
+    type: float
+    default: 0
+    description: "最小总持续时间(秒)，短于此的组将被过滤"
+  pre_pad:
+    type: float
+    default: 0.0
+    description: "scene_start_ts前扩秒数"
+  post_pad:
+    type: float
+    default: 0.0
+    description: "scene_end_ts后扩秒数"
+  sub_tag:
+    type: string
+    required: false
+    description: "可选的sub_tag过滤条件"
+
+sql_template: |
+  {cte_name} AS (
+      SELECT
+          MIN(start_ts) - {pre_pad} AS scene_start_ts,
+          MAX(end_ts) + {post_pad} AS scene_end_ts,
+          (MAX(end_ts) + {post_pad}) - (MIN(start_ts) - {pre_pad}) AS total_duration,
+          grp AS group_id
+      FROM (
+          SELECT
+              start_ts,
+              end_ts,
+              SUM(CASE WHEN start_ts - LAG(end_ts) OVER (ORDER BY start_ts) > {gap_seconds} THEN 1 ELSE 0 END)
+                  OVER (ORDER BY start_ts) AS grp
+          FROM range_tag
+          WHERE tag_name = '{tag_name}'
+              {sub_tag_filter}
+      )
+      GROUP BY grp
+      HAVING (MAX(end_ts) - MIN(start_ts)) >= {min_duration}
+  )

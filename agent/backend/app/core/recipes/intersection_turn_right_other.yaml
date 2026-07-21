@@ -1,0 +1,54 @@
+name: intersection_turn_right_other
+version: '1.0'
+description: intersection_turn_right_2：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: intersection_turn_right_2
+    output_tag_name: intersection_turn_right_2
+    raw_sql: "WITH ego_first_ts AS (\n    SELECT MIN(ts) as package_start_ts FROM\
+      \ ego\n),\nraw_intersection_tags AS (\n    SELECT\n        start_ts,\n     \
+      \   end_ts,\n        end_ts - start_ts AS duration\n    FROM range_tag\n   \
+      \ WHERE tag_name = 'topology_intersection'\n    AND end_ts - start_ts >= 2\n\
+      ),\nintersection_with_gap AS (\n    SELECT\n        start_ts,\n        end_ts,\n\
+      \        duration,\n        CASE\n            WHEN LAG(end_ts) OVER (ORDER BY\
+      \ start_ts) IS NULL THEN 1\n            WHEN (start_ts - LAG(end_ts) OVER (ORDER\
+      \ BY start_ts)) > 5 THEN 1\n            ELSE 0\n        END as is_new_group\n\
+      \    FROM raw_intersection_tags\n),\nintersection_grouped AS (\n    SELECT\n\
+      \        start_ts,\n        end_ts,\n        duration,\n        SUM(is_new_group)\
+      \ OVER (ORDER BY start_ts ROWS UNBOUNDED PRECEDING) as group_id\n    FROM intersection_with_gap\n\
+      ),\naggregated_intersections AS (\n    SELECT\n        group_id,\n        MIN(start_ts)\
+      \ as intersection_start_ts,\n        MAX(end_ts) as intersection_end_ts,\n \
+      \       SUM(duration) as total_duration\n    FROM intersection_grouped\n   \
+      \ GROUP BY group_id\n),\nintersections_with_turn_right AS (\n    SELECT\n  \
+      \      ai.group_id,\n        ai.intersection_start_ts,\n        ai.intersection_end_ts,\n\
+      \        ai.total_duration,\n        EXISTS (\n            SELECT 1\n      \
+      \      FROM range_tag r\n            WHERE r.tag_name = 'Turning'\n        \
+      \    AND json_extract(r.param, '$.sub_tag') = 'turn_right'\n            AND\
+      \ r.start_ts <= ai.intersection_end_ts\n            AND r.end_ts >= ai.intersection_start_ts\n\
+      \        ) as has_turn_right_in_range\n    FROM aggregated_intersections ai\n\
+      ),\nfiltered_intersections AS (\n    SELECT\n        group_id,\n        intersection_start_ts,\n\
+      \        intersection_end_ts,\n        total_duration\n    FROM intersections_with_turn_right\n\
+      \    WHERE has_turn_right_in_range = 1\n),\nturn_right_tags AS (\n    SELECT\n\
+      \        start_ts as turn_right_start,\n        end_ts as turn_right_end\n \
+      \   FROM range_tag\n    WHERE tag_name = 'Turning'\n    AND json_extract(param,\
+      \ '$.sub_tag') = 'turn_right'\n),\njudgment_frames AS (\n    SELECT\n      \
+      \  fi.group_id,\n        fi.intersection_start_ts,\n        fi.intersection_end_ts,\n\
+      \        fi.total_duration,\n        (\n            SELECT MAX(ts)\n       \
+      \     FROM (\n                SELECT DISTINCT e.ts\n                FROM ego\
+      \ e\n                WHERE e.ts < fi.intersection_start_ts\n               \
+      \ AND e.ts >= fi.intersection_start_ts - 10\n                AND NOT EXISTS\
+      \ (\n                    SELECT 1 FROM turn_right_tags t\n                 \
+      \   WHERE e.ts >= t.turn_right_start AND e.ts <= t.turn_right_end\n        \
+      \        )\n            )\n        ) as judgment_ts\n    FROM filtered_intersections\
+      \ fi\n),\nlane_check AS (\n    SELECT\n        jf.group_id,\n        jf.intersection_start_ts,\n\
+      \        jf.intersection_end_ts,\n        jf.total_duration,\n        jf.judgment_ts,\n\
+      \        EXISTS (\n            SELECT 1\n            FROM ego e\n          \
+      \  WHERE e.ts = jf.judgment_ts\n            AND e.gl_right_cnt > 2\n       \
+      \ ) as is_second_lane\n    FROM judgment_frames jf\n    WHERE jf.judgment_ts\
+      \ IS NOT NULL\n)\nSELECT\n    'intersection_turn_right_other' AS tag_name,\n\
+      \    CASE\n        WHEN lc.intersection_start_ts - 10 < e.package_start_ts THEN\
+      \ e.package_start_ts\n        ELSE lc.intersection_start_ts - 10\n    END AS\
+      \ start_ts,\n    lc.intersection_end_ts AS end_ts,\n    lc.total_duration as\
+      \ duration\nFROM lane_check lc, ego_first_ts e\nWHERE lc.is_second_lane = 1\n\
+      ORDER BY lc.intersection_start_ts;"

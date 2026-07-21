@@ -1,0 +1,47 @@
+name: off_ramp_new_use_link_type
+version: '1.0'
+description: off_ramp：产线SQL直通模式(raw_sql)
+blocks: []
+variants:
+  default:
+    tag_name: off_ramp
+    output_tag_name: off_ramp
+    raw_sql: "-- 查询自车从多后继的主路（主干道）切换到辅路（铺路）的场景\n-- 新增条件：过滤掉在Intersection标签时间范围内的场景\n\
+      \nWITH multiple_successors AS (\n    -- 找出所有后继数量等于2的 static_link\n    SELECT\n\
+      \        link_id,\n        link_successor,\n        json_array_length(link_successor)\
+      \ as successor_count\n    FROM static_link\n    WHERE link_successor IS NOT\
+      \ NULL\n        AND link_successor != '[]'\n        AND json_array_length(link_successor)\
+      \ >= 2\n),\nego_with_next AS (\n    -- 从完整的 ego 表中获取每个时间点的下一个 link_id\n    SELECT\n\
+      \        e.ts,\n        e.ego_static_map_link_id as current_link_id,\n     \
+      \   LEAD(e.ego_static_map_link_id) OVER (ORDER BY e.ts) as next_link_id,\n \
+      \       LEAD(e.ts) OVER (ORDER BY e.ts) as next_ts\n    FROM ego e\n    WHERE\
+      \ e.ego_static_map_link_id IS NOT NULL\n        AND e.ego_static_map_link_id\
+      \ != -1\n),\ndivergence_candidates AS (\n    -- 筛选出当前 link 是多后继的情况，并且确实进入了新的\
+      \ link\n    SELECT\n        ewn.ts as exit_ts,\n        ewn.current_link_id,\n\
+      \        ms.successor_count,\n        ms.link_successor,\n        ewn.next_link_id,\n\
+      \        ewn.next_ts\n    FROM ego_with_next ewn\n    INNER JOIN multiple_successors\
+      \ ms ON ewn.current_link_id = CAST(ms.link_id AS INTEGER)\n    WHERE ewn.next_link_id\
+      \ IS NOT NULL\n        AND ewn.next_link_id != ewn.current_link_id  -- 确实进入了新的\
+      \ link\n        AND ewn.next_link_id != -1\n),\n-- 获取当前 link 的详细信息（确认是主路）\n\
+      current_link_info AS (\n    SELECT\n        dc.*,\n        sl.link_type as current_link_type,\n\
+      \        sl.link_class as current_link_class\n    FROM divergence_candidates\
+      \ dc\n    INNER JOIN static_link sl ON dc.current_link_id = CAST(sl.link_id\
+      \ AS INTEGER)\n),\n-- 获取下一个 link 的详细信息（确认是辅路）\nnext_link_info AS (\n    SELECT\n\
+      \        cli.*,\n        sl.link_type as next_link_type,\n        sl.link_class\
+      \ as next_link_class,\n        sl.is_intersection_out as next_is_intersection_out\n\
+      \    FROM current_link_info cli\n    LEFT JOIN static_link sl ON cli.next_link_id\
+      \ = CAST(sl.link_id AS INTEGER)\n),\n-- 过滤掉在Intersection标签时间范围内的场景\nno_intersection\
+      \ AS (\n    SELECT\n        nli.*\n    FROM next_link_info nli\n    WHERE NOT\
+      \ EXISTS (\n        SELECT 1\n        FROM range_tag rt\n        WHERE rt.tag_name\
+      \ = 'Intersection'\n          AND rt.start_ts <= nli.exit_ts   -- Intersection开始时间\
+      \ <= 切换时间\n          AND rt.end_ts >= nli.exit_ts     -- Intersection结束时间 >=\
+      \ 切换时间\n    )\n)\n-- 最终筛选：当前 link 是主干道或主路，下一个 link 是辅路/匝道/入口匝道/出口匝道/互通立交（道路等级降级）\n\
+      SELECT\n    'divergence' AS tag_name,\n    current_link_id,\n    current_link_type,\n\
+      \    current_link_class,\n    successor_count,\n    link_successor,\n    next_link_id,\n\
+      \    next_link_type,\n    next_link_class,\n    next_is_intersection_out,\n\
+      \    exit_ts -8 as start_ts,\n    next_ts +3 as end_ts,\n    (next_ts - exit_ts)\
+      \ AS duration\nFROM no_intersection\nWHERE\n    -- 当前 link 是主干道或主路（高等级道路）\n\
+      \    current_link_type IN ('主干道', '主路')\n    AND current_link_class IN ('高速公路',\
+      \ '主要大街/城市快速道')\n    -- 下一个 link 是辅路/匝道/入口匝道/出口匝道/互通立交（低等级道路）\n    AND next_link_type\
+      \ IN ('匝道', '入口匝道', '出口匝道', '互通立交')\n    -- current_link_class = '主要道路'\n  \
+      \  -- AND next_link_class = '次要道路'\nORDER BY exit_ts"

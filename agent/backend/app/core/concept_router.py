@@ -59,17 +59,17 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
 ## 可用Pipeline Recipe（如果问题匹配以下场景，填写recipe字段）
 | 场景 | recipe | variant | 识别关键词 |
 |------|--------|---------|-----------|
-| 他车横穿冲突 | conflict_pipeline | vehicle | 横穿冲突/他车交叉/CrossConflict |
-| VRU横穿冲突 | conflict_pipeline | vru | 行人横穿/VRU冲突/VRUCrossConflict |
-| 左转冲突 | turn_conflict_pipeline | left_turn | 左转冲突/对向冲突/left turn |
-| 右转冲突 | turn_conflict_pipeline | right_turn | 右转冲突/right turn |
-| 切入分析 | cutin_analysis | default | 切入/cutin/Cutin |
-| 拥堵跟车分析 | cutin_analysis | congested | 拥堵跟车/CongestedFollow |
-| 变道分析 | lane_change_analysis | default | 变道/LaneChange/换道/并道 |
-| 左变道分析 | lane_change_analysis | left | 左变道/向左变道/LeftLaneChange |
-| 右变道分析 | lane_change_analysis | right | 右变道/向右变道/RightLaneChange |
-| 跟车过近分析 | close_follow_analysis | default | 跟车过近/CloseFollow/尾随/紧跟 |
-| 拥堵跟车(风险)分析 | close_follow_analysis | congested | 拥堵跟车风险/CongestedFollow |
+{recipe_table}
+
+## 可用CTE Block（当没有匹配的recipe时，选择需要的block组合）
+| Block名 | 功能 | 输入表 | 必需参数 |
+|---------|------|--------|---------|
+{block_catalog_table}
+
+## 何时使用Block组合（Layer 3）
+- 用户问题**没有**匹配任何recipe时，才需要指定required_blocks
+- 如果有匹配的recipe，required_blocks留空
+- Block组合示例：用户问"高速大曲率道路有障碍物时绕障"→ required_blocks=["continuous_segment", "obstacle_proximity", "steering_change_detect"]
 
 ## 输出格式（严格JSON，不要输出其他内容）
 {{
@@ -82,19 +82,72 @@ ROUND1_SYSTEM_TEMPLATE = """你是自动驾驶场景查询的概念识别器。
   "need_intersection_info": false,
   "analysis_description": "如果组合方式是cte_analysis，描述分析逻辑，否则为空",
   "recipe": "recipe名称或空字符串(无匹配recipe)",
-  "recipe_variant": "variant名称或空字符串"
+  "recipe_variant": "variant名称或空字符串",
+  "required_blocks": ["block名列表，仅当recipe为空时填写，否则留空"]
 }}"""
 
 
+def _build_recipe_table() -> str:
+    """Dynamically build recipe table from recipe YAML files."""
+    import yaml as _yaml
+    recipe_dir = Path(__file__).parent / "recipes"
+    rows = []
+    for f in sorted(recipe_dir.glob("*.yaml")):
+        try:
+            data = _yaml.safe_load(f.read_text())
+            if not data:
+                continue
+            name = f.stem
+            desc = data.get("description", "")[:40]
+            variants = data.get("variants", {})
+            for vname, v in variants.items():
+                tag = v.get("tag_name", v.get("output_tag_name", ""))
+                kw = v.get("nl_keywords", desc)
+                rows.append(f"| {desc or name} | {name} | {vname} | {kw} |")
+        except Exception:
+            pass
+    return "\n".join(rows)
+
+_RECIPE_TABLE_CACHE = None
+
+
+
+def _build_block_catalog_table() -> str:
+    """Build block catalog table from block_catalog.yaml."""
+    import yaml as _yaml
+    catalog_path = Path(__file__).parent / "block_catalog.yaml"
+    if not catalog_path.exists():
+        return "(block catalog not available)"
+    data = _yaml.safe_load(catalog_path.read_text())
+    rows = []
+    for bname, binfo in data.get("blocks", {}).items():
+        desc = binfo.get("description", "")[:50]
+        inp = binfo.get("input", "")
+        if isinstance(inp, list):
+            inp = ", ".join(inp)
+        req = binfo.get("required_params", [])
+        req_str = ", ".join(req) if req else "(all optional)"
+        rows.append(f"| {bname} | {desc} | {inp} | {req_str} |")
+    return "\n".join(rows)
+
+
+_BLOCK_CATALOG_CACHE = None
+
 def build_round1_messages(nl: str, concept_groups: dict) -> list[dict]:
     """构建Round 1的prompt"""
+    global _RECIPE_TABLE_CACHE
     rows = []
     for name, info in concept_groups.items():
         variants = "、".join(info.get("nl_variants", []))
         rows.append(f"| {name} | {variants} | {info.get('query_table', 'range_tag')} |")
 
     concept_table = "\n".join(rows)
-    system = ROUND1_SYSTEM_TEMPLATE.format(concept_table=concept_table)
+    global _BLOCK_CATALOG_CACHE
+    if _RECIPE_TABLE_CACHE is None:
+        _RECIPE_TABLE_CACHE = _build_recipe_table()
+    if _BLOCK_CATALOG_CACHE is None:
+        _BLOCK_CATALOG_CACHE = _build_block_catalog_table()
+    system = ROUND1_SYSTEM_TEMPLATE.format(concept_table=concept_table, recipe_table=_RECIPE_TABLE_CACHE, block_catalog_table=_BLOCK_CATALOG_CACHE)
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": f"用户问题：{nl}"},
@@ -211,6 +264,76 @@ def build_round2_messages(nl: str, context: str) -> list[dict]:
     ]
 
 
+
+
+def build_hybrid_round2_messages(nl: str, required_blocks: list, auto_blocks: list,
+                                  schema_text: str, assembler) -> list[dict]:
+    """构建 Layer 3 Hybrid Round2 prompt — LLM 需要生成胶水 CTE + final SELECT。
+
+    已知 block 会自动拼装，LLM 只需要：
+    1. 为 block 设置具体参数（如 where_condition, tag_name 等）
+    2. 生成 block 之间/之后的胶水 CTE（如有必要）
+    3. 生成最终 SELECT 语句
+    """
+    # 构建已知 block 信息
+    block_details = []
+    for bname in required_blocks:
+        block = assembler.block_lib.get(bname)
+        if block:
+            params_info = []
+            for pname, pdef in block.get("parameters", {}).items():
+                if pdef.get("required", False):
+                    params_info.append(f"  - {pname}: (REQUIRED) {pdef.get('description', '')}")
+                else:
+                    params_info.append(f"  - {pname}: default={pdef.get('default', 'N/A')} — {pdef.get('description', '')}")
+            block_details.append(f"### Block: {bname}")
+            block_details.append(f"功能: {block.get('description', '')}")
+            block_details.append(f"参数:")
+            block_details.extend(params_info)
+            block_details.append("")
+
+    system = f"""你是自动驾驶场景挖掘的SQL生成专家。
+
+## 任务
+用户查询没有完全匹配的recipe，但可以用以下Block组合 + 胶水CTE来拼装SQL。
+
+## 已知Block（会自动拼装，你只需指定参数值）
+{chr(10).join(block_details)}
+
+## 你需要做的
+1. 为每个Block指定具体参数值（根据用户查询语义）
+2. 如果Block之间需要连接CTE（如一个block的输出是另一个的输入），写胶水CTE
+3. 写最终SELECT语句
+
+## 输出格式
+---BLOCK_PARAMS---
+block_name: param1=value1, param2=value2
+---CUSTOM_CTE---
+<cte_name> AS (
+    ... SQL ...
+)
+---END_CTE---
+---FINAL_SELECT---
+SELECT ... FROM ...
+
+## 表结构
+{schema_text}
+
+## 关键规则
+1. range_tag.start_ts/end_ts 与 ego.ts 单位相同（秒级Unix时间戳），直接比较
+2. tag_name LIKE 'XXX_%' 可匹配前缀
+3. param列是JSON字符串，用 json_extract(param, '$.key') 提取
+4. 只输出纯SQL，不要解释
+"""
+
+    user = f"用户问题：{nl}\n\n请生成Block参数 + 胶水CTE + 最终SELECT："
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 class ConceptRouter:
     """概念路由器 — 两轮NL2SQL方案的Round 1 + 上下文组装"""
 
@@ -302,6 +425,36 @@ class ConceptRouter:
         "掉头3": ("u_turn_left_3", "default"),
         "变道掉头": ("u_turn_with_lanechange", "default"),
         "弱势道路使用者横穿": ("vru_cross_conflict", "default"),
+        # ── Layer1 扩展：产线SQL直通补全 ──
+        "大曲率道路": ("large_curvature_road", "default"),
+        "大曲率弯道": ("large_curvature_road", "default"),
+        "急弯": ("large_curvature_road", "default"),
+        "合流": ("convergence", "default"),
+        "汇入主路": ("convergence", "default"),
+        "匝道合流": ("convergence", "default"),
+        "连续变道": ("continuous_lane_change", "default"),
+        "多次变道": ("continuous_lane_change", "default"),
+        "Y型路口": ("intersection_y_junction", "default"),
+        "Y字路口": ("intersection_y_junction", "default"),
+        "直行红绿灯路口": ("straight_intersection_with_trafficlight", "default"),
+        "路口停车等灯": ("intersection_with_trafficlight", "default"),
+        "红绿灯前停车": ("intersection_with_trafficlight", "default"),
+        "路口等红绿灯": ("intersection_with_trafficlight", "default"),
+        "binok": ("binok", "default"),
+        "导航左转": ("ego_navigation_turn_left", "default"),
+        "导航右转": ("ego_navigation_turn_right", "default"),
+        "导航掉头": ("ego_navigation_uturn", "default"),
+        "掉头不变道": ("turn_back_without_lanechange", "default"),
+        "掉头一次变道": ("trun_back_with_1_lanechange", "default"),
+        "掉头两次变道": ("turn_back_with_2_lanechange", "default"),
+        "掉头变道": ("turn_back_with_lanechange", "default"),
+        "绕障": ("obstacle_avoidance", "default"),
+        "绕行避障": ("obstacle_avoidance", "default"),
+        "避障绕行": ("obstacle_avoidance", "default"),
+        "锥桶绕行": ("obstacle_avoidance", "default"),
+        "下匝道新版": ("off_ramp_new_use_link_type", "default"),
+        "上匝道新版": ("on_ramp_new_use_link_type", "default"),
+
     }
 
     def __init__(self):
@@ -401,14 +554,17 @@ class ConceptRouter:
                             break
                     if result.get("recipe"):
                         break
-            # Phase 3: NL原文匹配 — 直接从用户输入中检测关键词
+            # Phase 3: NL原文匹配 — 优先匹配最长关键词（最具体）
             if not result.get("recipe") and nl:
-                for key, (recipe, variant) in combined_map.items():
-                    if key in nl:
-                        result["recipe"] = recipe
-                        result["recipe_variant"] = result.get("recipe_variant") or variant
-                        result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
-                        break
+                matches = [(key, recipe, variant) for key, (recipe, variant) in combined_map.items() if key in nl]
+                if matches:
+                    # 按key长度降序，选最长的匹配（更具体）
+                    matches.sort(key=lambda x: len(x[0]), reverse=True)
+                    key, recipe, variant = matches[0]
+                    result["recipe"] = recipe
+                    result["recipe_variant"] = result.get("recipe_variant") or variant
+                    result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
+                    logger.info(f"Phase3 NL match: {nl} -> {key} (len={len(key)})")
             # Phase 4a: 向量语义搜索（ChromaDB + MiniLM）
             if not result.get("recipe") and nl:
                 try:

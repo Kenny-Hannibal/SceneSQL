@@ -1,0 +1,27 @@
+blocks: []
+created_at: 1784628899.2099946
+description: ''
+keywords:
+- tunnel_entrance
+- 隧道入口
+name: 隧道入口_v2
+updated_at: 1784628899.2099946
+variants:
+  default:
+    raw_sql: "WITH ego_link_attr AS (\n    SELECT\n        e.ts,\n        e.ego_static_map_link_id\
+      \ AS link_id,\n        sl.link_attribute,\n        e.cumulative_distance\n \
+      \   FROM ego e\n    LEFT JOIN static_link sl\n      ON e.ego_static_map_link_id\
+      \ = sl.link_id\n),\nwith_prev AS (\n    SELECT\n        ts,\n        link_id,\n\
+      \        link_attribute,\n        cumulative_distance,\n        LAG(link_attribute)\
+      \ OVER (ORDER BY ts) AS prev_attr\n    FROM ego_link_attr\n),\nentrance_events\
+      \ AS (\n    SELECT\n        ts AS entrance_ts,\n        link_id AS tunnel_link_id,\n\
+      \        cumulative_distance AS entrance_dist\n    FROM with_prev\n    WHERE\
+      \ prev_attr IS NOT NULL\n      AND prev_attr != '隧道'\n      AND link_attribute\
+      \ = '隧道'\n)\nSELECT\n    'tunnel_entrance' AS tag_name,\n    (\n        SELECT\
+      \ MAX(e2.ts)\n        FROM ego e2\n        WHERE e2.ts < ee.entrance_ts\n  \
+      \        AND e2.cumulative_distance IS NOT NULL\n          AND ee.entrance_dist\
+      \ IS NOT NULL\n          AND ee.entrance_dist - e2.cumulative_distance >= 110\n\
+      \    ) AS start_ts,\n    ee.entrance_ts AS end_ts,\n    ee.tunnel_link_id\n\
+      FROM entrance_events ee\nORDER BY ee.entrance_ts;"
+    tag_name: tunnel_entrance
+version: '1.0'

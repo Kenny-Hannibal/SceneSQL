@@ -1,0 +1,36 @@
+blocks: []
+created_at: 1784526281.5690598
+description: ''
+keywords:
+- 合流
+- 汇入
+name: 合流
+updated_at: 1784526281.5690598
+variants:
+  default:
+    raw_sql: "WITH multiple_predecessors AS (\n  SELECT link_id, link_predecessor,\n\
+      \    json_array_length(link_predecessor) as predecessor_count\n  FROM static_link\n\
+      \  WHERE link_predecessor IS NOT NULL\n  AND link_predecessor != '[]'\n  AND\
+      \ json_array_length(link_predecessor) >= 2\n),\nego_with_next AS (\n  SELECT\
+      \ e.ts, e.ego_static_map_link_id as current_link_id,\n    LEAD(e.ego_static_map_link_id)\
+      \ OVER (ORDER BY e.ts) as next_link_id,\n    LEAD(e.ts) OVER (ORDER BY e.ts)\
+      \ as next_ts\n  FROM ego e\n  WHERE e.ego_static_map_link_id IS NOT NULL\n \
+      \ AND e.ego_static_map_link_id != -1\n),\nconvergence_candidates AS (\n  SELECT\
+      \ ewn.ts as exit_ts, ewn.current_link_id, ewn.next_link_id, ewn.next_ts\n  FROM\
+      \ ego_with_next ewn\n  INNER JOIN multiple_predecessors mp ON ewn.next_link_id\
+      \ = CAST(mp.link_id AS INTEGER)\n  WHERE ewn.next_link_id IS NOT NULL\n  AND\
+      \ ewn.next_link_id != ewn.current_link_id\n  AND ewn.next_link_id != -1\n),\n\
+      current_link_info AS (\n  SELECT cc.exit_ts, cc.current_link_id, cc.next_link_id,\
+      \ cc.next_ts,\n    sl.link_type as current_link_type\n  FROM convergence_candidates\
+      \ cc\n  INNER JOIN static_link sl ON cc.current_link_id = CAST(sl.link_id AS\
+      \ INTEGER)\n),\nnext_link_info AS (\n  SELECT cli.exit_ts, cli.current_link_id,\
+      \ cli.next_link_id, cli.next_ts,\n    cli.current_link_type,\n    sl.link_type\
+      \ as next_link_type,\n    sl.link_turn_type as next_link_turn_type\n  FROM current_link_info\
+      \ cli\n  LEFT JOIN static_link sl ON cli.next_link_id = CAST(sl.link_id AS INTEGER)\n\
+      )\nSELECT\n  'convergence' AS tag_name,\n  current_link_id,\n  current_link_type,\n\
+      \  next_link_id,\n  next_link_type,\n  next_link_turn_type,\n  exit_ts - 8 as\
+      \ start_ts,\n  next_ts + 3 as end_ts\nFROM next_link_info\nWHERE\n  current_link_type\
+      \ IN ('匝道', '入口匝道', '出口匝道', '互通立交')\n  AND next_link_type IN ('主干道', '主路')\n\
+      ORDER BY exit_ts;"
+    tag_name: convergence
+version: '1.0'

@@ -1,0 +1,14 @@
+blocks: []
+created_at: 1784529692.1093416
+description: ''
+keywords:
+- topology_tunnel
+- 隧道
+name: 隧道
+updated_at: 1784529692.1093416
+variants:
+  default:
+    raw_sql: SELECT start_ts, end_ts, tag_name, param FROM range_tag WHERE tag_name
+      = 'topology_tunnel'
+    tag_name: topology_tunnel
+version: '1.0'
