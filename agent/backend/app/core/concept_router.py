@@ -551,6 +551,7 @@ class ConceptRouter:
                 )
                 result["sql_source"] = "hybrid"
                 result["composition"] = "hybrid_blocks"
+                result["_routed"] = True  # 标记路由完成，跳过后续Phase
                 logger.info(f"Compound concepts: {concept_recipes} -> blocks={result['required_blocks']}")
             else:
                 # Phase 1: exact match (单一场景)
@@ -560,9 +561,10 @@ class ConceptRouter:
                         result["recipe"] = recipe
                         result["recipe_variant"] = result.get("recipe_variant") or variant
                         result["sql_source"] = "user_strategy" if concept in self._user_strategy_map else "recipe"
+                        result["_routed"] = True
                         break
             # Phase 2: substring match — if concept contains a map key
-            if not result.get("recipe"):
+            if not result.get("recipe") and not result.get("_routed"):
                 for concept in concepts:
                     for key, (recipe, variant) in combined_map.items():
                         if key in concept or concept in key:
@@ -573,7 +575,7 @@ class ConceptRouter:
                     if result.get("recipe"):
                         break
             # Phase 3: NL原文匹配 — 复合场景检测 + 最长匹配
-            if not result.get("recipe") and nl:
+            if not result.get("recipe") and not result.get("_routed") and nl:
                 matches = [(key, recipe, variant) for key, (recipe, variant) in combined_map.items() if key in nl]
                 if matches:
                     # 先过滤：如果一个key是另一个key的子串，且较短key的recipe不同，
@@ -608,7 +610,7 @@ class ConceptRouter:
                         result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
                         logger.info(f"Phase3 NL match: '{nl}' -> '{key}' (len={len(key)})")
             # Phase 4a: 向量语义搜索（ChromaDB + MiniLM）
-            if not result.get("recipe") and nl:
+            if not result.get("recipe") and not result.get("_routed") and nl:
                 try:
                     from .vector_router import search as vector_search, is_available as vector_available
                     if vector_available():
@@ -630,7 +632,7 @@ class ConceptRouter:
                 except Exception as e:
                     logger.debug(f"Vector search failed: {e}")
             # Phase 4: n-gram 余弦相似度兜底 — 语义模糊匹配
-            if not result.get("recipe") and nl:
+            if not result.get("recipe") and not result.get("_routed") and nl:
                 best_key, best_score = self._fuzzy_match(nl)
                 if best_key and best_score >= 0.4:  # LCS 占比阈值
                     recipe, variant = combined_map[best_key]
@@ -639,6 +641,8 @@ class ConceptRouter:
                     result["sql_source"] = "user_strategy" if best_key in self._user_strategy_map else "recipe"
                     logger.info(f"Phase4 fuzzy match: '{nl}' → '{best_key}' (score={best_score:.3f})")
 
+        # 清理内部flag，不暴露给调用方
+        result.pop("_routed", None)
         return result
 
     # ── Phase 4: n-gram 余弦相似度模糊匹配 ──
