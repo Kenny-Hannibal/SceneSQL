@@ -46,6 +46,11 @@ parameters:
     type: string
     required: false
     description: "可选的sub_tag过滤条件"
+  sub_tag_filter:
+    type: string
+    required: false
+    default: ""
+    description: "由sub_tag派生的SQL过滤条件，通常为空或 AND sub_tag='xxx'"
 
 sql_template: |
   {cte_name} AS (

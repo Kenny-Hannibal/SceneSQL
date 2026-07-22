@@ -108,6 +108,24 @@ class BlockAssembler:
         if not variant:
             raise ValueError(f"Variant not found: {variant_name} in recipe {recipe_name}")
         
+        # ── Block path: if blocks defined, use block assembly ──
+        blocks = recipe.get('blocks', [])
+        if blocks:
+            # Block assembly path — blocks take priority over raw_sql
+            params = dict(variant)
+            if extra_params:
+                params.update(extra_params)
+            params = self._resolve_dict_vars(params)
+            cte_parts = self._assemble_blocks(recipe, params)
+            final_select = recipe.get('final_select_template', '')
+            final_select = self._resolve_str(final_select, params)
+            if cte_parts:
+                cte_sql = CTE_SEP.join(cte_parts)
+                full_sql = "WITH\n" + cte_sql + "\n\n" + final_select
+            else:
+                full_sql = final_select
+            return full_sql
+
         # ── Fast path: raw_sql (production SQL pass-through) ──
         raw_sql = variant.get('raw_sql')
         if raw_sql:
@@ -258,14 +276,19 @@ class BlockAssembler:
         return full_sql
     
     def _resolve_str(self, template: str, params: Dict[str, Any]) -> str:
-        """Replace {var} placeholders in a string with params values."""
+        """Replace {var} placeholders in a string with params values.
+        
+        If a placeholder key is not found in params, it is replaced with
+        an empty string (rather than leaving the raw {key} in the output).
+        This prevents unresolved placeholders from surviving into final SQL.
+        """
         if not isinstance(template, str):
             return str(template)
         
         for _ in range(5):  # Multiple passes for nested placeholders
             def replacer(match):
                 key = match.group(1)
-                val = params.get(key, match.group(0))
+                val = params.get(key, "")  # Default to empty string for unresolved
                 if isinstance(val, list):
                     return ', '.join(str(v) for v in val)
                 return str(val)

@@ -1,7 +1,23 @@
 name: continuous_lane_change
-version: '1.0'
-description: continuous_lane_change：产线SQL直通模式(raw_sql)
-blocks: []
+version: '2.0'
+description: 连续变道场景检测（block组装 + raw_sql直通双模式）
+blocks:
+  - name: tag_gap_merge
+    cte_name: lane_change_groups
+    params:
+      tag_name: LANECHANGE_NAVIGATION
+      gap_seconds: 6.0
+      min_duration: 0
+      pre_pad: 0.0
+      post_pad: 0.0
+final_select_template: |
+  SELECT
+      'continuous_lane_change' AS tag_name,
+      scene_start_ts AS start_ts,
+      scene_end_ts AS end_ts
+  FROM lane_change_groups
+  WHERE total_duration > 1
+  ORDER BY start_ts
 variants:
   default:
     tag_name: continuous_lane_change
