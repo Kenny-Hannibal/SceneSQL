@@ -573,14 +573,15 @@ class ConceptRouter:
             self._user_strategy_map = {}
 
     def _init_vector_index(self):
-        """初始化向量语义索引（ChromaDB + MiniLM）。
+        """初始化向量语义索引（ChromaDB + BGE-M3/MiniLM）。
         懒加载：如果依赖未安装则静默跳过，不影响 Phase 1-3 + Phase 4 逻辑。
         """
         try:
-            from .vector_router import load_from_templates, is_available
+            from .vector_router import load_from_templates, is_available, EMBED_MODEL
             load_from_templates()
             if is_available():
-                logger.info("Vector semantic routing enabled (ChromaDB + MiniLM)")
+                model_name = "BGE-M3" if EMBED_MODEL and "bge-m3" in EMBED_MODEL.lower() else "embedding model"
+                logger.info(f"Vector semantic routing enabled (ChromaDB + {model_name})")
         except Exception as e:
             logger.debug(f"Vector index init skipped: {e}")
 

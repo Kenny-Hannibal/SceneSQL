@@ -143,10 +143,14 @@ def search(query: str, top_k: int = 3) -> List[Tuple[str, float]]:
     ]
 
 
-def load_from_templates():
-    """从 templates.jsonl + 用户策略 加载所有 recipe 并索引。"""
+def _collect_template_entries() -> List[Tuple[str, str, str]]:
+    """从 templates.jsonl + 用户策略 收集所有条目（不写DB）。
+    
+    Returns:
+        [(id, text_for_embedding, recipe_name), ...]
+        id 使用 recipe 原始名称，确保与外部索引脚本一致。
+    """
     entries = []
-    _id_counter = 0
 
     # 1. 系统模板
     templates_path = os.path.join(
@@ -158,9 +162,10 @@ def load_from_templates():
         with open(templates_path) as f:
             for line in f:
                 t = json.loads(line)
-                _id_counter += 1
+                recipe_id = t.get("id", "")
                 text = f"{t.get('nl', '')} {t.get('domain', '')}"
-                entries.append((f"t_{_id_counter}", text, t.get("id", "")))
+                # id 使用 recipe 原始名称，与 BGE-M3 外部索引脚本一致
+                entries.append((f"tpl__{recipe_id}" if recipe_id else f"tpl__{len(entries)}", text, recipe_id))
 
     # 2. 用户策略
     strategy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_strategies")
@@ -172,14 +177,30 @@ def load_from_templates():
             try:
                 with open(os.path.join(strategy_dir, p)) as f:
                     d = yaml.safe_load(f)
-                _id_counter += 1
+                name = d.get("name", p.replace(".yaml", ""))
                 keywords = " ".join(d.get("keywords", []))
                 desc = d.get("description", "")
                 text = f"{keywords} {desc}"
-                entries.append((f"u_{_id_counter}", text, d.get("name", p.replace(".yaml", ""))))
+                entries.append((f"usr__{name}", text, name))
             except Exception as e:
                 logger.warning(f"Failed to load strategy {p}: {e}")
 
+    return entries
+
+
+def load_from_templates(force: bool = False):
+    """从 templates.jsonl + 用户策略 加载所有 recipe 并索引。
+    
+    仅在 collection 为空（或 force=True）时才写入，避免覆盖已有的 BGE-M3 索引。
+    """
+    if not is_available():
+        return
+
+    if not force and _collection.count() > 0:
+        logger.info(f"Vector DB already has {_collection.count()} entries, skip re-indexing (use force=True to override)")
+        return
+
+    entries = _collect_template_entries()
     if entries:
         index_recipes(entries)
 
