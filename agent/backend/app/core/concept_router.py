@@ -535,14 +535,32 @@ class ConceptRouter:
         combined_map = {**self.CONCEPT_RECIPE_MAP, **self._user_strategy_map}
         if not result.get("recipe"):
             concepts = result.get("concepts", [])
-            # Phase 1: exact match
+            # ── Pre-check: 检测concepts是否命中2+个不同recipe → compound场景 ──
+            concept_recipes = []
             for concept in concepts:
                 if concept in combined_map:
                     recipe, variant = combined_map[concept]
-                    result["recipe"] = recipe
-                    result["recipe_variant"] = result.get("recipe_variant") or variant
-                    result["sql_source"] = "user_strategy" if concept in self._user_strategy_map else "recipe"
-                    break
+                    concept_recipes.append((concept, recipe, variant))
+            unique_concept_recipes = set(r for _, r, _ in concept_recipes)
+            if len(unique_concept_recipes) >= 2:
+                # compound: 多个concept命中不同recipe → hybrid
+                result["recipe"] = ""
+                result["recipe_variant"] = ""
+                result["required_blocks"] = self._infer_required_blocks(
+                    [r for _, r, _ in concept_recipes]
+                )
+                result["sql_source"] = "hybrid"
+                result["composition"] = "hybrid_blocks"
+                logger.info(f"Compound concepts: {concept_recipes} -> blocks={result['required_blocks']}")
+            else:
+                # Phase 1: exact match (单一场景)
+                for concept in concepts:
+                    if concept in combined_map:
+                        recipe, variant = combined_map[concept]
+                        result["recipe"] = recipe
+                        result["recipe_variant"] = result.get("recipe_variant") or variant
+                        result["sql_source"] = "user_strategy" if concept in self._user_strategy_map else "recipe"
+                        break
             # Phase 2: substring match — if concept contains a map key
             if not result.get("recipe"):
                 for concept in concepts:
