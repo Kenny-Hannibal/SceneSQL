@@ -835,6 +835,18 @@ class AgentEngine:
                 )
                 sql_source = "hybrid"
                 logger.info("Hybrid assembled: blocks=%s sql_len=%d", required_blocks, len(sql))
+
+                # ── Post-assembly SQL sanitization ──
+                # 清理LLM可能残留的花括号占位符（如 {param_name}、{{variable}}）
+                # 只匹配 {\w+} 模式（花括号内为标识符），不误伤SQL字符串常量
+                import re as _re
+                pre_len = len(sql)
+                sql = _re.sub(r'\{[a-zA-Z_]\w*\}', '', sql)  # 移除 {param_name} 占位符
+                sql = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sql)  # 移除 {{variable}} 占位符
+                # 清理连续空行
+                sql = _re.sub(r'\n\s*\n\s*\n', '\n\n', sql)
+                if len(sql) != pre_len:
+                    logger.warning("Hybrid SQL sanitized: removed %d placeholder chars", pre_len - len(sql))
             except Exception as e:
                 logger.warning("Hybrid assembly failed, fallback to Round 2: %s", e)
                 sql = None

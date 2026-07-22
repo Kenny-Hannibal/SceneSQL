@@ -324,6 +324,14 @@ SELECT ... FROM ...
 2. tag_name LIKE 'XXX_%' 可匹配前缀
 3. param列是JSON字符串，用 json_extract(param, '$.key') 提取
 4. 只输出纯SQL，不要解释
+
+## 严格禁止（违反将导致SQL执行失败）
+1. 禁止使用花括号占位符，如 {{variable}}、{{param}} — 所有值必须直接写死
+2. 禁止在SQL中使用Python/Jinja语法，只允许标准SQLite语法
+3. CTE命名只允许字母、数字、下划线，禁止特殊字符
+4. 字符串常量必须用单引号，禁止双引号
+5. 最终SQL必须能被SQLite直接执行，不能依赖任何外部变量
+6. 如果Block已经自动拼装了CTE，胶水CTE和final SELECT中引用这些CTE名即可
 """
 
     user = f"用户问题：{nl}\n\n请生成Block参数 + 胶水CTE + 最终SELECT："
