@@ -63,11 +63,19 @@ sql_template: |
           SELECT
               start_ts,
               end_ts,
-              SUM(CASE WHEN start_ts - LAG(end_ts) OVER (ORDER BY start_ts) > {gap_seconds} THEN 1 ELSE 0 END)
-                  OVER (ORDER BY start_ts) AS grp
-          FROM range_tag
-          WHERE tag_name = '{tag_name}'
-              {sub_tag_filter}
+              SUM(is_gap) OVER (ORDER BY start_ts) AS grp
+          FROM (
+              SELECT
+                  start_ts,
+                  end_ts,
+                  CASE
+                      WHEN start_ts - LAG(end_ts) OVER (ORDER BY start_ts) > {gap_seconds} THEN 1
+                      ELSE 0
+                  END AS is_gap
+              FROM range_tag
+              WHERE tag_name = '{tag_name}'
+                  {sub_tag_filter}
+          )
       )
       GROUP BY grp
       HAVING (MAX(end_ts) - MIN(start_ts)) >= {min_duration}
