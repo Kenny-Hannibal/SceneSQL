@@ -713,8 +713,8 @@ class ConceptRouter:
                     from .vector_router import search as vector_search, is_available as vector_available, EMBED_MODEL
                     if vector_available():
                         hits = vector_search(nl, top_k=1)
-                        # Phase 4a threshold: MiniLM unreliable for Chinese → strict 0.35; BGE-M3 → 0.55
-                        _vec_threshold = 0.55 if "bge-m3" in (EMBED_MODEL or "").lower() else 0.35
+                        # Phase 4a threshold: MiniLM→0.35 (strict); BGE-M3→0.40 (75% precision, 57% recall)
+                        _vec_threshold = 0.40 if "bge-m3" in (EMBED_MODEL or "").lower() else 0.35
                         if hits and hits[0][1] < _vec_threshold:
                             recipe_name = hits[0][0]
                             # 在 combined_map 中查找 recipe_name 对应的 key
