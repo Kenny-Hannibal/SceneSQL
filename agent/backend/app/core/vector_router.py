@@ -59,8 +59,11 @@ def _ensure_loaded():
         logger.warning("sentence-transformers not installed, vector routing disabled")
         return
 
-    # ChromaDB 持久化目录
-    db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vector_db")
+    # ChromaDB 持久化目录 — 根据模型选择不同DB（BGE-M3和MiniLM维度不同，不能混用）
+    if "bge-m3" in (EMBED_MODEL or "").lower():
+        db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vector_db_bge_m3")
+    else:
+        db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vector_db")
     client = chromadb.PersistentClient(path=db_dir)
     _collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
