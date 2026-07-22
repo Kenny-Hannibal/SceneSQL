@@ -113,22 +113,67 @@ _RECIPE_TABLE_CACHE = None
 
 
 def _build_block_catalog_table() -> str:
-    """Build block catalog table from block_catalog.yaml."""
+    """Build block catalog table by scanning blocks/ directory.
+    
+    Automatically reads all block YAML files from the blocks/ subdirectory
+    and generates a markdown table for Round1 LLM consumption.
+    No manual catalog maintenance needed — always in sync with actual blocks.
+    """
     import yaml as _yaml
-    catalog_path = Path(__file__).parent / "block_catalog.yaml"
-    if not catalog_path.exists():
+    blocks_dir = Path(__file__).parent / "blocks"
+    if not blocks_dir.exists():
         return "(block catalog not available)"
-    data = _yaml.safe_load(catalog_path.read_text())
+    
     rows = []
-    for bname, binfo in data.get("blocks", {}).items():
-        desc = binfo.get("description", "")[:50]
-        inp = binfo.get("input", "")
-        if isinstance(inp, list):
-            inp = ", ".join(inp)
-        req = binfo.get("required_params", [])
-        req_str = ", ".join(req) if req else "(all optional)"
-        rows.append(f"| {bname} | {desc} | {inp} | {req_str} |")
-    return "\n".join(rows)
+    for bfile in sorted(blocks_dir.glob("*.yaml")):
+        if bfile.name == "block_catalog.yaml":
+            continue  # skip self if exists
+        try:
+            data = _yaml.safe_load(bfile.read_text())
+        except Exception:
+            continue
+        if not data or not isinstance(data, dict):
+            continue
+        
+        bname = data.get("name", bfile.stem)
+        desc = data.get("description", "") or ""
+        # Take first line of description, max 60 chars
+        first_line = desc.split("\n")[0].strip()[:60]
+        
+        # Extract input from description or parameters
+        input_tables = data.get("input", "")
+        if not input_tables:
+            # Infer from sql_template
+            sql_tmpl = data.get("sql_template", "")
+            if "FROM ego" in sql_tmpl and "FROM range_tag" in sql_tmpl:
+                input_tables = "ego, range_tag"
+            elif "FROM ego" in sql_tmpl:
+                input_tables = "ego"
+            elif "FROM range_tag" in sql_tmpl:
+                input_tables = "range_tag"
+            elif "FROM dynamic_obj" in sql_tmpl:
+                input_tables = "dynamic_obj"
+            elif "FROM static_obj" in sql_tmpl:
+                input_tables = "static_obj"
+            else:
+                input_tables = "upstream CTE"
+        
+        # Extract required params
+        params = data.get("parameters", {})
+        if isinstance(params, dict):
+            required = [k for k, v in params.items()
+                        if isinstance(v, dict) and v.get("required", False)]
+            req_str = ", ".join(required) if required else "(all optional)"
+        else:
+            req_str = "(see block definition)"
+        
+        rows.append(f"| {bname} | {first_line} | {input_tables} | {req_str} |")
+    
+    if not rows:
+        return "(block catalog not available)"
+    
+    header = "| Block | Description | Input | Required Params |\n|-------|-------------|-------|-----------------|\n"
+    return header + "\n".join(rows)
 
 
 _BLOCK_CATALOG_CACHE = None
