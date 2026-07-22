@@ -711,7 +711,7 @@ class ConceptRouter:
                     from .vector_router import search as vector_search, is_available as vector_available
                     if vector_available():
                         hits = vector_search(nl, top_k=1)
-                        if hits and hits[0][1] < 0.35:  # cosine distance < 0.35 ≈ 高度相似
+                        if hits and hits[0][1] < 0.55:  # cosine distance < 0.55 (MiniLM中文稍弱,放宽阈值)
                             recipe_name = hits[0][0]
                             # 在 combined_map 中查找 recipe_name 对应的 key
                             matched_key = None
