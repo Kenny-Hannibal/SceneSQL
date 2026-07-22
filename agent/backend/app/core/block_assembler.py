@@ -104,9 +104,18 @@ class BlockAssembler:
         if not recipe:
             raise ValueError(f"Recipe not found: {recipe_name}")
         
-        variant = recipe.get('variants', {}).get(variant_name)
-        if not variant:
-            raise ValueError(f"Variant not found: {variant_name} in recipe {recipe_name}")
+        # ── Resolve variant: prefer named variant, fallback to recipe top-level ──
+        variants = recipe.get('variants', {})
+        if variants and variant_name in variants:
+            variant = variants[variant_name]
+        elif variants:
+            # Try first available variant
+            variant = next(iter(variants.values()), {})
+        else:
+            # No variants defined — use recipe top-level as "virtual variant"
+            variant = {k: v for k, v in recipe.items()
+                       if k not in ('name', 'version', 'description', 'blocks',
+                                    'variants', 'final_select_template')}
         
         # ── Block path: if blocks defined, use block assembly ──
         blocks = recipe.get('blocks', [])
