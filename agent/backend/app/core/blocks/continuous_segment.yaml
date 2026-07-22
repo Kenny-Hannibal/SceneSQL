@@ -53,8 +53,7 @@ sql_template: |
       FROM (
           SELECT
               {ts_expr} AS ts,
-              ROW_NUMBER() OVER (ORDER BY {ts_expr}) -
-                  ROW_NUMBER() OVER (ORDER BY {ts_expr}) AS grp
+              {ts_expr} - ROW_NUMBER() OVER (ORDER BY {ts_expr}) AS grp
           FROM ego
           WHERE {where_condition}
       )
