@@ -402,8 +402,8 @@ class ConceptRouter:
         "拥堵跟车风险": ("close_follow_analysis", "congested"),
         "他车横穿冲突": ("conflict_pipeline", "vehicle"),
         "VRU横穿冲突": ("conflict_pipeline", "vru"),
-        "左转冲突": ("turn_conflict_pipeline", "left_turn"),
-        "右转冲突": ("turn_conflict_pipeline", "right_turn"),
+        "左转冲突": ("left_turn_conflict", "default"),
+        "右转冲突": ("right_turn_conflict", "default"),
         # ── 产线SQL直通Recipe (raw_sql) ──
         "绕行超车": ("turn_bypass_overtake", "default"),
         "变道减速": ("ego_decel_during_lanechange", "default"),
@@ -539,9 +539,11 @@ class ConceptRouter:
         "红绿灯路口v2": ("intersection_with_trafficlight_new", "default"),
         "基础变道": ("lane_change", "default"),
         "简单变道": ("lane_change", "default"),
-        "左转冲突": ("left_turn_conflict", "default"),
-        "右转冲突": ("right_turn_conflict", "default"),
+        "左转冲突": ("turn_conflict_pipeline", "left_turn"),
+        "右转冲突": ("turn_conflict_pipeline", "right_turn"),
         "卡车切入自车": ("truck_cutin_ego", "default"),
+        "绿灯急刹": ("greenLight_abnormalbrake", "default"),
+        "绿灯异常刹车": ("greenLight_abnormalbrake", "default"),
 
     }
 
