@@ -529,6 +529,20 @@ class ConceptRouter:
         "避障借道": ("nudge_borrowlane", "default"),
         "黄灯过线": ("ego_yellowlight_action", "default"),
 
+        # ===== 12个孤儿recipe映射 =====
+        "拓扑左转": ("intersection_turn_left_topology", "default"),
+        "拓扑右转": ("intersection_turn_right_topology", "default"),
+        "左转v2": ("intersection_turn_left_2", "default"),
+        "右转v1": ("intersection_turn_right_1", "default"),
+        "右转v2": ("intersection_turn_right_2", "default"),
+        "右转其他": ("intersection_turn_right_other", "default"),
+        "红绿灯路口v2": ("intersection_with_trafficlight_new", "default"),
+        "基础变道": ("lane_change", "default"),
+        "简单变道": ("lane_change", "default"),
+        "左转冲突": ("left_turn_conflict", "default"),
+        "右转冲突": ("right_turn_conflict", "default"),
+        "卡车切入自车": ("truck_cutin_ego", "default"),
+
     }
 
     def __init__(self):
