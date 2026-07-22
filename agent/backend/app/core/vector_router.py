@@ -71,6 +71,7 @@ def _ensure_loaded():
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
     )
+    logger.info(f"Vector DB dir: {db_dir} (model={EMBED_MODEL})")
     _LOADED = True
     logger.info(f"ChromaDB loaded, collection '{COLLECTION_NAME}' has {_collection.count()} entries")
 
