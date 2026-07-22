@@ -16,12 +16,18 @@ _embedding_model = None
 _LOADED = False
 
 COLLECTION_NAME = "scene_sql_recipes"
-EMBED_MODEL = "all-MiniLM-L6-v2"  # 80MB, CPU-friendly, multilingual
+# 优先使用 BGE-M3（多语言更优），若本地不存在则 fallback 到 MiniLM
+EMBED_MODEL_CANDIDATES = [
+    os.environ.get("SCENESQL_EMBED_MODEL", ""),  # 环境变量覆盖
+    "BAAI/bge-m3",          # 2.2GB, 多语言SOTA, 需GPU/CPU 1.5GB+ RAM
+    "all-MiniLM-L6-v2",     # 80MB, CPU-friendly, multilingual baseline
+]
+EMBED_MODEL = None  # 在 _ensure_loaded() 中确定
 
 
 def _ensure_loaded():
     """懒加载 ChromaDB 和 embedding 模型。首次调用时下载/加载。"""
-    global _chromadb, _collection, _embedding_model, _LOADED
+    global _chromadb, _collection, _embedding_model, _LOADED, EMBED_MODEL
     if _LOADED:
         return
 
@@ -34,8 +40,21 @@ def _ensure_loaded():
 
     try:
         from sentence_transformers import SentenceTransformer
-        _embedding_model = SentenceTransformer(EMBED_MODEL)
-        logger.info(f"Loaded embedding model: {EMBED_MODEL}")
+        # 选择可用的 embedding 模型
+        for candidate in EMBED_MODEL_CANDIDATES:
+            if not candidate:
+                continue
+            try:
+                _embedding_model = SentenceTransformer(candidate)
+                EMBED_MODEL = candidate
+                logger.info(f"Loaded embedding model: {candidate}")
+                break
+            except Exception as e:
+                logger.debug(f"Model '{candidate}' not available: {e}")
+                continue
+        if _embedding_model is None:
+            logger.warning("No embedding model available, vector routing disabled")
+            return
     except ImportError:
         logger.warning("sentence-transformers not installed, vector routing disabled")
         return
