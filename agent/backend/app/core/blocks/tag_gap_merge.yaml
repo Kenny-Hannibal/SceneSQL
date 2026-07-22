@@ -23,9 +23,19 @@ output_columns:
 parameters:
   tag_name:
     type: string
-    required: true
-    description: "range_tag中的tag_name"
+    required: false
+    description: "range_tag中的tag_name（精确匹配）"
     examples: ["CongestedFollow", "LaneChange", "Cutin"]
+  tag_names:
+    type: list
+    required: false
+    description: "range_tag中的多个tag_name（IN匹配，优先于tag_name）"
+    examples: [["LaneChange", "LANECHANGE_NAVIGATION"]]
+  tag_filter:
+    type: string
+    required: false
+    default: ""
+    description: "派生参数：由tag_name/tag_names生成的SQL过滤条件"
   gap_seconds:
     type: float
     default: 3.0
@@ -73,7 +83,7 @@ sql_template: |
                       ELSE 0
                   END AS is_gap
               FROM range_tag
-              WHERE tag_name = '{tag_name}'
+              WHERE {tag_filter}
                   {sub_tag_filter}
           )
       )
