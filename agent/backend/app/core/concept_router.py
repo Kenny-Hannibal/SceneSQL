@@ -558,24 +558,33 @@ class ConceptRouter:
             if not result.get("recipe") and nl:
                 matches = [(key, recipe, variant) for key, (recipe, variant) in combined_map.items() if key in nl]
                 if matches:
-                    # 去重：按recipe名去重（不同key可能映射同一recipe）
-                    unique_recipes = set(r for _, r, _ in matches)
+                    # 先过滤：如果一个key是另一个key的子串，且较短key的recipe不同，
+                    # 只保留最长key（"变道"被"掉头不变道"包含则过滤掉）
+                    filtered = []
+                    for i, (k1, r1, v1) in enumerate(matches):
+                        is_substring = False
+                        for j, (k2, r2, v2) in enumerate(matches):
+                            if i != j and k1 in k2 and len(k1) < len(k2):
+                                is_substring = True
+                                break
+                        if not is_substring:
+                            filtered.append((k1, r1, v1))
+                    
+                    unique_recipes = set(r for _, r, _ in filtered)
                     if len(unique_recipes) >= 2:
                         # ── 复合场景：NL匹配到2+个不同recipe → 走hybrid路径 ──
-                        # 不设单一recipe，设置required_blocks
                         result["recipe"] = ""
                         result["recipe_variant"] = ""
-                        # 从匹配的recipe反推需要的block
                         result["required_blocks"] = self._infer_required_blocks(
-                            [r for _, r, _ in matches]
+                            [r for _, r, _ in filtered]
                         )
                         result["sql_source"] = "hybrid"
                         result["composition"] = "hybrid_blocks"
                         logger.info(f"Phase3 compound: '{nl}' -> recipes={unique_recipes}, blocks={result['required_blocks']}")
                     else:
                         # 单一场景：按key长度降序，选最长的匹配（更具体）
-                        matches.sort(key=lambda x: len(x[0]), reverse=True)
-                        key, recipe, variant = matches[0]
+                        filtered.sort(key=lambda x: len(x[0]), reverse=True)
+                        key, recipe, variant = filtered[0]
                         result["recipe"] = recipe
                         result["recipe_variant"] = result.get("recipe_variant") or variant
                         result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
