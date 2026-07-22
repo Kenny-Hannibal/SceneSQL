@@ -54,3 +54,7 @@ vl_validation/**/results_*/
 vl_validation/**/validation_report*.json
 vl_validation/**/cutin_anchor_comparison*.json
 test_reports/
+
+# Vector DB binaries
+agent/backend/app/core/vector_db/
+agent/backend/app/core/vector_db_bge_m3/
