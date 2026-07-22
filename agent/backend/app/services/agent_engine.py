@@ -59,29 +59,71 @@ def _parse_hybrid_llm_output(raw_text: str, required_blocks: list) -> dict:
     """Parse LLM output for hybrid assembly.
 
     Expected LLM output format:
+    ---BLOCK_PARAMS---
+    block_name: param1=value1, param2=value2
     ---CUSTOM_CTE---
     <cte_name> AS (
         ...
     )
+    ---END_CTE---
     ---FINAL_SELECT---
     SELECT ...
 
-    If LLM output doesn't follow this format, treat entire output as final_select
-    with no custom CTEs (all blocks are auto-assembled).
+    BLOCK_PARAMS section is optional. If present, parsed params are merged
+    into auto_blocks before assembly. If absent, blocks use defaults.
     """
-    result = {"extra_auto_blocks": [], "custom_ctes": [], "final_select": ""}
+    result = {"extra_auto_blocks": [], "custom_ctes": [], "final_select": "",
+              "block_params": {}}
 
-    if "---CUSTOM_CTE---" in raw_text and "---FINAL_SELECT---" in raw_text:
-        parts = raw_text.split("---CUSTOM_CTE---", 1)[1]
+    # Parse BLOCK_PARAMS section
+    if "---BLOCK_PARAMS---" in raw_text:
+        params_section = raw_text.split("---BLOCK_PARAMS---", 1)[1]
+        # Find the next --- delimiter
+        for delimiter in ["---CUSTOM_CTE---", "---FINAL_SELECT---"]:
+            if delimiter in params_section:
+                params_section = params_section.split(delimiter, 1)[0]
+                break
+        # Parse lines: "block_name: param1=value1, param2=value2"
+        for line in params_section.strip().splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            bname, rest = line.split(":", 1)
+            bname = bname.strip()
+            params = {}
+            for pair in rest.split(","):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k.strip()] = v.strip()
+            if params:
+                result["block_params"][bname] = params
+
+    # Parse CUSTOM_CTE + FINAL_SELECT (original logic)
+    remaining = raw_text
+    if "---BLOCK_PARAMS---" in remaining:
+        # Remove BLOCK_PARAMS section before parsing CTE/SELECT
+        before = remaining.split("---BLOCK_PARAMS---", 1)[0]
+        after_parts = remaining.split("---BLOCK_PARAMS---", 1)[1]
+        # Skip to next known delimiter
+        for delimiter in ["---CUSTOM_CTE---", "---FINAL_SELECT---"]:
+            if delimiter in after_parts:
+                remaining = before + delimiter + after_parts.split(delimiter, 1)[1]
+                break
+        else:
+            remaining = before  # No CTE/SELECT after params
+
+    if "---CUSTOM_CTE---" in remaining and "---FINAL_SELECT---" in remaining:
+        parts = remaining.split("---CUSTOM_CTE---", 1)[1]
         cte_part, select_part = parts.split("---FINAL_SELECT---", 1)
         result["custom_ctes"] = [c.strip() for c in cte_part.strip().split("---END_CTE---") if c.strip()]
         result["final_select"] = select_part.strip()
-    elif "---FINAL_SELECT---" in raw_text:
-        _, select_part = raw_text.split("---FINAL_SELECT---", 1)
+    elif "---FINAL_SELECT---" in remaining:
+        _, select_part = remaining.split("---FINAL_SELECT---", 1)
         result["final_select"] = select_part.strip()
     else:
         # Fallback: treat entire output as final SELECT
-        result["final_select"] = raw_text.strip()
+        result["final_select"] = remaining.strip()
 
     return result
 
@@ -826,27 +868,34 @@ class AgentEngine:
                 # Step 3: 解析 LLM 输出为 auto_blocks + custom_ctes + final_select
                 hybrid_result = _parse_hybrid_llm_output(raw_sql, required_blocks)
 
+                # Step 3b: 将LLM指定的block参数合并到auto_blocks
+                block_params_from_llm = hybrid_result.get("block_params", {})
+                for ab in auto_blocks:
+                    bname = ab.get("name", "")
+                    if bname in block_params_from_llm:
+                        ab["params"] = block_params_from_llm[bname]
+
+                # ── Pre-assembly sanitization on LLM-generated parts only ──
+                # 清理LLM可能在custom CTE或final SELECT中残留的占位符
+                import re as _re
+                sanitized_ctes = []
+                for cte in hybrid_result.get("custom_ctes", []):
+                    clean = _re.sub(r'\{[a-zA-Z_]\w*\}', '', cte)
+                    clean = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', clean)
+                    sanitized_ctes.append(clean)
+                sanitized_final = _re.sub(r'\{[a-zA-Z_]\w*\}', '',
+                                          hybrid_result.get("final_select", "SELECT 1"))
+                sanitized_final = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sanitized_final)
+
                 sql = assembler.assemble_hybrid(
                     recipe_name="hybrid_" + "_".join(required_blocks),
                     variant_name="default",
                     auto_blocks=auto_blocks + hybrid_result.get("extra_auto_blocks", []),
-                    custom_ctes_sql=hybrid_result.get("custom_ctes", []),
-                    final_select_sql=hybrid_result.get("final_select", "SELECT 1"),
+                    custom_ctes_sql=sanitized_ctes,
+                    final_select_sql=sanitized_final,
                 )
                 sql_source = "hybrid"
                 logger.info("Hybrid assembled: blocks=%s sql_len=%d", required_blocks, len(sql))
-
-                # ── Post-assembly SQL sanitization ──
-                # 清理LLM可能残留的花括号占位符（如 {param_name}、{{variable}}）
-                # 只匹配 {\w+} 模式（花括号内为标识符），不误伤SQL字符串常量
-                import re as _re
-                pre_len = len(sql)
-                sql = _re.sub(r'\{[a-zA-Z_]\w*\}', '', sql)  # 移除 {param_name} 占位符
-                sql = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sql)  # 移除 {{variable}} 占位符
-                # 清理连续空行
-                sql = _re.sub(r'\n\s*\n\s*\n', '\n\n', sql)
-                if len(sql) != pre_len:
-                    logger.warning("Hybrid SQL sanitized: removed %d placeholder chars", pre_len - len(sql))
             except Exception as e:
                 logger.warning("Hybrid assembly failed, fallback to Round 2: %s", e)
                 sql = None
