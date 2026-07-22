@@ -710,10 +710,12 @@ class ConceptRouter:
             # Phase 4a: 向量语义搜索（ChromaDB + MiniLM）
             if not result.get("recipe") and not result.get("_routed") and nl:
                 try:
-                    from .vector_router import search as vector_search, is_available as vector_available
+                    from .vector_router import search as vector_search, is_available as vector_available, EMBED_MODEL
                     if vector_available():
                         hits = vector_search(nl, top_k=1)
-                        if hits and hits[0][1] < 0.55:  # cosine distance < 0.55 (MiniLM中文稍弱,放宽阈值)
+                        # Phase 4a threshold: MiniLM unreliable for Chinese → strict 0.35; BGE-M3 → 0.55
+                        _vec_threshold = 0.55 if "bge-m3" in (EMBED_MODEL or "").lower() else 0.35
+                        if hits and hits[0][1] < _vec_threshold:
                             recipe_name = hits[0][0]
                             # 在 combined_map 中查找 recipe_name 对应的 key
                             matched_key = None
