@@ -554,17 +554,32 @@ class ConceptRouter:
                             break
                     if result.get("recipe"):
                         break
-            # Phase 3: NL原文匹配 — 优先匹配最长关键词（最具体）
+            # Phase 3: NL原文匹配 — 复合场景检测 + 最长匹配
             if not result.get("recipe") and nl:
                 matches = [(key, recipe, variant) for key, (recipe, variant) in combined_map.items() if key in nl]
                 if matches:
-                    # 按key长度降序，选最长的匹配（更具体）
-                    matches.sort(key=lambda x: len(x[0]), reverse=True)
-                    key, recipe, variant = matches[0]
-                    result["recipe"] = recipe
-                    result["recipe_variant"] = result.get("recipe_variant") or variant
-                    result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
-                    logger.info(f"Phase3 NL match: {nl} -> {key} (len={len(key)})")
+                    # 去重：按recipe名去重（不同key可能映射同一recipe）
+                    unique_recipes = set(r for _, r, _ in matches)
+                    if len(unique_recipes) >= 2:
+                        # ── 复合场景：NL匹配到2+个不同recipe → 走hybrid路径 ──
+                        # 不设单一recipe，设置required_blocks
+                        result["recipe"] = ""
+                        result["recipe_variant"] = ""
+                        # 从匹配的recipe反推需要的block
+                        result["required_blocks"] = self._infer_required_blocks(
+                            [r for _, r, _ in matches]
+                        )
+                        result["sql_source"] = "hybrid"
+                        result["composition"] = "hybrid_blocks"
+                        logger.info(f"Phase3 compound: '{nl}' -> recipes={unique_recipes}, blocks={result['required_blocks']}")
+                    else:
+                        # 单一场景：按key长度降序，选最长的匹配（更具体）
+                        matches.sort(key=lambda x: len(x[0]), reverse=True)
+                        key, recipe, variant = matches[0]
+                        result["recipe"] = recipe
+                        result["recipe_variant"] = result.get("recipe_variant") or variant
+                        result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
+                        logger.info(f"Phase3 NL match: '{nl}' -> '{key}' (len={len(key)})")
             # Phase 4a: 向量语义搜索（ChromaDB + MiniLM）
             if not result.get("recipe") and nl:
                 try:
@@ -615,6 +630,35 @@ class ConceptRouter:
             return 0.0
         inter = len(a & b)
         return inter / min(len(a), len(b)) if min(len(a), len(b)) else 0.0
+
+    # ── Recipe → Block 映射表 ──
+    # 从recipe名反推需要的block（复合场景时使用）
+    RECIPE_BLOCK_MAP = {
+        "obstacle_avoidance": ["obstacle_proximity", "steering_change_detect"],
+        "large_curvature_road": ["continuous_segment"],
+        "intersection_y_junction": ["tag_gap_merge"],
+        "off_ramp": ["static_link_segment"],
+        "on_ramp": ["static_link_segment"],
+        "convergence": ["static_link_segment", "ego_field_condition"],
+        "intersection_stop": ["continuous_segment", "obstacle_proximity"],
+        "right_turn_only": ["static_link_segment", "continuous_segment"],
+        "turn_back_with_lanechange": ["continuous_segment"],
+        "turn_back_without_lanechange": ["continuous_segment"],
+        "continuous_lane_change": ["continuous_segment"],
+        "intersection_with_trafficlight": ["tag_gap_merge"],
+        "near_traffic_light": ["tag_gap_merge"],
+    }
+
+    def _infer_required_blocks(self, recipe_names: list) -> list:
+        """从匹配的recipe名列表反推需要的block（去重、保序）。"""
+        blocks = []
+        seen = set()
+        for rn in recipe_names:
+            for b in self.RECIPE_BLOCK_MAP.get(rn, []):
+                if b not in seen:
+                    blocks.append(b)
+                    seen.add(b)
+        return blocks
 
     def _fuzzy_match(self, nl: str) -> tuple:
         """Phase 4 兜底：从 NL 中提取关键词片段，与 CONCEPT_RECIPE_MAP key 做权重匹配。
