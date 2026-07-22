@@ -17,8 +17,10 @@ _LOADED = False
 
 COLLECTION_NAME = "scene_sql_recipes"
 # 优先使用 BGE-M3（多语言更优），若本地不存在则 fallback 到 MiniLM
+_LOCAL_BGE_M3 = "/root/models/bge-m3"  # DSW上hfd.sh下载的本地路径
 EMBED_MODEL_CANDIDATES = [
     os.environ.get("SCENESQL_EMBED_MODEL", ""),  # 环境变量覆盖
+    _LOCAL_BGE_M3 if os.path.isdir(_LOCAL_BGE_M3) else "",  # 本地BGE-M3（优先，免下载）
     "BAAI/bge-m3",          # 2.2GB, 多语言SOTA, 需GPU/CPU 1.5GB+ RAM
     "all-MiniLM-L6-v2",     # 80MB, CPU-friendly, multilingual baseline
 ]
