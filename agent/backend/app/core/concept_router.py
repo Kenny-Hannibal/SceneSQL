@@ -507,6 +507,27 @@ class ConceptRouter:
         "锥桶绕行": ("obstacle_avoidance", "default"),
         "下匝道新版": ("off_ramp_new_use_link_type", "default"),
         "上匝道新版": ("on_ramp_new_use_link_type", "default"),
+        # ── Concept→Recipe 补全：覆盖concept_groups中所有有recipe的概念 ──
+        "侧方横穿": ("vru_cross_conflict", "default"),
+        "偏离车道中心": ("lane_ending", "default"),
+        "右转A": ("right_turn_only", "default"),
+        "多障碍物绕行": ("obstacle_avoidance", "default"),
+        "急刹": ("front_hard_brake", "default"),
+        "掉头": ("intersection_u_turn", "default"),
+        "红灯": ("ego_redlight_action", "default"),
+        "红绿灯": ("traffic_light_state", "default"),
+        "绿灯": ("ego_greenlight_action", "default"),
+        "蠕行跟车": ("close_follow_analysis", "default"),
+        "超速": ("speed_limit_track", "default"),
+        "路口": ("intersection_with_trafficlight", "default"),
+        "路口右转": ("intersection_turn_right", "default"),
+        "路口左转": ("intersection_turn_left", "default"),
+        "车道内避障": ("obstacle_avoidance", "default"),
+        "车道合并": ("split_merge_track", "default"),
+        "转向": ("ego_navigation_turn_left", "default"),
+        "近碰": ("conflict_pipeline", "default"),
+        "避障借道": ("nudge_borrowlane", "default"),
+        "黄灯过线": ("ego_yellowlight_action", "default"),
 
     }
 
