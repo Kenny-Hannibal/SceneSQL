@@ -1,14 +1,27 @@
 name: large_curvature_road
-version: '1.0'
-description: large_curvature_road：产线SQL直通模式(raw_sql)
-blocks: []
+version: '2.0'
+description: 大曲率道路场景检测（block组装 + raw_sql直通双模式）
+blocks:
+  - name: continuous_segment
+    cte_name: curved_segment
+    params:
+      where_condition: "ABS(steering_angle) > 0.6 AND speed > 25"
+      min_duration: 8.0
+      pre_pad: 0.0
+      post_pad: 0.0
+      ts_expr: "round(ts)"
+
+final_select_template: |
+  SELECT
+      start_ts,
+      end_ts
+  FROM curved_segment
+  ORDER BY start_ts
+
 variants:
   default:
     tag_name: large_curvature_road
     output_tag_name: large_curvature_road
-    raw_sql: "select start_ts,end_ts from (\n    SELECT\n        MIN(ts) AS start_ts,\n\
-      \        MAX(ts) AS end_ts\n    FROM (\n        SELECT\n            ts,\n  \
-      \          ts - ROW_NUMBER() OVER (ORDER BY ts) AS grp\n        FROM (\n   \
-      \         select round(ts) ts\n            from ego\n            where \n  \
-      \            abs(steering_angle)>0.6 \n              and speed>25\n        )\n\
-      \    ) a\n    GROUP BY grp\n    ORDER BY start_ts\n) where end_ts-start_ts>=8"
+    # raw_sql已移除，改用blocks组装
+    # 保留raw_sql作参考：
+    # raw_sql: "select start_ts,end_ts from (SELECT MIN(ts) AS start_ts, MAX(ts) AS end_ts FROM (SELECT ts, ts - ROW_NUMBER() OVER (ORDER BY ts) AS grp FROM (select round(ts) ts from ego where abs(steering_angle)>0.6 and speed>25)) a GROUP BY grp ORDER BY start_ts) where end_ts-start_ts>=8"

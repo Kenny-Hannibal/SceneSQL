@@ -38,6 +38,10 @@ parameters:
     type: float
     default: 0.0
     description: "end_ts后扩秒数"
+  ts_expr:
+    type: string
+    default: "ts"
+    description: "时间戳表达式，默认为ts。设为round(ts)可对时间取整后再分组，产线SQL常用此技巧"
 
 sql_template: |
   {cte_name} AS (
@@ -48,9 +52,9 @@ sql_template: |
           COUNT(*) AS frame_count
       FROM (
           SELECT
-              ts,
-              ROW_NUMBER() OVER (ORDER BY ts) -
-                  ROW_NUMBER() OVER (ORDER BY ts) AS grp
+              {ts_expr} AS ts,
+              ROW_NUMBER() OVER (ORDER BY {ts_expr}) -
+                  ROW_NUMBER() OVER (ORDER BY {ts_expr}) AS grp
           FROM ego
           WHERE {where_condition}
       )
