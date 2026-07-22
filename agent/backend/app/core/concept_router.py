@@ -536,11 +536,19 @@ class ConceptRouter:
         if not result.get("recipe"):
             concepts = result.get("concepts", [])
             # ── Pre-check: 检测concepts是否命中2+个不同recipe → compound场景 ──
+            # 先精确匹配，再子串匹配（concept包含map key的情况）
             concept_recipes = []
             for concept in concepts:
                 if concept in combined_map:
                     recipe, variant = combined_map[concept]
                     concept_recipes.append((concept, recipe, variant))
+                else:
+                    # 子串匹配：concept包含map中的key，取最长匹配
+                    sub_matches = [(key, *combined_map[key]) for key in combined_map if key in concept]
+                    if sub_matches:
+                        sub_matches.sort(key=lambda x: len(x[0]), reverse=True)
+                        key, recipe, variant = sub_matches[0]
+                        concept_recipes.append((f"{concept}→{key}", recipe, variant))
             unique_concept_recipes = set(r for _, r, _ in concept_recipes)
             if len(unique_concept_recipes) >= 2:
                 # compound: 多个concept命中不同recipe → hybrid
@@ -678,6 +686,8 @@ class ConceptRouter:
         "continuous_lane_change": ["continuous_segment"],
         "intersection_with_trafficlight": ["tag_gap_merge"],
         "near_traffic_light": ["tag_gap_merge"],
+        "nudge_borrowlane": ["steering_change_detect", "continuous_segment"],
+        "reversing": ["continuous_segment"],
     }
 
     def _infer_required_blocks(self, recipe_names: list) -> list:
