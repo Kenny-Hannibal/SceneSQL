@@ -1,0 +1,34 @@
+# SceneSQL 容器化依赖锁定（API 服务最小集）
+# 说明：
+# - 版本与根 requirements.txt（DSW pip freeze）对齐，新增项按本机 .venv 实测版本锁定
+# - gsbag / dm-sdk（C++ bag 解析）不入镜像，相关功能自动降级（bag_parser try/except）
+# - chromadb / sentence-transformers 为懒加载可选依赖（vector_router），不入基础镜像，
+#   向量路由自动回退到关键词/n-gram 路由
+# - opencv / gradio 等仅本地调试工具使用，不入镜像
+
+# ── Web 框架 ──
+fastapi==0.136.1
+uvicorn==0.47.0
+starlette==1.0.0
+python-multipart==0.0.28
+orjson==3.11.9
+
+# ── 配置 / 认证 ──
+pydantic==2.13.4
+pydantic-core==2.46.4
+pydantic-settings==2.14.1
+python-dotenv==1.2.2
+pyyaml==6.0.3
+python-jose[cryptography]==3.5.0
+
+# ── LLM 客户端 ──
+openai==2.37.0
+httpx[socks]==0.28.1
+requests==2.34.2
+
+# ── NL2SQL 引擎 ──
+sqlglot==30.10.0
+duckdb==1.5.3
+pandas==2.3.3
+pyarrow==18.1.0
+numpy==2.2.6

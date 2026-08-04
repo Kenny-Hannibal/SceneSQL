@@ -1279,8 +1279,16 @@ export default function AgentPanel() {
     mediaSource.addEventListener('sourceopen', async () => {
       if (aborted) return;
       try {
-        // 不预设 mediaSource.duration —— 让 endOfStream() 根据实际缓冲数据自动计算
-        // 预设值 (endTs-startTs)/1e9 可能比实际视频多1秒，导致进度条 8→7 跳变
+        // 用搜索结果的 start_ts/end_ts 预计算视频总时长，进度条立即显示完整长度，
+        // 不依赖流式数据到达后动态增长（endOfStream 不会缩短已预设的 duration）
+        if (playerData.durationSec && playerData.durationSec > 0) {
+          try {
+            mediaSource.duration = playerData.durationSec;
+            console.log('[MSE诊断] 预设视频时长(ts窗口):', playerData.durationSec, '秒');
+          } catch (e) {
+            console.warn('[MSE诊断] 设置 duration 失败:', e);
+          }
+        }
 
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
         sourceBuffer.addEventListener('error', onSourceBufferError);

@@ -37,9 +37,9 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
   // ── 根据 startTs/endTs 计算预期总时长（秒），一开就有，不会变 ──
   const durationSec = (startTs != null && endTs != null) ? (endTs - startTs) / 1e9 : 0;
 
-  // ── 总时长：优先用 bufferedEnd（MSE精确值），但不超过 durationSec（避免比实际多1秒） ──
-  // 推流完成前用 durationSec（预估），推流完成后用 min(bufferedEnd, durationSec)（精确）
-  const totalDuration = bufferedEnd > 0 ? Math.min(bufferedEnd, durationSec || Infinity) : (durationSec || 0);
+  // ── 总时长：直接由搜索结果的 start_ts/end_ts 预计算，推流过程中保持稳定 ──
+  // 仅当缺少 ts 窗口（durationSec=0）时才回退用 bufferedEnd（MSE实际缓冲终点）
+  const totalDuration = durationSec > 0 ? durationSec : bufferedEnd;
 
   // BEV refs — 每个BEV topic一个ref
   const bevRefs = useRef({});
