@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     """产线数据表（回灌后的 bag 信息，用于追溯原始 bag）"""
 
     # --------------------------------------------
+    # DataMining 平台同步（评测集 / 策略）
+    # --------------------------------------------
+    DATAMINING_BASE_URL: str = "http://alb-2hjgj3j3kmcpx75nds.cn-wulanchabu.alb.aliyuncsslb.com/api/datamining"
+    """DataMining 网关前缀（evalset: {base}/evalset/...，text2sql: {base}/api/text2sql/...）"""
+
+    EVAL_SYNC_TOKEN: Optional[str] = None
+    """DataMining Access-Token，缺省回退 DM_ACCESS_TOKEN"""
+
+    # --------------------------------------------
     # LLM / Agent
     # --------------------------------------------
     AGENT_MAIN_MODEL: str = "gpt-4o"

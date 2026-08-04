@@ -14,6 +14,8 @@ from app.core.user_strategy import (
     StrategyUpdateRequest,
     StrategyInfo,
 )
+from app.core.eval_case_store import eval_case_store
+from app.services.datamining import sync_strategy_to_dm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
@@ -66,11 +68,34 @@ async def update_strategy(name: str, req: StrategyUpdateRequest):
         raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
 
 
+@router.post("/{name}/sync-dm")
+async def sync_strategy_dm(name: str):
+    """把策略同步到 DataMining 平台 sql_strategy 表（新建或更新）。"""
+    try:
+        info = _manager.get_strategy(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
+    try:
+        result = await sync_strategy_to_dm(
+            name=info.name,
+            tag_name=getattr(info, "tag_name", None),
+            sql=info.sql,
+            description=getattr(info, "description", None),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.exception("sync-dm failed for %s", name)
+        raise HTTPException(status_code=502, detail=f"同步异常: {e}")
+    return {"ok": True, **result}
+
+
 @router.delete("/{name}")
 async def delete_strategy(name: str):
     """删除策略。"""
     try:
         _manager.delete_strategy(name)
+        eval_case_store.clear(name)
         _reload_concept_router()
         return {"ok": True}
     except FileNotFoundError:

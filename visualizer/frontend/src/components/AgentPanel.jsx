@@ -229,6 +229,13 @@ export default function AgentPanel() {
   const [strategyList, setStrategyList] = useState([]);
   const [strategyForm, setStrategyForm] = useState({ name: '', keywords: '', tag_name: '', description: '' });
 
+  // ── 评测标注（通过/不通过）与产线同步 ──
+  const [pendingLabel, setPendingLabel] = useState(null);   // {verdict, bag_id, start_ts, end_ts} 保存策略后补提交
+  const [rowLabel, setRowLabel] = useState(null);           // 当前播放行的标注 'pass'|'fail'|null
+  const [matchedLabels, setMatchedLabels] = useState({});   // key: bag_id|start_ts|end_ts → verdict
+  const [evalSyncModal, setEvalSyncModal] = useState(null); // {strategy, benchmarkName, cases}
+  const [syncBusy, setSyncBusy] = useState(false);
+
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
   const intervalRef = useRef(null);
@@ -450,7 +457,23 @@ export default function AgentPanel() {
         setSaveStrategyModalOpen(false);
         setStrategyForm({ name: '', keywords: '', tag_name: '', description: '' });
         loadStrategyList();
-        alert('策略已保存');
+        // 通过/不通过触发的保存：保存成功后立即补提交标注
+        if (pendingLabel) {
+          try {
+            await postLabel(strategyForm.name, pendingLabel, pendingLabel.verdict);
+            setRowLabel(pendingLabel.verdict);
+            setMatchedLabels((prev) => ({
+              ...prev,
+              [`${pendingLabel.bag_id}|${pendingLabel.start_ts ?? ''}|${pendingLabel.end_ts ?? ''}`]: pendingLabel.verdict,
+            }));
+            alert('策略已保存，标注已绑定到该策略');
+          } catch (e) {
+            alert('策略已保存，但标注失败: ' + e.message);
+          }
+          setPendingLabel(null);
+        } else {
+          alert('策略已保存');
+        }
       } else {
         const err = await res.json();
         alert('保存失败: ' + (err.detail || JSON.stringify(err)));
@@ -473,7 +496,139 @@ export default function AgentPanel() {
     setStrategyListOpen(false);
   };
 
+  // ── 评测标注 ──
+  // 当前 SQL 是否已保存为策略（按 SQL 文本精确匹配）
+  const matchedStrategy = strategyList.find((s) => (s.sql || '').trim() === sqlEditor.trim()) || null;
+
+  const labelKey = (row) => `${row?.bag_id}|${row?.start_ts ?? ''}|${row?.end_ts ?? ''}`;
+
+  const loadLabelsForStrategy = async (name) => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/eval-labels/${encodeURIComponent(name)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const map = {};
+        (data.cases || []).forEach((c) => { map[`${c.bag_id}|${c.start_ts ?? ''}|${c.end_ts ?? ''}`] = c.verdict; });
+        setMatchedLabels(map);
+        return data.cases || [];
+      }
+    } catch (e) { console.error('Failed to load labels', e); }
+    return [];
+  };
+
+  const postLabel = async (strategyName, row, verdict) => {
+    const res = await authFetch(`${API_BASE}/api/eval-labels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strategy_name: strategyName,
+        bag_id: row.bag_id,
+        start_ts: row.start_ts != null ? Number(row.start_ts) : null,
+        end_ts: row.end_ts != null ? Number(row.end_ts) : null,
+        verdict,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+  };
+
+  const handleLabel = async (verdict) => {
+    const row = playerData?.row;
+    if (!row || !row.bag_id) { alert('当前行缺少 bag_id，无法标注'); return; }
+    if (row.start_ts == null || row.end_ts == null) { alert('当前行缺少 start_ts/end_ts，无法标注'); return; }
+    try {
+      if (matchedStrategy) {
+        await postLabel(matchedStrategy.name, row, verdict);
+        setRowLabel(verdict);
+        setMatchedLabels((prev) => ({ ...prev, [labelKey(row)]: verdict }));
+      } else {
+        // SQL 未保存为策略 → 先弹保存策略窗口，保存成功后补提交标注
+        setPendingLabel({ verdict, bag_id: row.bag_id, start_ts: row.start_ts, end_ts: row.end_ts });
+        setSaveStrategyModalOpen(true);
+      }
+    } catch (e) {
+      alert('标注失败: ' + e.message);
+    }
+  };
+
+  const handleSyncStrategyDm = async (name) => {
+    if (!window.confirm(`将策略 "${name}" 同步到 DataMining 平台（重名则更新）？`)) return;
+    setSyncBusy(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/strategies/${encodeURIComponent(name)}/sync-dm`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(data.mode === 'created' ? '已同步到产线（新建）' : '已同步到产线（更新）');
+      } else {
+        alert('同步失败: ' + (data.detail || JSON.stringify(data)));
+      }
+    } catch (e) {
+      alert('同步失败: ' + e.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const openEvalSyncModal = async (s) => {
+    const cases = await loadLabelsForStrategy(s.name);
+    setEvalSyncModal({ strategy: s, benchmarkName: `scenesql_${s.name}`, cases });
+  };
+
+  const handleSyncEvalset = async () => {
+    if (!evalSyncModal) return;
+    const { strategy, benchmarkName, cases } = evalSyncModal;
+    if (!cases.length) { alert('该策略暂无标注 case'); return; }
+    if (!benchmarkName.trim()) { alert('请填写 benchmark 名称'); return; }
+    setSyncBusy(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/eval-labels/${encodeURIComponent(strategy.name)}/sync-evalset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ benchmark_name: benchmarkName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const r = data.result || {};
+        let msg = `同步完成：提交 ${data.submitted} 条\n产线成功 ${r.successCount ?? '?'}，失败 ${r.failCount ?? '?'}`;
+        if ((data.skipped || []).length) msg += `\n跳过 ${data.skipped.length} 条（缺时间戳）`;
+        alert(msg);
+        setEvalSyncModal(null);
+      } else {
+        alert('同步失败: ' + (data.detail || JSON.stringify(data)));
+      }
+    } catch (e) {
+      alert('同步失败: ' + e.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   useEffect(() => { loadStrategyList(); }, []);
+
+  // 当前 SQL 匹配到策略时，载入其标注（结果表小圆点回显）
+  useEffect(() => {
+    if (matchedStrategy) loadLabelsForStrategy(matchedStrategy.name);
+    else setMatchedLabels({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchedStrategy?.name, strategyList.length]);
+
+  // 播放器打开时：载入匹配策略的既有标注，回显当前行标注状态
+  useEffect(() => {
+    if (!playerModalOpen || !playerData?.row) {
+      setRowLabel(null);
+      return;
+    }
+    setRowLabel(matchedLabels[labelKey(playerData.row)] || null);
+    if (matchedStrategy) {
+      loadLabelsForStrategy(matchedStrategy.name).then((cases) => {
+        const c = cases.find((x) => `${x.bag_id}|${x.start_ts ?? ''}|${x.end_ts ?? ''}` === labelKey(playerData.row));
+        setRowLabel(c ? c.verdict : null);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerModalOpen, playerData, matchedStrategy?.name]);
 
   const handleExecuteSql = async () => {
     const sql = sqlEditor.trim();
@@ -1785,6 +1940,15 @@ export default function AgentPanel() {
                           >
                             📹 播包可视化
                           </button>
+                          {matchedLabels[labelKey(row)] && (
+                            <span
+                              title={matchedLabels[labelKey(row)] === 'pass' ? '已标注：通过' : '已标注：不通过'}
+                              style={{
+                                display: 'inline-block', width: 8, height: 8, borderRadius: '50%', marginLeft: 6,
+                                background: matchedLabels[labelKey(row)] === 'pass' ? '#52c41a' : '#ff4d4f',
+                              }}
+                            />
+                          )}
                         </td>
                       </tr>
                     );
@@ -2078,6 +2242,27 @@ export default function AgentPanel() {
                   </span>
                 )}
               </span>
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {rowLabel && (
+                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: rowLabel === 'pass' ? '#52c41a' : '#ff4d4f', color: '#fff' }}>
+                    {rowLabel === 'pass' ? '✅ 已通过' : '❌ 不通过'}
+                  </span>
+                )}
+                <button
+                  onClick={() => handleLabel('pass')}
+                  title={matchedStrategy ? `标注通过 → 策略「${matchedStrategy.name}」` : '当前 SQL 未保存为策略，点击后先保存策略'}
+                  style={{ padding: '4px 10px', fontSize: 12, borderRadius: 4, border: rowLabel === 'pass' ? '1px solid #52c41a' : '1px solid #555', background: rowLabel === 'pass' ? '#52c41a' : 'transparent', color: '#fff', cursor: 'pointer' }}
+                >
+                  ✅ 通过
+                </button>
+                <button
+                  onClick={() => handleLabel('fail')}
+                  title={matchedStrategy ? `标注不通过 → 策略「${matchedStrategy.name}」` : '当前 SQL 未保存为策略，点击后先保存策略'}
+                  style={{ padding: '4px 10px', fontSize: 12, borderRadius: 4, border: rowLabel === 'fail' ? '1px solid #ff4d4f' : '1px solid #555', background: rowLabel === 'fail' ? '#ff4d4f' : 'transparent', color: '#fff', cursor: 'pointer' }}
+                >
+                  ❌ 不通过
+                </button>
+              </span>
               <button
                 onClick={() => { setPlayerModalOpen(false); setPlayerData(null); setVideoRows([]); setPlayerError(null); setExtractModalOpen(false); setPlayerGridMode(false); setPlayerGridTopics([]); pollCancelledRef.current = true; if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } }}
                 style={{ padding: '4px 12px', fontSize: 13, borderRadius: 4, border: '1px solid #555', background: 'transparent', color: '#fff', cursor: 'pointer' }}
@@ -2302,6 +2487,11 @@ export default function AgentPanel() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
             <h3 style={{ margin: '0 0 16px' }}>保存为策略</h3>
+            {pendingLabel && (
+              <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4, fontSize: 12, color: '#874d00' }}>
+                当前 SQL 尚未保存为策略。请先保存，标注（{pendingLabel.verdict === 'pass' ? '✅ 通过' : '❌ 不通过'}）将自动绑定到新策略。
+              </div>
+            )}
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: '#666' }}>策略名</label>
               <input value={strategyForm.name} onChange={e => setStrategyForm(p => ({...p, name: e.target.value}))} placeholder="如: high_speed_cutin" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
@@ -2319,7 +2509,7 @@ export default function AgentPanel() {
               <input value={strategyForm.description} onChange={e => setStrategyForm(p => ({...p, description: e.target.value}))} placeholder="策略说明" style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={() => setSaveStrategyModalOpen(false)} style={{ padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>取消</button>
+              <button onClick={() => { setSaveStrategyModalOpen(false); setPendingLabel(null); }} style={{ padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>取消</button>
               <button onClick={handleSaveStrategy} style={{ padding: '6px 16px', border: 'none', borderRadius: 4, background: '#52c41a', color: '#fff', cursor: 'pointer' }}>保存</button>
             </div>
           </div>
@@ -2349,6 +2539,8 @@ export default function AgentPanel() {
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button onClick={() => handleLoadStrategy(s)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #1890ff', borderRadius: 3, background: 'transparent', color: '#1890ff', cursor: 'pointer' }}>加载</button>
+                        <button onClick={() => openEvalSyncModal(s)} disabled={syncBusy} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #722ed1', borderRadius: 3, background: 'transparent', color: '#722ed1', cursor: 'pointer' }}>同步评测集</button>
+                        <button onClick={() => handleSyncStrategyDm(s.name)} disabled={syncBusy} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #fa8c16', borderRadius: 3, background: 'transparent', color: '#fa8c16', cursor: 'pointer' }}>同步策略</button>
                         <button onClick={() => handleDeleteStrategy(s.name)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #ff4d4f', borderRadius: 3, background: 'transparent', color: '#ff4d4f', cursor: 'pointer' }}>删除</button>
                       </div>
                     </div>
@@ -2358,6 +2550,31 @@ export default function AgentPanel() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 评测集同步弹窗 ── */}
+      {evalSyncModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 440, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px' }}>同步评测集 — {evalSyncModal.strategy.name}</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#666' }}>产线 benchmark 名称</label>
+              <input value={evalSyncModal.benchmarkName} onChange={e => setEvalSyncModal(p => p && ({ ...p, benchmarkName: e.target.value }))} style={{ width: '100%', padding: 6, marginTop: 4, border: '1px solid #d9d9d9', borderRadius: 4 }} />
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginBottom: 12, lineHeight: 1.8 }}>
+              <div>标签映射：✅ 通过 → <code style={{ background: '#f5f5f5', padding: '1px 4px' }}>{evalSyncModal.strategy.name}_positive</code>，❌ 不通过 → <code style={{ background: '#f5f5f5', padding: '1px 4px' }}>{evalSyncModal.strategy.name}_negative</code></div>
+              <div>待同步 case：<strong>{evalSyncModal.cases.length}</strong> 条
+                （通过 {evalSyncModal.cases.filter(c => c.verdict === 'pass').length}，不通过 {evalSyncModal.cases.filter(c => c.verdict === 'fail').length}）</div>
+              <div style={{ color: '#999', fontSize: 11 }}>产线按 (benchmark, bin_id, tag, 时间窗) 去重，可重复同步</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setEvalSyncModal(null)} style={{ padding: '6px 16px', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fff', cursor: 'pointer' }}>取消</button>
+              <button onClick={handleSyncEvalset} disabled={syncBusy || evalSyncModal.cases.length === 0} style={{ padding: '6px 16px', border: 'none', borderRadius: 4, background: '#722ed1', color: '#fff', cursor: 'pointer', opacity: (syncBusy || evalSyncModal.cases.length === 0) ? 0.5 : 1 }}>
+                {syncBusy ? '同步中...' : `同步 ${evalSyncModal.cases.length} 条到产线`}
+              </button>
+            </div>
           </div>
         </div>
       )}
