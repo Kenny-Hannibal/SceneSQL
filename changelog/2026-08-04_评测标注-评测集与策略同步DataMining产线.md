@@ -73,3 +73,6 @@
 ### 实测（产线 ALB）
 - benchmark upload 无 mining_table → 推断 `collection_t68_thor_bag`，successCount 1（测试 benchmark 已硬删）
 - strategy/review：pass+fail 各 1 → review-stats `pass_count=1 fail_count=1 total_count=2`（测试策略已删）
+
+### 补充修正：dataVersion 去重
+首版评测详情同步未传 `dataVersion`，产线去重 SQL `data_version = #{dataVersion}` 对 NULL 永不匹配 → 重复同步会重复插入（E2E 复现：二次 sync 后 total 4）。已固定传 `dataVersion="v1"`，二次 sync 后 review-stats 仍 `pass=1 fail=1 total=2`（幂等）。
