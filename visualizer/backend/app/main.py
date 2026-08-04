@@ -99,6 +99,7 @@ app.include_router(video.router)
 app.include_router(agent.router)
 app.include_router(strategies.router)
 app.include_router(fusion_map.router)
+app.include_router(eval_labels.router)
 
 # Serve frontend build if available
 _FRONTEND_BUILD = settings.PROJECT_ROOT / "visualizer" / "frontend" / "build"
