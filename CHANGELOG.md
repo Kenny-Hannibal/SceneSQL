@@ -6,6 +6,7 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
+| 2026-08-04 | 进度条跳动根因修复：endOfStream 前用实际缓冲终点校正 duration | `changelog/2026-08-04_进度条跳动根因修复-endOfStream前校正duration.md` |
 | 2026-08-03 | 视频进度条时长预计算 + 容器化 + API 契约 v1（DataMining 集成准备） | `changelog/2026-08-03_视频进度条时长预计算-容器化-API契约v1.md` |
 || 2026-07-18 | BEV并行解码+流式预加载：ThreadPoolExecutor 4线程解码 + 首批50帧即播 | `changelog/2026-07-18_BEV并行解码-流式预加载ThreadPoolExecutor-4线程解码-首批50帧即播.md` |
 || 2026-07-18 | 多摄像头宫格：共享Reader+N路ffmpeg+复用协议 | `changelog/2026-07-18_多摄像头宫格播放-共享Reader-多路ffmpeg-复用协议.md` |

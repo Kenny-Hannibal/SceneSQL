@@ -1293,6 +1293,23 @@ export default function AgentPanel() {
         sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
         sourceBuffer.addEventListener('error', onSourceBufferError);
 
+        // 收尾：用实际缓冲终点校正 duration 再 endOfStream。
+        // ts 窗口预设值可能大于实际流时长（首帧 ts 不精确对齐 start_ts），
+        // 而 MSE 的 duration 在 endOfStream 时只会取 max(预设, 缓冲终点)，
+        // 不会缩短，必须在 endOfStream 前手动下调，否则进度条与播放进度错位跳动。
+        const finishStream = () => {
+          try {
+            if (sourceBuffer && !sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
+              const actualEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+              if (mediaSource.duration > actualEnd + 0.05) {
+                console.log('[MSE诊断] 校正 duration:', mediaSource.duration, '→', actualEnd);
+                mediaSource.duration = actualEnd;
+              }
+            }
+            mediaSource.endOfStream();
+          } catch (e) {}
+        };
+
         const response = await authFetch(playerData.stream_url, { signal: streamController.signal });
         if (!response.ok) {
           throw new Error(`Stream HTTP ${response.status}`);
@@ -1317,7 +1334,7 @@ export default function AgentPanel() {
         const onUpdateEnd = () => {
           isUpdating = false;
           if (queue.length === 0 && reader === null) {
-            try { mediaSource.endOfStream(); } catch (e) {}
+            finishStream();
             return;
           }
           processQueue();
@@ -1329,7 +1346,7 @@ export default function AgentPanel() {
           if (done) {
             reader = null;
             if (!isUpdating && queue.length === 0) {
-              try { mediaSource.endOfStream(); } catch (e) {}
+              finishStream();
             }
             break;
           }
