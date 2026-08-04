@@ -15,7 +15,7 @@ from app.core.user_strategy import (
     StrategyInfo,
 )
 from app.core.eval_case_store import eval_case_store
-from app.services.datamining import sync_strategy_to_dm
+from app.services.datamining import sync_strategy_to_dm, sync_strategy_reviews
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
@@ -70,7 +70,8 @@ async def update_strategy(name: str, req: StrategyUpdateRequest):
 
 @router.post("/{name}/sync-dm")
 async def sync_strategy_dm(name: str):
-    """把策略同步到 DataMining 平台 sql_strategy 表（新建或更新）。"""
+    """把策略同步到 DataMining 平台 sql_strategy 表（新建或更新），
+    并把该策略的标注 case 推送为策略评测记录（评测详情：通过/不通过）。"""
     try:
         info = _manager.get_strategy(name)
     except FileNotFoundError:
@@ -82,12 +83,18 @@ async def sync_strategy_dm(name: str):
             sql=info.sql,
             description=getattr(info, "description", None),
         )
+        # 推送评测详情（通过/不通过 case）
+        reviews = {"pushed": 0, "skipped": 0, "failed": 0}
+        sid = result.get("id")
+        cases = eval_case_store.list_cases(name)
+        if sid and cases:
+            reviews = await sync_strategy_reviews(sid, cases)
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.exception("sync-dm failed for %s", name)
         raise HTTPException(status_code=502, detail=f"同步异常: {e}")
-    return {"ok": True, **result}
+    return {"ok": True, **result, "reviews": reviews}
 
 
 @router.delete("/{name}")

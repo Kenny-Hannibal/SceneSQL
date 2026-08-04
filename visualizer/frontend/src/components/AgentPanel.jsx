@@ -554,13 +554,15 @@ export default function AgentPanel() {
   };
 
   const handleSyncStrategyDm = async (name) => {
-    if (!window.confirm(`将策略 "${name}" 同步到 DataMining 平台（重名则更新）？`)) return;
+    if (!window.confirm(`将策略 "${name}" 同步到 DataMining 平台（重名则更新），并推送标注 case 为评测详情（通过/不通过）？`)) return;
     setSyncBusy(true);
     try {
       const res = await authFetch(`${API_BASE}/api/strategies/${encodeURIComponent(name)}/sync-dm`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        alert(data.mode === 'created' ? '已同步到产线（新建）' : '已同步到产线（更新）');
+        const rv = data.reviews || {};
+        const modeText = data.mode === 'created' ? '新建' : '更新';
+        alert(`已同步到产线（${modeText}）\n评测详情：成功 ${rv.pushed ?? 0}，跳过 ${rv.skipped ?? 0}，失败 ${rv.failed ?? 0}`);
       } else {
         alert('同步失败: ' + (data.detail || JSON.stringify(data)));
       }

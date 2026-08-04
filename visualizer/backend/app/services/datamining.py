@@ -1,10 +1,11 @@
-"""DataMining 平台同步服务 — 评测集上传 + 策略 save-or-update
+"""DataMining 平台同步服务 — 评测集上传 + 策略 save-or-update + 策略评测详情
 
 端点（网关前缀 settings.DATAMINING_BASE_URL）：
   POST {base}/evalset/benchmark/upload            评测集批量上传（幂等去重）
   POST {base}/api/text2sql/strategy/save          策略新建（重名返回 code=409）
   GET  {base}/api/text2sql/strategy/search        按名查策略 id
   POST {base}/api/text2sql/strategy/update/{id}   策略更新
+  POST {base}/api/text2sql/strategy/review        策略评测记录(评测详情，通过/不通过)
 """
 import logging
 from typing import Dict, List, Optional
@@ -77,3 +78,42 @@ async def sync_strategy_to_dm(
         if ubody.get("code") != 200:
             raise RuntimeError(f"产线 strategy/update 失败: {ubody.get('message') or upd.text}")
         return {"mode": "updated", "id": target["id"]}
+
+
+async def sync_strategy_reviews(strategy_id: int, cases: List[Dict]) -> Dict:
+    """把标注 case 推送为 DataMining 策略评测记录（评测详情：哪些 case 通过/不通过）。
+
+    verdict pass→reviewResult 1，fail→2。bag_id 同时作为 bagId 与 dataId
+    （SceneSQL 的 bag_id 即 em_bin/模块 bin）。时间戳用秒。产线按
+    (strategyId,bagId,dataVersion,startTs) 幂等 upsert，可重复同步。
+    返回 {"pushed", "skipped", "failed"}。
+    """
+    base = f"{settings.DATAMINING_BASE_URL}/api/text2sql"
+    pushed = skipped = failed = 0
+    async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
+        for c in cases:
+            if c.get("start_ts") is None or c.get("end_ts") is None:
+                skipped += 1
+                continue
+            dto = {
+                "strategyId": strategy_id,
+                "bagId": c.get("bag_id"),
+                "dataId": c.get("bag_id"),
+                "startTs": int(c["start_ts"]),
+                "endTs": int(c["end_ts"]),
+                "reviewResult": 1 if c.get("verdict") == "pass" else 2,
+                "reviewer": "scenesql",
+            }
+            try:
+                resp = await client.post(f"{base}/strategy/review", headers=_headers(), json=dto)
+                body = resp.json()
+            except Exception as e:
+                logger.warning("strategy/review 请求异常: %s", e)
+                failed += 1
+                continue
+            if body.get("code") == 200:
+                pushed += 1
+            else:
+                failed += 1
+                logger.warning("strategy/review 失败: %s", body.get("message"))
+    return {"pushed": pushed, "skipped": skipped, "failed": failed}

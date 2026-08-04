@@ -52,3 +52,24 @@
 - 容器/DSW 环境如有 HTTP(S)_PROXY 环境变量且产线 ALB 走代理超时，
   需在启动环境加 `NO_PROXY`/`no_proxy` 覆盖 ALB 域名
 - Docker 镜像无需 dm_sdk（同步只用 httpx）
+
+---
+
+## 更新 2026-08-04（对齐产线后端更新）：mining_table 修正 + 评测详情同步
+
+产线 DataMining 后端更新后复核链路，两处调整：
+
+1. **sync-evalset 去掉 `mining_table`**。SceneSQL 的 `bag_id` 即 em_bin（ubm_vehicle_module_bin 的 data_id）。实测：不传 mining_table 时产线按 em_bin 反查 UBM 推断真实 collection 表（如 `collection_t68_thor_bag` + `..._metadata` viz 表）；此前强传 `ubm_vehicle_module_bin` 反而指错表。现 payload 只传 `bin_id/tag_name/start_ts/end_ts/version`。
+2. **sync-dm 新增评测详情同步**。DataMining 策略的"评测详情"（哪些 case 通过/不通过）即策略评测记录，与 SceneSQL 策略标注同源。`sync-dm` 在 save-or-update 拿到策略 id 后，把全部标注 case 经 `POST /api/text2sql/strategy/review` 推送（`reviewResult` pass→1 / fail→2，bag_id 同作 bagId+dataId，秒级 ts），产线按 (strategyId,bagId,dataVersion,startTs) 幂等 upsert。
+
+### 改动文件
+| 文件 | 说明 |
+|------|------|
+| `app/api/eval_labels.py` | sync-evalset 去掉 mining_table；移除 settings 依赖 |
+| `app/services/datamining.py` | +`sync_strategy_reviews()` 推送评测详情 |
+| `app/api/strategies.py` | sync-dm 追加评测详情推送，响应含 `reviews` 计数 |
+| `AgentPanel.jsx` | 同步策略确认/结果文案含评测详情计数 |
+
+### 实测（产线 ALB）
+- benchmark upload 无 mining_table → 推断 `collection_t68_thor_bag`，successCount 1（测试 benchmark 已硬删）
+- strategy/review：pass+fail 各 1 → review-stats `pass_count=1 fail_count=1 total_count=2`（测试策略已删）

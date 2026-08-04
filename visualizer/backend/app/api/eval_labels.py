@@ -2,8 +2,9 @@
 
 标注按 (strategy, bag_id, start_ts, end_ts) 去重 upsert，存 JSONL。
 同步时转换为产线格式：bin_id=row.bag_id（SceneSQL 查询行的 bag_id 即
-ubm_vehicle_module_bin 的 data_id）、tag=<策略名>_positive/_negative、
-时间戳秒→纳秒。
+em_bin / ubm_vehicle_module_bin 的 data_id）、tag=<策略名>_positive/_negative、
+时间戳秒→纳秒。不传 mining_table：产线按 em_bin 反查 UBM 推断真实 collection
+表（如 collection_xxx_bag），比强行指定 ubm_vehicle_module_bin 更准确。
 """
 import logging
 from typing import Optional
@@ -11,7 +12,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.core.eval_case_store import eval_case_store
 from app.services.datamining import upload_evalset
 
@@ -70,7 +70,6 @@ async def sync_evalset(strategy_name: str, req: SyncRequest):
         tag = f"{strategy_name}_{'positive' if c.get('verdict') == 'pass' else 'negative'}"
         label_res_list.append({
             "bin_id": c["bag_id"],
-            "mining_table": settings.DM_PROD_TABLE,
             "tag_name": tag,
             "start_ts": int(c["start_ts"]) * 10**9,
             "end_ts": int(c["end_ts"]) * 10**9,
