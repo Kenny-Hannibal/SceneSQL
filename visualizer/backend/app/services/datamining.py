@@ -84,9 +84,10 @@ async def sync_strategy_reviews(strategy_id: int, cases: List[Dict]) -> Dict:
     """把标注 case 推送为 DataMining 策略评测记录（评测详情：哪些 case 通过/不通过）。
 
     verdict pass→reviewResult 1，fail→2。bag_id 同时作为 bagId 与 dataId
-    （SceneSQL 的 bag_id 即 em_bin/模块 bin）。时间戳用秒。产线按
-    (strategyId,bagId,dataVersion,startTs) 幂等 upsert，可重复同步。
-    返回 {"pushed", "skipped", "failed"}。
+    （SceneSQL 的 bag_id 即 em_bin/模块 bin）。时间戳用秒。dataVersion 固定
+    "v1"：产线去重 SQL 为 data_version = #{dataVersion}，NULL 永不匹配会导致
+    重复插入，故必须传稳定非空值。产线按 (strategyId,bagId,dataVersion,startTs)
+    幂等 upsert，可重复同步。返回 {"pushed", "skipped", "failed"}。
     """
     base = f"{settings.DATAMINING_BASE_URL}/api/text2sql"
     pushed = skipped = failed = 0
@@ -99,6 +100,7 @@ async def sync_strategy_reviews(strategy_id: int, cases: List[Dict]) -> Dict:
                 "strategyId": strategy_id,
                 "bagId": c.get("bag_id"),
                 "dataId": c.get("bag_id"),
+                "dataVersion": "v1",
                 "startTs": int(c["start_ts"]),
                 "endTs": int(c["end_ts"]),
                 "reviewResult": 1 if c.get("verdict") == "pass" else 2,
