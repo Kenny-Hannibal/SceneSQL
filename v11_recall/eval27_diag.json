@@ -1,0 +1,605 @@
+{
+ "10GlRj78h1CCQkwcd8HHas202606": {
+  "verdict": "pass",
+  "wait": [
+   1772752740,
+   1772752741
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "228.0": {
+    "xy_at_min": [
+     -4.2,
+     3.9
+    ],
+    "brg_at_min": 137.1,
+    "dmin": 5.8,
+    "brg_at_15": 29.3
+   }
+  }
+ },
+ "10QPevc19IMUgiKaiAEwGR202606": {
+  "verdict": "fail",
+  "wait": [
+   1772195952,
+   1772195953
+  ],
+  "wait_oncoming": 1,
+  "objs": {
+   "97.0": {
+    "xy_at_min": [
+     -2.4,
+     4.5
+    ],
+    "brg_at_min": 118.6,
+    "dmin": 5.1,
+    "brg_at_15": 32.3
+   }
+  }
+ },
+ "10mi6gqjkHjbfpL0ijrbP3202606": {
+  "verdict": "pass",
+  "wait": [
+   1776383462,
+   1776383463
+  ],
+  "wait_oncoming": 6,
+  "objs": {
+   "382.0": {
+    "xy_at_min": [
+     0.0,
+     5.0
+    ],
+    "brg_at_min": 89.8,
+    "dmin": 5.0,
+    "brg_at_15": 8.7
+   }
+  }
+ },
+ "10qmIOWgxqYpvcrjuKD5zD202606": {
+  "verdict": "pass",
+  "wait": [
+   1773137401,
+   1773137402
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "185.0": {
+    "xy_at_min": [
+     -2.2,
+     4.6
+    ],
+    "brg_at_min": 116.1,
+    "dmin": 5.1,
+    "brg_at_15": 22.8
+   }
+  }
+ },
+ "11077aEuHYyrc6GmlHeOGX202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "30.0": {
+    "xy_at_min": [
+     0.7,
+     -5.2
+    ],
+    "brg_at_min": -82.7,
+    "dmin": 5.3,
+    "brg_at_15": -21.1
+   }
+  }
+ },
+ "11AJpgq6DqjDeRUo3tVs2j202606": {
+  "verdict": "pass",
+  "wait": [
+   1772841630,
+   1772841631
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "10.0": {
+    "xy_at_min": [
+     -6.1,
+     -3.2
+    ],
+    "brg_at_min": -152.6,
+    "dmin": 6.9,
+    "brg_at_15": -34.6
+   }
+  }
+ },
+ "11Da5oYMQ7IOQb5GHddSDn202606": {
+  "verdict": "pass",
+  "wait": [
+   1771940520,
+   1771940522
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "11.0": {
+    "xy_at_min": [
+     4.1,
+     3.5
+    ],
+    "brg_at_min": 40.8,
+    "dmin": 5.4,
+    "brg_at_15": 40.8
+   }
+  }
+ },
+ "11IM4jcbTm4vrBjdzzksth202606": {
+  "verdict": "pass",
+  "wait": [
+   1771229708,
+   1771229709
+  ],
+  "wait_oncoming": 1,
+  "objs": {
+   "116.0": {
+    "xy_at_min": [
+     -1.1,
+     3.8
+    ],
+    "brg_at_min": 106.1,
+    "dmin": 3.9,
+    "brg_at_15": 22.0
+   },
+   "161.0": {
+    "xy_at_min": [
+     4.2,
+     4.0
+    ],
+    "brg_at_min": 43.1,
+    "dmin": 5.8,
+    "brg_at_15": 12.7
+   }
+  }
+ },
+ "11dXHPBq3g5WIVpdHgKSLS202606": {
+  "verdict": "pass",
+  "wait": [
+   1775045438,
+   1775045439
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "434.0": {
+    "xy_at_min": [
+     4.7,
+     7.5
+    ],
+    "brg_at_min": 57.7,
+    "dmin": 8.9,
+    "brg_at_15": 34.4
+   },
+   "495.0": {
+    "xy_at_min": [
+     2.3,
+     7.4
+    ],
+    "brg_at_min": 72.8,
+    "dmin": 7.7,
+    "brg_at_15": 36.5
+   }
+  }
+ },
+ "11kDBlPD50eUtD3Wu3cVAY202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "449.0": {
+    "xy_at_min": [
+     -7.2,
+     5.8
+    ],
+    "brg_at_min": 141.1,
+    "dmin": 9.3,
+    "brg_at_15": 26.6
+   }
+  }
+ },
+ "11qdEDPtt7jEgRYTjihJoP202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "221.0": {
+    "xy_at_min": [
+     -2.7,
+     3.3
+    ],
+    "brg_at_min": 129.5,
+    "dmin": 4.2,
+    "brg_at_15": 26.9
+   },
+   "227.0": {
+    "xy_at_min": [
+     4.1,
+     4.6
+    ],
+    "brg_at_min": 47.7,
+    "dmin": 6.2,
+    "brg_at_15": 21.8
+   }
+  }
+ },
+ "11uo8aSSg3GECQWWNVNLjx202606": {
+  "verdict": "pass",
+  "wait": [
+   1776957982,
+   1776957983
+  ],
+  "wait_oncoming": 4,
+  "objs": {
+   "114.0": {
+    "xy_at_min": [
+     -1.9,
+     3.6
+    ],
+    "brg_at_min": 117.6,
+    "dmin": 4.0,
+    "brg_at_15": 15.5
+   },
+   "127.0": {
+    "xy_at_min": [
+     5.7,
+     2.7
+    ],
+    "brg_at_min": 25.4,
+    "dmin": 6.3,
+    "brg_at_15": 25.4
+   },
+   "128.0": {
+    "xy_at_min": [
+     1.6,
+     6.2
+    ],
+    "brg_at_min": 75.5,
+    "dmin": 6.4,
+    "brg_at_15": 28.1
+   },
+   "134.0": {
+    "xy_at_min": [
+     4.8,
+     2.6
+    ],
+    "brg_at_min": 28.3,
+    "dmin": 5.5,
+    "brg_at_15": 1.6
+   },
+   "98.0": {
+    "xy_at_min": [
+     0.8,
+     3.8
+    ],
+    "brg_at_min": 78.4,
+    "dmin": 3.9,
+    "brg_at_15": 78.4
+   }
+  }
+ },
+ "11zvJXioqZWxXtMyMfATjZ202606": {
+  "verdict": "pass",
+  "wait": [
+   1772892777,
+   1772892778
+  ],
+  "wait_oncoming": 3,
+  "objs": {
+   "364.0": {
+    "xy_at_min": [
+     -5.3,
+     -2.9
+    ],
+    "brg_at_min": -150.8,
+    "dmin": 6.0,
+    "brg_at_15": -39.1
+   }
+  }
+ },
+ "1248gqKuxZe4hvlPtxuwOk202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "36.0": {
+    "xy_at_min": [
+     -4.2,
+     4.2
+    ],
+    "brg_at_min": 134.6,
+    "dmin": 5.9,
+    "brg_at_15": 17.4
+   }
+  }
+ },
+ "12cZMhJTQToRdoWH39Egid202606": {
+  "verdict": "pass",
+  "wait": [
+   1772157842,
+   1772157843
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "423.0": {
+    "xy_at_min": [
+     -3.4,
+     3.5
+    ],
+    "brg_at_min": 134.5,
+    "dmin": 4.9,
+    "brg_at_15": 12.0
+   }
+  }
+ },
+ "12xyPeSpiuEH1lWLxIgeIw202606": {
+  "verdict": "pass",
+  "wait": [
+   1773363521,
+   1773363522
+  ],
+  "wait_oncoming": 12,
+  "objs": {
+   "432.0": {
+    "xy_at_min": [
+     -0.8,
+     4.1
+    ],
+    "brg_at_min": 101.4,
+    "dmin": 4.2,
+    "brg_at_15": 16.4
+   },
+   "438.0": {
+    "xy_at_min": [
+     0.7,
+     4.9
+    ],
+    "brg_at_min": 82.1,
+    "dmin": 4.9,
+    "brg_at_15": 21.5
+   }
+  }
+ },
+ "133mqyH4Hs3xh5XLzvNaIY202606": {
+  "verdict": "pass",
+  "wait": [
+   1778061955,
+   1778061956
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "240.0": {
+    "xy_at_min": [
+     -2.1,
+     3.7
+    ],
+    "brg_at_min": 120.0,
+    "dmin": 4.3,
+    "brg_at_15": 22.1
+   },
+   "284.0": {
+    "xy_at_min": [
+     -0.1,
+     -6.0
+    ],
+    "brg_at_min": -91.0,
+    "dmin": 6.0,
+    "brg_at_15": -21.7
+   }
+  }
+ },
+ "13FW1hdTuwkWNFSM2J337t202606": {
+  "verdict": "pass",
+  "wait": [
+   1771125564,
+   1771125566
+  ],
+  "wait_oncoming": 1,
+  "objs": {
+   "1024.0": {
+    "xy_at_min": [
+     -0.6,
+     4.4
+    ],
+    "brg_at_min": 97.2,
+    "dmin": 4.4,
+    "brg_at_15": 21.7
+   }
+  }
+ },
+ "13MgYq8y02xoj5LCAQUJTq202606": {
+  "verdict": "fail",
+  "wait": [
+   1772616378,
+   1772616379
+  ],
+  "wait_oncoming": 19,
+  "objs": {
+   "463.0": {
+    "xy_at_min": [
+     4.3,
+     9.3
+    ],
+    "brg_at_min": 65.1,
+    "dmin": 10.2,
+    "brg_at_15": 23.4
+   },
+   "473.0": {
+    "xy_at_min": [
+     0.7,
+     8.8
+    ],
+    "brg_at_min": 85.1,
+    "dmin": 8.8,
+    "brg_at_15": 9.9
+   }
+  }
+ },
+ "13UdYYqV5CT8cmgkOFbOUy202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "67.0": {
+    "xy_at_min": [
+     -3.4,
+     5.3
+    ],
+    "brg_at_min": 122.6,
+    "dmin": 6.2,
+    "brg_at_15": 24.3
+   }
+  }
+ },
+ "13cZ8yopuLCfi3i5QyGlFL202606": {
+  "verdict": "pass",
+  "wait": [
+   null,
+   null
+  ],
+  "wait_oncoming": null,
+  "objs": {
+   "1048.0": {
+    "xy_at_min": [
+     0.0,
+     -4.2
+    ],
+    "brg_at_min": -89.4,
+    "dmin": 4.2,
+    "brg_at_15": -19.8
+   }
+  }
+ },
+ "13foSJ2gwsDQNswXszuGXi202606": {
+  "verdict": "fail",
+  "wait": [
+   1778981875,
+   1778981876
+  ],
+  "wait_oncoming": 5,
+  "objs": {
+   "514.0": {
+    "xy_at_min": [
+     0.2,
+     3.6
+    ],
+    "brg_at_min": 87.1,
+    "dmin": 3.6,
+    "brg_at_15": 29.9
+   }
+  }
+ },
+ "13qaPiuk5NGjZgH4NN97od202606": {
+  "verdict": "fail",
+  "wait": [
+   1779278791,
+   1779278792
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "191.0": {
+    "xy_at_min": [
+     -0.1,
+     -6.9
+    ],
+    "brg_at_min": -90.8,
+    "dmin": 6.9,
+    "brg_at_15": -48.1
+   }
+  }
+ },
+ "13szpzUGiD7tmH6B1G8vY202606": {
+  "verdict": "fail",
+  "wait": [
+   1776828903,
+   1776828905
+  ],
+  "wait_oncoming": 12,
+  "objs": {
+   "1187.0": {
+    "xy_at_min": [
+     4.2,
+     3.5
+    ],
+    "brg_at_min": 39.9,
+    "dmin": 5.5,
+    "brg_at_15": 13.1
+   }
+  }
+ },
+ "143QXO1tzo04z7WIlmyG6t202606": {
+  "verdict": "pass",
+  "wait": [
+   1774711595,
+   1774711596
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "97.0": {
+    "xy_at_min": [
+     -1.0,
+     -5.3
+    ],
+    "brg_at_min": -100.2,
+    "dmin": 5.4,
+    "brg_at_15": -33.7
+   }
+  }
+ },
+ "14Kfppv9jLjp0VIXisbAAm202606": {
+  "verdict": "fail",
+  "wait": [
+   1776127208,
+   1776127210
+  ],
+  "wait_oncoming": 3,
+  "objs": {
+   "86.0": {
+    "xy_at_min": [
+     -2.2,
+     2.7
+    ],
+    "brg_at_min": 128.4,
+    "dmin": 3.5,
+    "brg_at_15": 18.3
+   }
+  }
+ },
+ "14LIxsWxRQCOKvUSF7EiCe202606": {
+  "verdict": "pass",
+  "wait": [
+   1771316928,
+   1771316929
+  ],
+  "wait_oncoming": 0,
+  "objs": {
+   "98.0": {
+    "xy_at_min": [
+     2.0,
+     4.6
+    ],
+    "brg_at_min": 66.4,
+    "dmin": 5.0,
+    "brg_at_15": 22.5
+   }
+  }
+ }
+}

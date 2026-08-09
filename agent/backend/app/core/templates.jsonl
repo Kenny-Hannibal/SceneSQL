@@ -90,3 +90,4 @@
 {"id": "u_turn_left_3", "nl": "掉头3：产线SQL直通模式(raw_sql)", "domain": "", "tags": ["u_turn_left_3"], "text_for_embedding": "掉头3：产线SQL直通模式(raw_sql) u_turn_left_3", "recipe_name": "u_turn_left_3"}
 {"id": "u_turn_with_lanechange", "nl": "变道掉头：产线SQL直通模式(raw_sql)", "domain": "", "tags": ["u_turn_with_lanechange"], "text_for_embedding": "变道掉头：产线SQL直通模式(raw_sql) u_turn_with_lanechange", "recipe_name": "u_turn_with_lanechange"}
 {"id": "vru_cross_conflict", "nl": "VRU横穿冲突：产线SQL直通模式(raw_sql)", "domain": "", "tags": ["vru_cross_conflict"], "text_for_embedding": "VRU横穿冲突：产线SQL直通模式(raw_sql) vru_cross_conflict", "recipe_name": "vru_cross_conflict"}
+{"id": "unprotected_left_turn", "nl": "无保护左转：自车左转时对向直行机动车(car/bus/truck)干涉，输出博弈结果/最近距离/灯色/路口拓扑", "domain": "", "tags": ["unprotected_left_turn"], "text_for_embedding": "无保护左转 自车左转 对向直行 机动车干涉 博弈 路口 unprotected_left_turn", "recipe_name": "unprotected_left_turn"}

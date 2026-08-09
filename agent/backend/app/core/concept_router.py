@@ -404,6 +404,7 @@ class ConceptRouter:
         "VRU横穿冲突": ("conflict_pipeline", "vru"),
         "左转冲突": ("left_turn_conflict", "default"),
         "右转冲突": ("right_turn_conflict", "default"),
+        "无保护左转": ("unprotected_left_turn", "default"),
         # ── 产线SQL直通Recipe (raw_sql) ──
         "绕行超车": ("turn_bypass_overtake", "default"),
         "变道减速": ("ego_decel_during_lanechange", "default"),

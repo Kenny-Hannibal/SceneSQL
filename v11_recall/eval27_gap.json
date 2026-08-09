@@ -1,0 +1,215 @@
+{
+ "10GlRj78h1CCQkwcd8HHas202606": {
+  "verdict": "pass",
+  "move_start": 1772752741,
+  "onc_total": 4,
+  "at_move_pm3s": 2,
+  "near30_at_move_pm3s": 2,
+  "after_move_10s": 4,
+  "gap_before_s": null
+ },
+ "10QPevc19IMUgiKaiAEwGR202606": {
+  "verdict": "fail",
+  "move_start": 1772195953,
+  "onc_total": 5,
+  "at_move_pm3s": 0,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 3,
+  "gap_before_s": 9
+ },
+ "10mi6gqjkHjbfpL0ijrbP3202606": {
+  "verdict": "pass",
+  "move_start": 1776383463,
+  "onc_total": 14,
+  "at_move_pm3s": 6,
+  "near30_at_move_pm3s": 5,
+  "after_move_10s": 10,
+  "gap_before_s": 1
+ },
+ "10qmIOWgxqYpvcrjuKD5zD202606": {
+  "verdict": "pass",
+  "move_start": 1773137402,
+  "onc_total": 3,
+  "at_move_pm3s": 2,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 3,
+  "gap_before_s": null
+ },
+ "11077aEuHYyrc6GmlHeOGX202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "11AJpgq6DqjDeRUo3tVs2j202606": {
+  "verdict": "pass",
+  "move_start": 1772841631,
+  "onc_total": 4,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 3,
+  "gap_before_s": 1
+ },
+ "11Da5oYMQ7IOQb5GHddSDn202606": {
+  "verdict": "pass",
+  "move_start": 1771940522,
+  "onc_total": 1,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 1,
+  "gap_before_s": null
+ },
+ "11IM4jcbTm4vrBjdzzksth202606": {
+  "verdict": "pass",
+  "move_start": 1771229709,
+  "onc_total": 6,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 5,
+  "gap_before_s": 10
+ },
+ "11dXHPBq3g5WIVpdHgKSLS202606": {
+  "verdict": "pass",
+  "move_start": 1775045439,
+  "onc_total": 4,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 3,
+  "gap_before_s": null
+ },
+ "11kDBlPD50eUtD3Wu3cVAY202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "11qdEDPtt7jEgRYTjihJoP202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "11uo8aSSg3GECQWWNVNLjx202606": {
+  "verdict": "pass",
+  "move_start": 1776957983,
+  "onc_total": 9,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 7,
+  "gap_before_s": 1
+ },
+ "11zvJXioqZWxXtMyMfATjZ202606": {
+  "verdict": "pass",
+  "move_start": 1772892778,
+  "onc_total": 8,
+  "at_move_pm3s": 0,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 5,
+  "gap_before_s": 7
+ },
+ "1248gqKuxZe4hvlPtxuwOk202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "12cZMhJTQToRdoWH39Egid202606": {
+  "verdict": "pass",
+  "move_start": 1772157843,
+  "onc_total": 10,
+  "at_move_pm3s": 2,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 8,
+  "gap_before_s": 1
+ },
+ "12xyPeSpiuEH1lWLxIgeIw202606": {
+  "verdict": "pass",
+  "move_start": 1773363522,
+  "onc_total": 21,
+  "at_move_pm3s": 5,
+  "near30_at_move_pm3s": 5,
+  "after_move_10s": 11,
+  "gap_before_s": 1
+ },
+ "133mqyH4Hs3xh5XLzvNaIY202606": {
+  "verdict": "pass",
+  "move_start": 1778061956,
+  "onc_total": 5,
+  "at_move_pm3s": 0,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 3,
+  "gap_before_s": null
+ },
+ "13FW1hdTuwkWNFSM2J337t202606": {
+  "verdict": "pass",
+  "move_start": 1771125566,
+  "onc_total": 3,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 3,
+  "gap_before_s": 1
+ },
+ "13MgYq8y02xoj5LCAQUJTq202606": {
+  "verdict": "fail",
+  "move_start": 1772616379,
+  "onc_total": 39,
+  "at_move_pm3s": 14,
+  "near30_at_move_pm3s": 12,
+  "after_move_10s": 26,
+  "gap_before_s": 1
+ },
+ "13UdYYqV5CT8cmgkOFbOUy202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "13cZ8yopuLCfi3i5QyGlFL202606": {
+  "verdict": "pass",
+  "note": "no stop"
+ },
+ "13foSJ2gwsDQNswXszuGXi202606": {
+  "verdict": "fail",
+  "move_start": 1778981876,
+  "onc_total": 11,
+  "at_move_pm3s": 3,
+  "near30_at_move_pm3s": 3,
+  "after_move_10s": 6,
+  "gap_before_s": 3
+ },
+ "13qaPiuk5NGjZgH4NN97od202606": {
+  "verdict": "fail",
+  "move_start": 1779278792,
+  "onc_total": 1,
+  "at_move_pm3s": 0,
+  "near30_at_move_pm3s": 0,
+  "after_move_10s": 1,
+  "gap_before_s": null
+ },
+ "13szpzUGiD7tmH6B1G8vY202606": {
+  "verdict": "fail",
+  "move_start": 1776828905,
+  "onc_total": 11,
+  "at_move_pm3s": 6,
+  "near30_at_move_pm3s": 5,
+  "after_move_10s": 4,
+  "gap_before_s": 1
+ },
+ "143QXO1tzo04z7WIlmyG6t202606": {
+  "verdict": "pass",
+  "move_start": 1774711596,
+  "onc_total": 7,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 6,
+  "gap_before_s": null
+ },
+ "14Kfppv9jLjp0VIXisbAAm202606": {
+  "verdict": "fail",
+  "move_start": 1776127210,
+  "onc_total": 4,
+  "at_move_pm3s": 2,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 1,
+  "gap_before_s": 1
+ },
+ "14LIxsWxRQCOKvUSF7EiCe202606": {
+  "verdict": "pass",
+  "move_start": 1771316929,
+  "onc_total": 2,
+  "at_move_pm3s": 1,
+  "near30_at_move_pm3s": 1,
+  "after_move_10s": 2,
+  "gap_before_s": null
+ }
+}

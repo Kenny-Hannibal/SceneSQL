@@ -11,6 +11,13 @@
   - `agent/backend/` — NL2SQL 引擎（SQLite / Parquet / DuckDB）
   - `tools/` — 共享 HEVC 解码工具
 
+## ⚠️ 部署目标（务必看清）
+
+- **统一部署到「大写 `DSW`」**：`ssh DSW` → `8.130.209.216:1025`，仓库路径 `/root/data/text2sql`
+- **「小写 `dsw`」（`8.130.175.37:1021`）已废弃，不再部署、不再验证**
+- 两台是不同机器；ssh 别名大小写敏感。每次部署/端到端测试一律用大写 `DSW`。
+- 部署命令：`ssh DSW "cd /root/data/text2sql && git pull --ff-only && bash visualizer/deploy.sh -f"`
+
 ## 工作流（必须遵守）
 
 ### 1. 修改代码前 — 阅读历史

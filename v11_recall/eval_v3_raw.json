@@ -1,0 +1,221 @@
+{
+ "strategy_name": "无保护左转正式版_v3",
+ "cases": [
+  {
+   "bag_id": "10GlRj78h1CCQkwcd8HHas202606",
+   "start_ts": 1772752740,
+   "end_ts": 1772752754,
+   "verdict": "pass",
+   "labeled_at": 1785859809.322023,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "10QPevc19IMUgiKaiAEwGR202606",
+   "start_ts": 1772195954,
+   "end_ts": 1772195970,
+   "verdict": "fail",
+   "labeled_at": 1785859825.7327206,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "10mi6gqjkHjbfpL0ijrbP3202606",
+   "start_ts": 1776383471,
+   "end_ts": 1776383491,
+   "verdict": "pass",
+   "labeled_at": 1785859838.2256806,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "10qmIOWgxqYpvcrjuKD5zD202606",
+   "start_ts": 1773137399,
+   "end_ts": 1773137413,
+   "verdict": "pass",
+   "labeled_at": 1785859849.245241,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11077aEuHYyrc6GmlHeOGX202606",
+   "start_ts": 1777968913,
+   "end_ts": 1777968927,
+   "verdict": "pass",
+   "labeled_at": 1785859861.1526792,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11AJpgq6DqjDeRUo3tVs2j202606",
+   "start_ts": 1772841627,
+   "end_ts": 1772841644,
+   "verdict": "pass",
+   "labeled_at": 1785859878.079755,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11Da5oYMQ7IOQb5GHddSDn202606",
+   "start_ts": 1771940520,
+   "end_ts": 1771940535,
+   "verdict": "pass",
+   "labeled_at": 1785859891.06056,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11IM4jcbTm4vrBjdzzksth202606",
+   "start_ts": 1771229707,
+   "end_ts": 1771229726,
+   "verdict": "pass",
+   "labeled_at": 1785859899.6945562,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11dXHPBq3g5WIVpdHgKSLS202606",
+   "start_ts": 1775045461,
+   "end_ts": 1775045476,
+   "verdict": "pass",
+   "labeled_at": 1785859914.8167417,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11kDBlPD50eUtD3Wu3cVAY202606",
+   "start_ts": 1779783691,
+   "end_ts": 1779783706,
+   "verdict": "pass",
+   "labeled_at": 1785859923.8749762,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11qdEDPtt7jEgRYTjihJoP202606",
+   "start_ts": 1778814253,
+   "end_ts": 1778814269,
+   "verdict": "pass",
+   "labeled_at": 1785859932.4802344,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11uo8aSSg3GECQWWNVNLjx202606",
+   "start_ts": 1776957980,
+   "end_ts": 1776958004,
+   "verdict": "pass",
+   "labeled_at": 1785859945.9261062,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "11zvJXioqZWxXtMyMfATjZ202606",
+   "start_ts": 1772892777,
+   "end_ts": 1772892793,
+   "verdict": "pass",
+   "labeled_at": 1785859957.8633718,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "1248gqKuxZe4hvlPtxuwOk202606",
+   "start_ts": 1771998252,
+   "end_ts": 1771998265,
+   "verdict": "pass",
+   "labeled_at": 1785859971.5226002,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "12cZMhJTQToRdoWH39Egid202606",
+   "start_ts": 1772157845,
+   "end_ts": 1772157859,
+   "verdict": "pass",
+   "labeled_at": 1785859980.384148,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "12xyPeSpiuEH1lWLxIgeIw202606",
+   "start_ts": 1773363522,
+   "end_ts": 1773363542,
+   "verdict": "pass",
+   "labeled_at": 1785859989.681627,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "133mqyH4Hs3xh5XLzvNaIY202606",
+   "start_ts": 1778061975,
+   "end_ts": 1778061989,
+   "verdict": "pass",
+   "labeled_at": 1785860001.6983647,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13FW1hdTuwkWNFSM2J337t202606",
+   "start_ts": 1771125568,
+   "end_ts": 1771125581,
+   "verdict": "pass",
+   "labeled_at": 1785860010.2031715,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13MgYq8y02xoj5LCAQUJTq202606",
+   "start_ts": 1772616374,
+   "end_ts": 1772616388,
+   "verdict": "fail",
+   "labeled_at": 1785860032.3100953,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13UdYYqV5CT8cmgkOFbOUy202606",
+   "start_ts": 1780019230,
+   "end_ts": 1780019244,
+   "verdict": "pass",
+   "labeled_at": 1785860049.4766214,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13cZ8yopuLCfi3i5QyGlFL202606",
+   "start_ts": 1778926246,
+   "end_ts": 1778926262,
+   "verdict": "pass",
+   "labeled_at": 1785860061.6696808,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13foSJ2gwsDQNswXszuGXi202606",
+   "start_ts": 1778981879,
+   "end_ts": 1778981893,
+   "verdict": "fail",
+   "labeled_at": 1785860075.7115574,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13qaPiuk5NGjZgH4NN97od202606",
+   "start_ts": 1779278789,
+   "end_ts": 1779278805,
+   "verdict": "fail",
+   "labeled_at": 1785860093.5988555,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "13szpzUGiD7tmH6B1G8vY202606",
+   "start_ts": 1776828902,
+   "end_ts": 1776828919,
+   "verdict": "fail",
+   "labeled_at": 1785860108.0047033,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "143QXO1tzo04z7WIlmyG6t202606",
+   "start_ts": 1774711598,
+   "end_ts": 1774711612,
+   "verdict": "pass",
+   "labeled_at": 1785860121.3135934,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "14Kfppv9jLjp0VIXisbAAm202606",
+   "start_ts": 1776127206,
+   "end_ts": 1776127233,
+   "verdict": "fail",
+   "labeled_at": 1785860154.7507591,
+   "labeled_by": ""
+  },
+  {
+   "bag_id": "14LIxsWxRQCOKvUSF7EiCe202606",
+   "start_ts": 1771316930,
+   "end_ts": 1771316945,
+   "verdict": "pass",
+   "labeled_at": 1785860164.0911462,
+   "labeled_by": ""
+  }
+ ]
+}

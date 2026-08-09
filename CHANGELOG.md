@@ -6,6 +6,7 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
+| 2026-08-09 | 验证集可视化 + Mage-VL 评测 API | `changelog/2026-08-09_验证集可视化-Mage-VL评测API.md` |
 | 2026-08-04 | 评测标注 + 评测集/策略同步 DataMining 产线 | `changelog/2026-08-04_评测标注-评测集与策略同步DataMining产线.md` |
 | 2026-08-04 | 进度条跳动根因修复：endOfStream 前用实际缓冲终点校正 duration | `changelog/2026-08-04_进度条跳动根因修复-endOfStream前校正duration.md` |
 | 2026-08-03 | 视频进度条时长预计算 + 容器化 + API 契约 v1（DataMining 集成准备） | `changelog/2026-08-03_视频进度条时长预计算-容器化-API契约v1.md` |

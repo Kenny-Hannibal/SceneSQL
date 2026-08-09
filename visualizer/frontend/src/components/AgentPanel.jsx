@@ -235,6 +235,8 @@ export default function AgentPanel() {
   const [matchedLabels, setMatchedLabels] = useState({});   // key: bag_id|start_ts|end_ts → verdict
   const [evalSyncModal, setEvalSyncModal] = useState(null); // {strategy, benchmarkName, cases}
   const [syncBusy, setSyncBusy] = useState(false);
+  // ── 验证集可视化 ──
+  const [validationSetModal, setValidationSetModal] = useState(null); // {strategy, cases, loading}
 
   // Video extraction states
   const [videoRows, setVideoRows] = useState([]);
@@ -608,6 +610,65 @@ export default function AgentPanel() {
   };
 
   useEffect(() => { loadStrategyList(); }, []);
+
+  // ── 验证集可视化：打开验证集列表弹窗 ──
+  const openValidationSet = async (s) => {
+    setValidationSetModal({ strategy: s, cases: [], loading: true });
+    try {
+      const res = await authFetch(`${API_BASE}/api/eval-labels/${encodeURIComponent(s.name)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setValidationSetModal({ strategy: s, cases: data.cases || [], loading: false });
+      } else {
+        setValidationSetModal({ strategy: s, cases: [], loading: false });
+      }
+    } catch (e) {
+      setValidationSetModal({ strategy: s, cases: [], loading: false });
+    }
+  };
+
+  // ── 验证集可视化：点击某条 case → 触发可视化 ──
+  const handleVisualizeValidationCase = (c) => {
+    setValidationSetModal(null);
+    // 构造 row 对象，复用 startVisualization
+    const row = {
+      bag_id: c.bag_id,
+      start_ts: c.start_ts,
+      end_ts: c.end_ts,
+      bag_path: null,  // startVisualization 会自动解析
+    };
+    startVisualization(row);
+  };
+
+  // ── 验证集可视化：覆盖标注 ──
+  const handleRelabelValidationCase = async (c, verdict) => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/eval-labels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: validationSetModal.strategy.name,
+          bag_id: c.bag_id,
+          start_ts: c.start_ts,
+          end_ts: c.end_ts,
+          verdict,
+        }),
+      });
+      if (res.ok) {
+        // 更新列表中的 verdict
+        setValidationSetModal(prev => prev ? {
+          ...prev,
+          cases: prev.cases.map(x =>
+            x.bag_id === c.bag_id && x.start_ts === c.start_ts && x.end_ts === c.end_ts
+              ? { ...x, verdict }
+              : x
+          ),
+        } : prev);
+      }
+    } catch (e) {
+      alert('标注失败: ' + e.message);
+    }
+  };
 
   // 当前 SQL 匹配到策略时，载入其标注（结果表小圆点回显）
   useEffect(() => {
@@ -2541,6 +2602,7 @@ export default function AgentPanel() {
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button onClick={() => handleLoadStrategy(s)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #1890ff', borderRadius: 3, background: 'transparent', color: '#1890ff', cursor: 'pointer' }}>加载</button>
+                        <button onClick={() => openValidationSet(s)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #13c2c2', borderRadius: 3, background: 'transparent', color: '#13c2c2', cursor: 'pointer' }}>验证集</button>
                         <button onClick={() => openEvalSyncModal(s)} disabled={syncBusy} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #722ed1', borderRadius: 3, background: 'transparent', color: '#722ed1', cursor: 'pointer' }}>同步评测集</button>
                         <button onClick={() => handleSyncStrategyDm(s.name)} disabled={syncBusy} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #fa8c16', borderRadius: 3, background: 'transparent', color: '#fa8c16', cursor: 'pointer' }}>同步策略</button>
                         <button onClick={() => handleDeleteStrategy(s.name)} style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #ff4d4f', borderRadius: 3, background: 'transparent', color: '#ff4d4f', cursor: 'pointer' }}>删除</button>
@@ -2577,6 +2639,74 @@ export default function AgentPanel() {
                 {syncBusy ? '同步中...' : `同步 ${evalSyncModal.cases.length} 条到产线`}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 验证集列表弹窗 ── */}
+      {validationSetModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1003, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 8, padding: 24, minWidth: 600, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>验证集 — {validationSetModal.strategy.name}</h3>
+              <button onClick={() => setValidationSetModal(null)} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            {validationSetModal.loading ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>加载中...</div>
+            ) : validationSetModal.cases.length === 0 ? (
+              <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>该策略暂无验证集标注</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+                  共 {validationSetModal.cases.length} 条标注
+                  （✅ 通过 {validationSetModal.cases.filter(c => c.verdict === 'pass').length}，
+                  ❌ 不通过 {validationSetModal.cases.filter(c => c.verdict === 'fail').length}）
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #f0f0f0', textAlign: 'left' }}>
+                      <th style={{ padding: '8px 4px' }}>Bag ID</th>
+                      <th style={{ padding: '8px 4px' }}>时间范围</th>
+                      <th style={{ padding: '8px 4px' }}>标注</th>
+                      <th style={{ padding: '8px 4px' }}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {validationSetModal.cases.map((c, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '8px 4px', fontFamily: 'monospace', fontSize: 12 }}>{c.bag_id}</td>
+                        <td style={{ padding: '8px 4px', fontSize: 12 }}>
+                          {c.start_ts != null ? `${c.start_ts}s` : '?'} ~ {c.end_ts != null ? `${c.end_ts}s` : '?'}
+                        </td>
+                        <td style={{ padding: '8px 4px' }}>
+                          {c.verdict === 'pass' ? (
+                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: '#52c41a', color: '#fff' }}>✅ 通过</span>
+                          ) : (
+                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: '#ff4d4f', color: '#fff' }}>❌ 不通过</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 4px' }}>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              onClick={() => handleVisualizeValidationCase(c)}
+                              style={{ padding: '2px 8px', fontSize: 11, border: '1px solid #1890ff', borderRadius: 3, background: 'transparent', color: '#1890ff', cursor: 'pointer' }}
+                            >📹 可视化</button>
+                            <button
+                              onClick={() => handleRelabelValidationCase(c, 'pass')}
+                              style={{ padding: '2px 6px', fontSize: 11, border: '1px solid #52c41a', borderRadius: 3, background: c.verdict === 'pass' ? '#52c41a' : 'transparent', color: c.verdict === 'pass' ? '#fff' : '#52c41a', cursor: 'pointer' }}
+                            >✅</button>
+                            <button
+                              onClick={() => handleRelabelValidationCase(c, 'fail')}
+                              style={{ padding: '2px 6px', fontSize: 11, border: '1px solid #ff4d4f', borderRadius: 3, background: c.verdict === 'fail' ? '#ff4d4f' : 'transparent', color: c.verdict === 'fail' ? '#fff' : '#ff4d4f', cursor: 'pointer' }}
+                            >❌</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

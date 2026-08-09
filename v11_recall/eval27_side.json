@@ -1,0 +1,375 @@
+{
+ "10GlRj78h1CCQkwcd8HHas202606": {
+  "verdict": "pass",
+  "objs": {
+   "228.0": {
+    "maxsp": 31.9,
+    "cal_fail": true
+   }
+  }
+ },
+ "10QPevc19IMUgiKaiAEwGR202606": {
+  "verdict": "fail",
+  "objs": {
+   "97.0": {
+    "maxsp": 34.2,
+    "cal_fail": true
+   }
+  }
+ },
+ "10mi6gqjkHjbfpL0ijrbP3202606": {
+  "verdict": "pass",
+  "objs": {
+   "382.0": {
+    "maxsp": 26.0,
+    "cross_side_y": 0.9,
+    "cross_x": 0.7,
+    "obj_xy_at_ots": [
+     9.1,
+     3.0
+    ],
+    "dts": -5
+   }
+  }
+ },
+ "10qmIOWgxqYpvcrjuKD5zD202606": {
+  "verdict": "pass",
+  "objs": {
+   "185.0": {
+    "maxsp": 57.8,
+    "cal_fail": true
+   }
+  }
+ },
+ "11077aEuHYyrc6GmlHeOGX202606": {
+  "verdict": "pass",
+  "objs": {
+   "30.0": {
+    "maxsp": 14.1,
+    "cal_fail": true
+   }
+  }
+ },
+ "11AJpgq6DqjDeRUo3tVs2j202606": {
+  "verdict": "pass",
+  "objs": {
+   "10.0": {
+    "maxsp": 49.5,
+    "cross_side_y": -0.8,
+    "cross_x": -1.2,
+    "obj_xy_at_ots": [
+     -22.5,
+     4.9
+    ],
+    "dts": 3
+   }
+  }
+ },
+ "11Da5oYMQ7IOQb5GHddSDn202606": {
+  "verdict": "pass",
+  "objs": {
+   "11.0": {
+    "maxsp": 43.7,
+    "cross_side_y": -1.1,
+    "cross_x": -0.9,
+    "obj_xy_at_ots": [
+     15.0,
+     3.6
+    ],
+    "dts": -4
+   }
+  }
+ },
+ "11IM4jcbTm4vrBjdzzksth202606": {
+  "verdict": "pass",
+  "objs": {
+   "116.0": {
+    "maxsp": 37.4,
+    "cal_fail": true
+   },
+   "161.0": {
+    "maxsp": 44.0,
+    "cal_fail": true
+   }
+  }
+ },
+ "11dXHPBq3g5WIVpdHgKSLS202606": {
+  "verdict": "pass",
+  "objs": {
+   "434.0": {
+    "maxsp": 27.7,
+    "cross_side_y": -0.5,
+    "cross_x": -1.5,
+    "obj_xy_at_ots": [
+     11.3,
+     7.8
+    ],
+    "dts": -5
+   },
+   "495.0": {
+    "maxsp": 25.3,
+    "cross_side_y": 1.7,
+    "cross_x": -0.6,
+    "obj_xy_at_ots": [
+     8.0,
+     5.9
+    ],
+    "dts": -3
+   }
+  }
+ },
+ "11kDBlPD50eUtD3Wu3cVAY202606": {
+  "verdict": "pass",
+  "objs": {
+   "449.0": {
+    "maxsp": 57.5,
+    "cal_fail": true
+   }
+  }
+ },
+ "11qdEDPtt7jEgRYTjihJoP202606": {
+  "verdict": "pass",
+  "objs": {
+   "221.0": {
+    "maxsp": 47.8,
+    "cal_fail": true
+   },
+   "227.0": {
+    "maxsp": 27.7,
+    "cal_fail": true
+   }
+  }
+ },
+ "11uo8aSSg3GECQWWNVNLjx202606": {
+  "verdict": "pass",
+  "objs": {
+   "114.0": {
+    "maxsp": 56.6,
+    "cross_side_y": 0.7,
+    "cross_x": 1.5,
+    "obj_xy_at_ots": [
+     10.7,
+     3.0
+    ],
+    "dts": -4
+   },
+   "127.0": {
+    "maxsp": 46.0,
+    "cross_side_y": 1.4,
+    "cross_x": 0.4,
+    "obj_xy_at_ots": [
+     5.7,
+     2.7
+    ],
+    "dts": -3
+   },
+   "128.0": {
+    "maxsp": 28.8,
+    "cross_side_y": 1.1,
+    "cross_x": 2.7,
+    "obj_xy_at_ots": [
+     10.6,
+     5.6
+    ],
+    "dts": -5
+   },
+   "134.0": {
+    "maxsp": 39.6,
+    "cross_side_y": 1.3,
+    "cross_x": 0.3,
+    "obj_xy_at_ots": [
+     4.8,
+     2.6
+    ],
+    "dts": -2
+   },
+   "98.0": {
+    "maxsp": 46.3,
+    "cross_side_y": 1.0,
+    "cross_x": 3.3,
+    "obj_xy_at_ots": [
+     15.2,
+     3.7
+    ],
+    "dts": -4
+   }
+  }
+ },
+ "11zvJXioqZWxXtMyMfATjZ202606": {
+  "verdict": "pass",
+  "objs": {
+   "364.0": {
+    "maxsp": 33.2,
+    "cross_side_y": 1.3,
+    "cross_x": 0.2,
+    "obj_xy_at_ots": [
+     -28.5,
+     11.2
+    ],
+    "dts": 5
+   }
+  }
+ },
+ "1248gqKuxZe4hvlPtxuwOk202606": {
+  "verdict": "pass",
+  "objs": {
+   "36.0": {
+    "maxsp": 42.1,
+    "cal_fail": true
+   }
+  }
+ },
+ "12cZMhJTQToRdoWH39Egid202606": {
+  "verdict": "pass",
+  "objs": {
+   "423.0": {
+    "maxsp": 31.2,
+    "cal_fail": true
+   }
+  }
+ },
+ "12xyPeSpiuEH1lWLxIgeIw202606": {
+  "verdict": "pass",
+  "objs": {
+   "432.0": {
+    "maxsp": 29.2,
+    "cal_fail": true
+   },
+   "438.0": {
+    "maxsp": 24.1,
+    "cal_fail": true
+   }
+  }
+ },
+ "133mqyH4Hs3xh5XLzvNaIY202606": {
+  "verdict": "pass",
+  "objs": {
+   "240.0": {
+    "maxsp": 19.4,
+    "cross_side_y": 1.9,
+    "cross_x": -1.2,
+    "obj_xy_at_ots": [
+     16.6,
+     4.7
+    ],
+    "dts": -4
+   },
+   "284.0": {
+    "maxsp": 17.2,
+    "cross_side_y": 0.3,
+    "cross_x": 3.8,
+    "obj_xy_at_ots": [
+     -20.0,
+     -0.2
+    ],
+    "dts": 5
+   }
+  }
+ },
+ "13FW1hdTuwkWNFSM2J337t202606": {
+  "verdict": "pass",
+  "objs": {
+   "1024.0": {
+    "maxsp": 30.5,
+    "cal_fail": true
+   }
+  }
+ },
+ "13MgYq8y02xoj5LCAQUJTq202606": {
+  "verdict": "fail",
+  "objs": {
+   "463.0": {
+    "maxsp": 33.6,
+    "cal_fail": true
+   },
+   "473.0": {
+    "maxsp": 40.1,
+    "cal_fail": true
+   }
+  }
+ },
+ "13UdYYqV5CT8cmgkOFbOUy202606": {
+  "verdict": "pass",
+  "objs": {
+   "67.0": {
+    "maxsp": 38.9,
+    "cal_fail": true
+   }
+  }
+ },
+ "13cZ8yopuLCfi3i5QyGlFL202606": {
+  "verdict": "pass",
+  "objs": {
+   "1048.0": {
+    "maxsp": 19.4,
+    "cal_fail": true
+   }
+  }
+ },
+ "13foSJ2gwsDQNswXszuGXi202606": {
+  "verdict": "fail",
+  "objs": {
+   "514.0": {
+    "maxsp": 21.8,
+    "cal_fail": true
+   }
+  }
+ },
+ "13qaPiuk5NGjZgH4NN97od202606": {
+  "verdict": "fail",
+  "objs": {
+   "191.0": {
+    "maxsp": 9.1,
+    "cross_side_y": -1.8,
+    "cross_x": 0.0,
+    "obj_xy_at_ots": [
+     -15.0,
+     7.2
+    ],
+    "dts": 5
+   }
+  }
+ },
+ "13szpzUGiD7tmH6B1G8vY202606": {
+  "verdict": "fail",
+  "objs": {
+   "1187.0": {
+    "maxsp": 44.0,
+    "cal_fail": true
+   }
+  }
+ },
+ "143QXO1tzo04z7WIlmyG6t202606": {
+  "verdict": "pass",
+  "objs": {
+   "97.0": {
+    "maxsp": 30.7,
+    "cross_side_y": -5.0,
+    "cross_x": 0.5,
+    "obj_xy_at_ots": [
+     -10.2,
+     -2.5
+    ],
+    "dts": 3
+   }
+  }
+ },
+ "14Kfppv9jLjp0VIXisbAAm202606": {
+  "verdict": "fail",
+  "objs": {
+   "86.0": {
+    "maxsp": 26.0,
+    "cal_fail": true
+   }
+  }
+ },
+ "14LIxsWxRQCOKvUSF7EiCe202606": {
+  "verdict": "pass",
+  "objs": {
+   "98.0": {
+    "maxsp": 41.2,
+    "cal_fail": true
+   }
+  }
+ }
+}
