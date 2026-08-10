@@ -1089,6 +1089,7 @@ class AgentEngine:
                     r2_messages[0]["content"],
                     r2_messages[1]["content"],
                     temperature=0.0,
+                    max_tokens=8192,
                 )
                 hybrid_result = _parse_hybrid_llm_output(raw_sql, required_blocks)
                 block_params_from_llm = hybrid_result.get("block_params", {})
@@ -1143,8 +1144,11 @@ class AgentEngine:
                 r2_messages[0]["content"],
                 r2_messages[1]["content"],
                 temperature=0.0,
+                max_tokens=8192,
             )
             sql = self._clean_sql(raw_sql)
+            if not sql.strip():
+                raise ValueError("Round 2 返回空 SQL，降级到关键词路径")
             logger.info("generate_sql_two_round Round 2 SQL: %s", sql[:200])
 
         validation_error = self._validate_sql(sql)
@@ -1181,6 +1185,7 @@ class AgentEngine:
                         correction_messages[0]["content"],
                         correction_messages[1]["content"],
                         temperature=0.0,
+                        max_tokens=8192,
                     )
                     sql = self._clean_sql(raw_sql)
 
