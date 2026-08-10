@@ -481,7 +481,14 @@ async def generate_sql_only(req: AgentQueryRequest):
 
     engine = _get_engine(db_path, query_mode=query_mode, batch_id=resolved_batch_id)
 
-    # 路由 + 分层注入（与 query 相同逻辑）
+    # 两轮路径（概念识别 + recipe 组装 + EXPLAIN 纠错），GENSQL_TWO_ROUND=false 可回退旧链路
+    if os.environ.get("GENSQL_TWO_ROUND", "true").lower() != "false":
+        try:
+            return await engine.generate_sql_two_round(req.question)
+        except Exception as e:
+            logger.warning("两轮生成失败，降级到关键词路径: %s", e)
+
+    # 路由 + 分层注入（旧关键词路径）
     route = engine.router.route(req.question)
     from agent.backend.app.core.schema_reader import format_schema_for_prompt
     from agent.backend.app.core.tag_router import build_prompt

@@ -345,6 +345,16 @@ def assemble_sql(recipe_name: str, variant_name: str,
     return assembler.assemble(recipe_name, variant_name, extra_params)
 
 
+# ── 全局单例：避免每次请求重载全部 block/recipe YAML ──
+_assembler_instance = None
+
+def get_block_assembler() -> BlockAssembler:
+    global _assembler_instance
+    if _assembler_instance is None:
+        _assembler_instance = BlockAssembler()
+    return _assembler_instance
+
+
 if __name__ == "__main__":
     # Test: assemble agent_cross_conflict
     assembler = BlockAssembler()

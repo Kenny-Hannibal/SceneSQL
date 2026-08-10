@@ -1029,6 +1029,169 @@ class AgentEngine:
         result.correction_rounds = correction_rounds
         return result
 
+    # generate-sql 路径的纠错预算（语义同 MAX_CORRECTIONS：容忍失败次数，实际纠错 = N-1 次）
+    GENERATE_MAX_CORRECTIONS = int(os.environ.get("GENSQL_MAX_CORRECTIONS", "2"))
+
+    async def generate_sql_two_round(self, question: str) -> dict:
+        """generate-sql 两轮路径：概念识别 → recipe 组装 → LLM 生成 → EXPLAIN 纠错。
+
+        只生成 SQL 不执行，返回 /api/agent/generate-sql 契约的 dict。
+        相比旧关键词路径：recipe 命中免 LLM、复合场景走概念路由、EXPLAIN 兜底纠错。
+        """
+        from agent.backend.app.core.concept_router import get_concept_router, build_hybrid_round2_messages
+        from agent.backend.app.core.block_assembler import get_block_assembler
+
+        concept_router = get_concept_router()
+
+        # ── Round 1: 概念识别 ──
+        r1_messages = concept_router.get_round1_messages(question)
+        r1_raw = await self.llm.chat(
+            r1_messages[0]["content"],
+            r1_messages[1]["content"],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        r1_result = concept_router.parse_round1_output(r1_raw, question)
+
+        concepts = r1_result.get("concepts", [])
+        composition = r1_result.get("composition", "single_tag")
+        recipe_name = r1_result.get("recipe", "")
+        recipe_variant = r1_result.get("recipe_variant", "")
+        logger.info("generate_sql_two_round Round 1: concepts=%s composition=%s recipe=%s variant=%s",
+                    concepts, composition, recipe_name, recipe_variant)
+
+        sql = None
+        route_method = "llm"
+        involved_tables = set()
+
+        # ── Recipe 分支：直接组装，免 LLM ──
+        if recipe_name and recipe_variant:
+            try:
+                sql = get_block_assembler().assemble(recipe_name, recipe_variant)
+                route_method = "recipe"
+                logger.info("Recipe assembled: recipe=%s variant=%s sql_len=%d",
+                            recipe_name, recipe_variant, len(sql))
+            except Exception as e:
+                logger.warning("Recipe assembly failed, fallback to Round 2: %s", e)
+                sql = None
+
+        # ── Hybrid 分支：block 拼装 + LLM 胶水 ──
+        required_blocks = r1_result.get("required_blocks", [])
+        if sql is None and required_blocks:
+            try:
+                assembler = get_block_assembler()
+                auto_blocks = [{"name": b, "cte_name": b} for b in required_blocks]
+                schema_text = format_schema_for_prompt(self.schema)
+                r2_messages = build_hybrid_round2_messages(
+                    question, required_blocks, auto_blocks, schema_text, assembler
+                )
+                raw_sql = await self.llm.chat(
+                    r2_messages[0]["content"],
+                    r2_messages[1]["content"],
+                    temperature=0.0,
+                )
+                hybrid_result = _parse_hybrid_llm_output(raw_sql, required_blocks)
+                block_params_from_llm = hybrid_result.get("block_params", {})
+                for ab in auto_blocks:
+                    bname = ab.get("name", "")
+                    if bname in block_params_from_llm:
+                        ab["params"] = block_params_from_llm[bname]
+                sanitized_ctes = []
+                for cte in hybrid_result.get("custom_ctes", []):
+                    clean = re.sub(r'\{[a-zA-Z_]\w*\}', '', cte)
+                    clean = re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', clean)
+                    sanitized_ctes.append(clean)
+                sanitized_final = re.sub(r'\{[a-zA-Z_]\w*\}', '',
+                                         hybrid_result.get("final_select", "SELECT 1"))
+                sanitized_final = re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sanitized_final)
+                sql = assembler.assemble_hybrid(
+                    recipe_name="hybrid_" + "_".join(required_blocks),
+                    variant_name="default",
+                    auto_blocks=auto_blocks + hybrid_result.get("extra_auto_blocks", []),
+                    custom_ctes_sql=sanitized_ctes,
+                    final_select_sql=sanitized_final,
+                )
+                route_method = "hybrid"
+                logger.info("Hybrid assembled: blocks=%s sql_len=%d", required_blocks, len(sql))
+            except Exception as e:
+                logger.warning("Hybrid assembly failed, fallback to Round 2: %s", e)
+                sql = None
+
+        # ── Fallback: Round 2 LLM 生成 ──
+        schema_text_for_correction = None
+        if sql is None:
+            involved_tables = {"range_tag"}
+            ego_fields = r1_result.get("ego_fields", [])
+            need_dynamic_obj = r1_result.get("need_dynamic_obj", False)
+            need_dynamic_lane = r1_result.get("need_dynamic_lane", False)
+            need_intersection_info = r1_result.get("need_intersection_info", False)
+
+            if ego_fields or composition in ("tag_join_ego", "cross_table", "ego_only"):
+                involved_tables.add("ego")
+            if need_dynamic_obj or composition in ("tag_join_dynamic_obj", "cross_table"):
+                involved_tables.add("dynamic_obj")
+            if need_dynamic_lane or composition == "tag_join_dynamic_lane":
+                involved_tables.add("dynamic_lane")
+            if need_intersection_info or composition == "tag_join_intersection_info":
+                involved_tables.add("intersection_info")
+
+            schema_text = format_schema_for_prompt(self.schema, only_tables=involved_tables)
+            schema_text_for_correction = schema_text
+
+            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
+            raw_sql = await self.llm.chat(
+                r2_messages[0]["content"],
+                r2_messages[1]["content"],
+                temperature=0.0,
+            )
+            sql = self._clean_sql(raw_sql)
+            logger.info("generate_sql_two_round Round 2 SQL: %s", sql[:200])
+
+        validation_error = self._validate_sql(sql)
+
+        # ── EXPLAIN dry-run + 纠错 ──
+        if not validation_error:
+            if route_method == "recipe":
+                # Recipe SQL 语法错 = 模板 bug，不走 LLM 纠错
+                ok, err_msg = self._dry_run(sql)
+                if not ok:
+                    logger.error("Recipe SQL dry-run FAILED (recipe=%s variant=%s): %s",
+                                 recipe_name, recipe_variant, err_msg)
+                    validation_error = f"Recipe模板语法错误(recipe={recipe_name}, variant={recipe_variant}): {err_msg}"
+            else:
+                correction_rounds = 0
+                for attempt in range(self.GENERATE_MAX_CORRECTIONS + 1):
+                    ok, err_msg = self._dry_run(sql)
+                    if ok:
+                        ts_err = self._check_start_end_ts(sql)
+                        if ts_err:
+                            ok, err_msg = False, ts_err
+                        else:
+                            break
+                    correction_rounds += 1
+                    logger.warning("generate-sql dry-run FAILED (attempt %d/%d): %s | SQL: %s",
+                                   attempt + 1, self.GENERATE_MAX_CORRECTIONS, err_msg, sql[:200])
+                    if correction_rounds >= self.GENERATE_MAX_CORRECTIONS:
+                        validation_error = err_msg
+                        break
+                    if schema_text_for_correction is None:
+                        schema_text_for_correction = format_schema_for_prompt(self.schema)
+                    correction_messages = self._build_correction_prompt(sql, err_msg, schema_text_for_correction)
+                    raw_sql = await self.llm.chat(
+                        correction_messages[0]["content"],
+                        correction_messages[1]["content"],
+                        temperature=0.0,
+                    )
+                    sql = self._clean_sql(raw_sql)
+
+        return {
+            "sql": sql,
+            "validation_error": validation_error,
+            "route_method": route_method,
+            "matched_tags": concepts,
+            "involved_tables": sorted(involved_tables),
+        }
+
 
 class _DummyResolver:
     """Fallback resolver when dm_sdk is unavailable."""
