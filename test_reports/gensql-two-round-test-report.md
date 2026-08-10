@@ -65,8 +65,8 @@ recipe SQL 为产线验证过的模板（Obj_CutIn_v2 / 超速 V4.1 等），语
 | # | 问题 | 影响 | 计划 |
 |---|------|------|------|
 | 1 | 两轮路径延迟整体回退（p50 6s→16s） | 用户等待变长；DataMining read-timeout 60s 对 L4 题告急 | 下一步 P0：Round1 前先做**纯本地概念预匹配**（ConceptRouter 5 阶段本地匹配），命中即跳过 Round1 LLM；简单单标签题 recipe 命中可降至亚秒级 |
-| 2 | L4-01 hybrid SQL 截断（max_tokens 4096） | 复杂组合题生成失败 | generate-sql 路径 max_tokens 提到 8192 或拆分生成 |
-| 3 | L4-02 Round2 空返回 | 偶发生成失败 | 空返回时降级旧关键词路径（当前仅整个两轮异常才降级） |
+| 2 | L4-01 hybrid SQL 截断（max_tokens 4096） | 复杂组合题生成失败 | ✅ 复测通过：两轮异常自动降级 keyword 路径产出有效 SQL；max_tokens 8192 降低截断概率（2d7952d） |
+| 3 | L4-02 Round2 空返回 | 偶发生成失败 | ✅ 复测通过：两轮路径正常产出（route=llm, verr=None）；空返回抛异常降级兜底（2d7952d） |
 | 4 | CrossVRUV1 标签名存疑 | 可能查不到数据 | 对照标签体系确认后补概念组别名 |
 | 5 | recipe SQL 执行成本高于标签查询 | DataMining 执行侧耗时增加 | 与 DataMining 灰度观察，必要时按场景分级 |
 
