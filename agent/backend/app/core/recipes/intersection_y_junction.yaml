@@ -8,7 +8,7 @@ variants:
     output_tag_name: intersection_y_junction
     raw_sql: "WITH ego_first_ts AS (\nSELECT MIN(ts) AS package_start_ts,\nMAX(ts)\
       \ AS package_end_ts FROM ego\n),\nraw_tags AS (\nSELECT start_ts, end_ts, end_ts\
-      \ - start_ts AS duration\nFROM range_tag\nWHERE tag_name = 'topology_intersection_y_junction_v2'\n\
+      \ - start_ts AS duration\nFROM range_tag\nWHERE tag_name = 'topology_intersection_y_junction_v3'\n\
       ),\n-- 碎片合并：间隔≤3秒的归为同一事件\ntags_with_gap AS (\nSELECT\nstart_ts, end_ts, duration,\n\
       CASE\nWHEN LAG(end_ts) OVER (ORDER BY start_ts) IS NULL THEN 1\nWHEN start_ts\
       \ - LAG(end_ts) OVER (ORDER BY start_ts) > 3 THEN 1\nELSE 0\nEND AS is_new_group\n\
