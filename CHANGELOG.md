@@ -6,6 +6,7 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
+| 2026-08-13 | Y型路口策略切换 v2 标签（地图分叉点 + 轨迹匹配） | `changelog/2026-08-13_Y型路口策略切换v2标签-地图分叉点轨迹匹配.md` |
 | 2026-08-11 | generate-sql 两轮路由试点（feature/gen-sql-two-round） | `changelog/2026-08-11_generate-sql两轮路由试点.md` |
 | 2026-08-09 | 验证集可视化 + Mage-VL 评测 API | `changelog/2026-08-09_验证集可视化-Mage-VL评测API.md` |
 | 2026-08-04 | 评测标注 + 评测集/策略同步 DataMining 产线 | `changelog/2026-08-04_评测标注-评测集与策略同步DataMining产线.md` |
