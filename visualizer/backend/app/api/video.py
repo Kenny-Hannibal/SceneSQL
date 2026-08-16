@@ -465,7 +465,7 @@ async def stream_multi(
 
 # ── VL 验证：批量提取 + 抽帧 API ──
 
-DEFAULT_CAMERA_TOPIC = "/gac/cam/ft30_encoded"
+DEFAULT_CAMERA_TOPIC = "/gac/cam/orig_fw120_encoded"
 
 
 def _process_batch_clips(task_id: str, req: ExtractBatchRequest) -> None:

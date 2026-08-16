@@ -88,7 +88,7 @@ class VideoClipSpec(BaseModel):
     bag_id: str                    # 回灌 bag_id（db 文件名），用于 resolve-bag-path
     start_ts: Optional[int] = None  # 纳秒
     end_ts: Optional[int] = None    # 纳秒
-    topic: Optional[str] = None     # camera topic，不传则用默认 /gac/cam/ft30_encoded
+    topic: Optional[str] = None     # camera topic，不传则用默认 /gac/cam/orig_fw120_encoded (前视宽120°)
 
 class ExtractBatchRequest(BaseModel):
     """批量提取 + 抽帧请求"""

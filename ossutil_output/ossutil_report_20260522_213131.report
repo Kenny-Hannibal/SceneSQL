@@ -1,1 +1,0 @@
-# ossutil sync oss://gacrnd-oss/gac_liulian/common_data/sqlite_dbs/ ./test_data/sqlite_dbs/

@@ -199,11 +199,13 @@ def _find_default_camera_topic(bag_path: str) -> Optional[str]:
     metadata_path = os.path.join(bag_path, "metadata.yaml")
     if not os.path.exists(metadata_path):
         return None
-    # 优先列表
+    # 优先列表：前视宽120°(fw120)优先，前视30°(ft30)次之
     PREFERRED_TOPICS = [
+        "/gac/cam/orig_fw120_encoded",
+        "/gac/cam/fw120_encoded",
+        "/gac/cam/orig_ft30_encoded",
         "/gac/cam/ft30_encoded",
         "/camera/front_wide/compressed",
-        "/gac/cam/fw_encoded",
     ]
     try:
         with open(metadata_path, "r", encoding="utf-8") as f:

@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/mage-vl", tags=["mage-vl"])
 # ── 配置 ──
 MAGE_VL_BASE_URL = os.environ.get("MAGE_VL_BASE_URL", "http://localhost:31000")
 MAGE_VL_TIMEOUT = float(os.environ.get("MAGE_VL_TIMEOUT", "120"))
-DEFAULT_CAMERA_TOPIC = "/gac/cam/ft30_encoded"
+DEFAULT_CAMERA_TOPIC = "/gac/cam/orig_fw120_encoded"
 DEFAULT_PROMPT = "请描述这段自动驾驶视频中的场景，包括自车行为、周围对象、是否有冲突或加塞等情况。"
 
 
@@ -42,7 +42,7 @@ class EvalRequest(BaseModel):
     bag_id: str
     start_ts: Optional[int] = None  # 纳秒
     end_ts: Optional[int] = None    # 纳秒
-    topic: Optional[str] = None     # 默认 /gac/cam/ft30_encoded
+    topic: Optional[str] = None     # 默认 /gac/cam/orig_fw120_encoded (前视宽120°)
     prompt: Optional[str] = None    # 默认场景描述 prompt
     max_tokens: Optional[int] = 512
 

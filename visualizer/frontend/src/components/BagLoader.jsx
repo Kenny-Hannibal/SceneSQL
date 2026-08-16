@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = process.env.REACT_APP_API_BASE || '';
 
 export default function BagLoader({ onTopicsLoaded }) {
   const [path, setPath] = useState('/root/data/bags/20260124_085515');
