@@ -8,7 +8,7 @@ import ResultTable from './agent/ResultTable';
 import HistoryPanel, { saveHistoryEntry } from './agent/HistoryPanel';
 import TopicModal from './agent/TopicModal';
 import PlayerModal from './agent/PlayerModal';
-import StrategyModals from './agent/StrategyModals';
+import StrategyModals, { StrategyLoaderModal } from './agent/StrategyModals';
 import StrategyPanel from './agent/StrategyPanel';
 import { SqlExecModal, ExtractProgressModal } from './agent/ProgressModals';
 import { useStrategies } from './agent/useStrategies';
@@ -94,6 +94,9 @@ export default function AgentPanel() {
   const [forceH264, setForceH264] = useState(false);
   const [playerGridMode, setPlayerGridMode] = useState(false);       // 宫格模式（多topic同时播放）
   const [playerGridTopics, setPlayerGridTopics] = useState([]);     // 宫格模式选中的topics
+
+  // 顶部主 Tab：SQL 查询 / 策略列表（平面化并行切换，替代页内下滑）
+  const [mainTab, setMainTab] = useState('query'); // 'query' | 'strategies'
 
   // ── 策略与评测标注（状态+handler 全部在 hook 里） ──
   const strategies = useStrategies({
@@ -989,6 +992,52 @@ export default function AgentPanel() {
     <div style={card}>
       <h2 style={cardTitle}>🤖 NL2SQL Agent</h2>
 
+      {/* ── 顶部主 Tab：SQL 查询 / 策略列表 并行切换 ── */}
+      <div style={{ display: 'flex', gap: 4, marginTop: 8, marginBottom: 4, borderBottom: `1px solid ${colors.border}` }}>
+        {[
+          { key: 'query', label: '🔍 SQL 查询' },
+          { key: 'strategies', label: `📋 策略列表 (${strategies.strategyList.length})` },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => {
+              setMainTab(t.key);
+              if (t.key === 'strategies') strategies.loadStrategyList();
+            }}
+            style={{
+              padding: '8px 18px', fontSize: 14, cursor: 'pointer',
+              border: 'none', background: 'none',
+              borderBottom: mainTab === t.key ? `2px solid ${colors.primary}` : '2px solid transparent',
+              color: mainTab === t.key ? colors.primary : colors.textSecondary,
+              fontWeight: mainTab === t.key ? 600 : 400,
+              marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {mainTab === 'strategies' ? (
+        /* ── 策略列表页：评测集管理（平面化，无需下滑） ── */
+        <div style={{ marginTop: 12 }}>
+          <StrategyPanel
+            strategyList={strategies.strategyList}
+            syncBusy={strategies.syncBusy}
+            onDeleteStrategy={strategies.handleDeleteStrategy}
+            validationSet={strategies.validationSet}
+            onToggleValidationSet={strategies.toggleValidationSet}
+            onOpenEvalSync={strategies.openEvalSyncModal}
+            onSyncStrategyDm={strategies.handleSyncStrategyDm}
+            onRelabelCase={strategies.handleRelabelValidationCase}
+            onVisualizeCase={(c) => {
+              startVisualization({ bag_id: c.bag_id, start_ts: c.start_ts, end_ts: c.end_ts, bag_path: null });
+            }}
+          />
+        </div>
+      ) : (
+      /* ── SQL 查询页 ── */
+      <>
       <QueryBar
         queryMode={queryMode} setQueryMode={setQueryMode}
         sqlEditMode={sqlEditMode} setSqlEditMode={setSqlEditMode}
@@ -1030,10 +1079,11 @@ export default function AgentPanel() {
           <span style={{ fontSize: 12, color: colors.textTertiary }}>SQL 编辑器</span>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
-              onClick={() => { strategies.setStrategyListOpen(!strategies.strategyListOpen); strategies.loadStrategyList(); }}
+              onClick={() => { strategies.setStrategyListOpen(true); strategies.loadStrategyList(); }}
               style={btn.outline(colors.primary, false)}
+              title="把已保存策略的 SQL 加载到编辑器（管理评测集请用顶部「策略列表」页）"
             >
-              我的策略 ({strategies.strategyList.length})
+              策略加载 ({strategies.strategyList.length})
             </button>
             <button
               onClick={() => {
@@ -1061,26 +1111,6 @@ export default function AgentPanel() {
         <HistoryPanel onRestore={handleRestoreHistory} />
       </div>
 
-      {/* 我的策略：页内平面面板（仿 data-platform-fe，不再是弹窗） */}
-      {strategies.strategyListOpen && (
-        <div style={{ marginTop: 12 }}>
-          <StrategyPanel
-            strategyList={strategies.strategyList}
-            syncBusy={strategies.syncBusy}
-            onLoadStrategy={strategies.handleLoadStrategy}
-            onDeleteStrategy={strategies.handleDeleteStrategy}
-            validationSet={strategies.validationSet}
-            onToggleValidationSet={strategies.toggleValidationSet}
-            onOpenEvalSync={strategies.openEvalSyncModal}
-            onSyncStrategyDm={strategies.handleSyncStrategyDm}
-            onRelabelCase={strategies.handleRelabelValidationCase}
-            onVisualizeCase={(c) => {
-              startVisualization({ bag_id: c.bag_id, start_ts: c.start_ts, end_ts: c.end_ts, bag_path: null });
-            }}
-          />
-        </div>
-      )}
-
       <ResultTable
         result={result}
         loading={loading}
@@ -1101,6 +1131,8 @@ export default function AgentPanel() {
         onArrowDownload={handleArrowDownload}
         mayBeTruncated={!resultLimitUnlimited && totalRows >= getResultLimit()}
       />
+      </>
+      )}
 
       {/* ── 弹窗群 ── */}
       {extractModalOpen && (
@@ -1152,6 +1184,15 @@ export default function AgentPanel() {
           onRetryH264={handleRetryH264}
           streamAbortRef={streamAbortControllerRef}
           mseCleanupRef={mseCleanupRef}
+        />
+      )}
+
+      {/* 策略加载弹窗（唯一职责：把策略 SQL 灌入编辑器） */}
+      {strategies.strategyListOpen && (
+        <StrategyLoaderModal
+          strategyList={strategies.strategyList}
+          onLoad={strategies.handleLoadStrategy}
+          onClose={() => strategies.setStrategyListOpen(false)}
         />
       )}
 

@@ -2,8 +2,53 @@ import React from 'react';
 import { colors, radius, modal, btn, input, zIndex } from '../../theme';
 
 // ── 策略轻量表单弹窗 ──
-// 平面化设计约定（仿 data-platform-fe）：modal 只承载轻量表单——
-// 保存策略、评测集同步。列表/详情/可视化一律页内平面展示（见 StrategyPanel.jsx）。
+// 平面化设计约定（仿 data-platform-fe）：modal 只承载轻量交互——
+// 保存策略、评测集同步、策略加载。列表/详情/可视化一律页内平面展示（见 StrategyPanel.jsx）。
+
+// 策略加载弹窗：唯一职责 = 把选中策略的 SQL 灌入 SQL 编辑器。
+// 评测集管理不在这里，走顶部 Tab「策略列表」页。
+export function StrategyLoaderModal({ strategyList, onLoad, onClose }) {
+  return (
+    <div style={modal.overlay(zIndex.modal)} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={modal.dialog(440, 560)}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ ...modal.title, margin: 0 }}>策略加载</h3>
+          <button onClick={onClose} style={modal.closeBtn}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: colors.textTertiary, marginBottom: 12 }}>
+          选择策略，将其 SQL 加载到 SQL 编辑器（管理评测集请用顶部「策略列表」页）
+        </div>
+        {strategyList.length === 0 ? (
+          <div style={{ color: colors.textTertiary, textAlign: 'center', padding: 20 }}>暂无自定义策略</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {strategyList.map((s) => (
+              <div
+                key={s.name}
+                onClick={() => onLoad(s)}
+                style={{
+                  padding: '10px 12px', border: `1px solid ${colors.border}`, borderRadius: radius.md,
+                  cursor: 'pointer', transition: 'all 0.1s',
+                }}
+                onMouseEnter={(ev) => { ev.currentTarget.style.borderColor = colors.primary; ev.currentTarget.style.background = colors.bgHover; }}
+                onMouseLeave={(ev) => { ev.currentTarget.style.borderColor = colors.border; ev.currentTarget.style.background = '#fff'; }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ fontSize: 13 }}>{s.name}</strong>
+                  <span style={{ fontSize: 11, color: colors.textTertiary }}>{s.keywords.join(', ')}</span>
+                </div>
+                <div style={{ fontSize: 11, color: colors.textTertiary, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.description || '无备注'}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function StrategyModals({
   saveStrategyModalOpen, setSaveStrategyModalOpen,
   strategyForm, setStrategyForm,

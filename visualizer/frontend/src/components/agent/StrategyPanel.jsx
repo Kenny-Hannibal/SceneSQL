@@ -1,14 +1,14 @@
 import React from 'react';
 import { colors, radius, btn, badge } from '../../theme';
 
-// ── 我的策略 · 页内平面面板 ──
-// 平面化设计（仿 data-platform-fe）：策略列表与验证集不再是 modal，
-// 而是 SQL 编辑器下方的页内折叠面板；验证集在策略行下方内联展开。
+// ── 策略列表 · 页内平面面板 ──
+// 平面化设计（仿 data-platform-fe）：本页职责 = 查看/管理策略的评测集。
+// 「把策略 SQL 加载到编辑器」不在这里做，走 SQL 查询页上方的「策略加载」弹窗。
 // 这样可视化链路（TopicModal → PlayerModal）永远不会被策略弹窗盖住。
 export default function StrategyPanel({
   strategyList,
   syncBusy,
-  onLoadStrategy, onDeleteStrategy,
+  onDeleteStrategy,
   validationSet,            // {name, cases, loading} | null
   onToggleValidationSet,    // (strategy) => void —— 展开/收起该策略的验证集
   onOpenEvalSync, onSyncStrategyDm,
@@ -38,7 +38,6 @@ export default function StrategyPanel({
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button onClick={() => onLoadStrategy(s)} style={btn.outline(colors.primary, false)}>加载</button>
                   <button onClick={() => onToggleValidationSet(s)} style={btn.outline(colors.cyan, false, expanded)}>
                     验证集 {expanded ? '▲' : '▼'}
                   </button>
