@@ -16,7 +16,7 @@ import BevViewer from './BevViewer';
 
 const COLORS = ['#ff4d4f','#1890ff','#52c41a','#faad14','#722ed1','#13c2c2','#eb2f96','#fa8c16'];
 
-export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, endTs, mode, apiBase, streamToken, authFetch }) {
+export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, endTs, mode, apiBase, streamToken }) {
   const [loadingStatus, setLoadingStatus] = useState('idle');
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -579,7 +579,6 @@ export default function MultiVideoGrid({ topics, bagPath, emBinPath, startTs, en
                   ref={el => { bevRefs.current[topic] = el; }}
                   compact
                   bagPath={emBinPath || bagPath}
-                  authFetch={authFetch}
                   startTsNs={startTs}
                   endTsNs={endTs}
                 />

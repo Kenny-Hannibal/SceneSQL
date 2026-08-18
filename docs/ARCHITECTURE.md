@@ -614,8 +614,14 @@ Agent 生成 SQL
 - ✅ 后端：Parquet 模式 bag_id/bag_path 注入（`_query_parquet` 中 resolver 批量解析）
 - ✅ 后端：新增 API — `/api/agent/generate-sql`（仅生成）、`/api/agent/execute-sql`（直接执行）、`/api/agent/resolve-bag-path`（bag 路径解析）
 - ✅ 前端：SQL 编辑器 + LLM 行为切换（⚡直接执行 / ✏️仅生成SQL）
-- ✅ 前端/后端：时间戳超出 bag 范围时自动 clamp（前端 alert 提示 + 后端兜底）
+- ✅ 前端/后端：时间戳超出 bag 范围时自动 clamp（前端 toast 提示 + 后端兜底）
 - ✅ 前端：bag_path 为空时降级处理（允许手动输入路径）
+- ✅ **前端架构重构（2026-08-18）**：`AgentPanel.jsx` 2715→~700 行编排器，子组件拆至 `components/agent/`
+  （QueryBar / ResultTable / PaginationControls / HistoryPanel / TopicModal / PlayerModal /
+  StrategyModals / ProgressModals + `useStrategies.js` / `useMseStream.js`）；
+  `src/api.js`（authFetch 单例）、`src/theme.js`（设计令牌）、`src/toast.jsx`（alert 全灭）；
+  fetch 场景 token 不再拼 URL（仅 `<video src>` 保留 `addTokenParam`）。
+  详见 `changelog/2026-08-18_前端重构与交互优化-组件拆分-Toast-历史查询面板.md`
 - [ ] 目标：用户 Week 1 就能输入自然语言、看到视频播放
 
 ### Phase 2：质量加固（进行中）
@@ -632,7 +638,7 @@ Agent 生成 SQL
 - [ ] 后端：审计日志 + 成本熔断
 
 ### Phase 4：可视化深度集成（1-2 周）
-- [ ] 前端：历史查询面板
+- [x] 前端：历史查询面板（2026-08-18 ✅，localStorage 实现，见 `components/agent/HistoryPanel.jsx`）
 - [ ] 后端：视频预提取（常见片段后台转码缓存）
 - [ ] 后端：HEVC 流式传输（Safari/Chrome 按需启用）
 - [ ] 前端：帧级跳转、多路相机同步播放（恢复 legacy Gradio 能力）
