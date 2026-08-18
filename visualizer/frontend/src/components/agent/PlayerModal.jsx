@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { colors, radius, badge } from '../../theme';
+import { colors, radius, badge, zIndex } from '../../theme';
 import { API_BASE } from '../../api';
 import BevViewer from '../BevViewer';
 import MultiVideoGrid from '../MultiVideoGrid';
@@ -73,7 +73,7 @@ export default function PlayerModal({
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001,
+      background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: zIndex.player,
     }}>
       <div style={{ background: '#000', borderRadius: radius.lg, padding: 16, maxWidth: '92vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         {/* ── 标题栏 ── */}

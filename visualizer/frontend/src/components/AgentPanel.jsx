@@ -9,6 +9,7 @@ import HistoryPanel, { saveHistoryEntry } from './agent/HistoryPanel';
 import TopicModal from './agent/TopicModal';
 import PlayerModal from './agent/PlayerModal';
 import StrategyModals from './agent/StrategyModals';
+import StrategyPanel from './agent/StrategyPanel';
 import { SqlExecModal, ExtractProgressModal } from './agent/ProgressModals';
 import { useStrategies } from './agent/useStrategies';
 
@@ -20,11 +21,15 @@ import { useStrategies } from './agent/useStrategies';
 //   - agent/QueryBar.jsx        查询控制区（模式/批次/输入/提交）
 //   - agent/ResultTable.jsx     结果表格 + 双滚动条 + 分页
 //   - agent/HistoryPanel.jsx    历史查询（localStorage）
+//   - agent/StrategyPanel.jsx   我的策略 + 验证集（页内平面面板，非弹窗）
 //   - agent/TopicModal.jsx      播包可视化的 topic 选择弹窗
-//   - agent/PlayerModal.jsx     视频/BEV/宫格播放弹窗（内含 useMseStream）
-//   - agent/StrategyModals.jsx  策略保存/列表/评测集/验证集弹窗
+//   - agent/PlayerModal.jsx     视频/BEV/宫格播放弹窗（内含 useMseStream，z-index 最高）
+//   - agent/StrategyModals.jsx  仅存轻量表单弹窗：保存策略 / 评测集同步
 //   - agent/ProgressModals.jsx  SQL 执行进度 / 视频提取进度弹窗
 //   - agent/useStrategies.js    策略与评测标注的全部状态与 API 逻辑
+//
+// 平面化约定（仿 data-platform-fe）：modal 只承载轻量表单；
+// 列表/详情/可视化一律页内平面展示或单弹窗链路，禁止弹窗堆叠。
 // ============================================
 export default function AgentPanel() {
   const toast = useToast();
@@ -1056,6 +1061,26 @@ export default function AgentPanel() {
         <HistoryPanel onRestore={handleRestoreHistory} />
       </div>
 
+      {/* 我的策略：页内平面面板（仿 data-platform-fe，不再是弹窗） */}
+      {strategies.strategyListOpen && (
+        <div style={{ marginTop: 12 }}>
+          <StrategyPanel
+            strategyList={strategies.strategyList}
+            syncBusy={strategies.syncBusy}
+            onLoadStrategy={strategies.handleLoadStrategy}
+            onDeleteStrategy={strategies.handleDeleteStrategy}
+            validationSet={strategies.validationSet}
+            onToggleValidationSet={strategies.toggleValidationSet}
+            onOpenEvalSync={strategies.openEvalSyncModal}
+            onSyncStrategyDm={strategies.handleSyncStrategyDm}
+            onRelabelCase={strategies.handleRelabelValidationCase}
+            onVisualizeCase={(c) => {
+              startVisualization({ bag_id: c.bag_id, start_ts: c.start_ts, end_ts: c.end_ts, bag_path: null });
+            }}
+          />
+        </div>
+      )}
+
       <ResultTable
         result={result}
         loading={loading}
@@ -1138,24 +1163,9 @@ export default function AgentPanel() {
         pendingLabel={strategies.pendingLabel}
         setPendingLabel={strategies.setPendingLabel}
         onSaveStrategy={strategies.handleSaveStrategy}
-        strategyListOpen={strategies.strategyListOpen}
-        setStrategyListOpen={strategies.setStrategyListOpen}
-        strategyList={strategies.strategyList}
-        onLoadStrategy={strategies.handleLoadStrategy}
-        onDeleteStrategy={strategies.handleDeleteStrategy}
-        onOpenValidationSet={strategies.openValidationSet}
-        onOpenEvalSync={strategies.openEvalSyncModal}
-        onSyncStrategyDm={strategies.handleSyncStrategyDm}
         evalSyncModal={strategies.evalSyncModal}
         setEvalSyncModal={strategies.setEvalSyncModal}
         onSyncEvalset={strategies.handleSyncEvalset}
-        validationSetModal={strategies.validationSetModal}
-        setValidationSetModal={strategies.setValidationSetModal}
-        onRelabelCase={strategies.handleRelabelValidationCase}
-        onVisualizeCase={(c) => {
-          strategies.setValidationSetModal(null);
-          startVisualization({ bag_id: c.bag_id, start_ts: c.start_ts, end_ts: c.end_ts, bag_path: null });
-        }}
         syncBusy={strategies.syncBusy}
       />
     </div>

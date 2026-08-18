@@ -20,7 +20,8 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
   const [matchedLabels, setMatchedLabels] = useState({});   // key: bag_id|start_ts|end_ts → verdict
   const [evalSyncModal, setEvalSyncModal] = useState(null); // {strategy, benchmarkName, cases}
   const [syncBusy, setSyncBusy] = useState(false);
-  const [validationSetModal, setValidationSetModal] = useState(null); // {strategy, cases, loading}
+  // 验证集内联展开（平面化，不再是 modal）：{name, cases, loading} | null
+  const [validationSet, setValidationSet] = useState(null);
 
   const labelKey = (row) => `${row?.bag_id}|${row?.start_ts ?? ''}|${row?.end_ts ?? ''}`;
 
@@ -215,19 +216,23 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
     }
   };
 
-  // 验证集可视化：打开验证集列表弹窗
-  const openValidationSet = async (s) => {
-    setValidationSetModal({ strategy: s, cases: [], loading: true });
+  // 验证集：内联展开/收起（再点同一策略则收起）
+  const toggleValidationSet = async (s) => {
+    if (validationSet?.name === s.name) {
+      setValidationSet(null);
+      return;
+    }
+    setValidationSet({ name: s.name, cases: [], loading: true });
     try {
       const res = await authFetch(`${API_BASE}/api/eval-labels/${encodeURIComponent(s.name)}`);
       if (res.ok) {
         const data = await res.json();
-        setValidationSetModal({ strategy: s, cases: data.cases || [], loading: false });
+        setValidationSet({ name: s.name, cases: data.cases || [], loading: false });
       } else {
-        setValidationSetModal({ strategy: s, cases: [], loading: false });
+        setValidationSet({ name: s.name, cases: [], loading: false });
       }
     } catch (e) {
-      setValidationSetModal({ strategy: s, cases: [], loading: false });
+      setValidationSet({ name: s.name, cases: [], loading: false });
     }
   };
 
@@ -238,7 +243,7 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          strategy_name: validationSetModal.strategy.name,
+          strategy_name: validationSet.name,
           bag_id: c.bag_id,
           start_ts: c.start_ts,
           end_ts: c.end_ts,
@@ -246,7 +251,7 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
         }),
       });
       if (res.ok) {
-        setValidationSetModal((prev) => prev ? {
+        setValidationSet((prev) => prev ? {
           ...prev,
           cases: prev.cases.map((x) =>
             x.bag_id === c.bag_id && x.start_ts === c.start_ts && x.end_ts === c.end_ts
@@ -293,7 +298,7 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
     rowLabel, matchedLabels,
     evalSyncModal, setEvalSyncModal,
     syncBusy,
-    validationSetModal, setValidationSetModal,
+    validationSet, setValidationSet,
     matchedStrategy, labelKey,
     // 处理器
     loadStrategyList,
@@ -304,7 +309,7 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
     handleSyncStrategyDm,
     openEvalSyncModal,
     handleSyncEvalset,
-    openValidationSet,
+    toggleValidationSet,
     handleRelabelValidationCase,
   };
 }

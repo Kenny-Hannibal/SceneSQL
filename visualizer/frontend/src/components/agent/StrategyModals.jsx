@@ -1,25 +1,22 @@
 import React from 'react';
-import { colors, radius, modal, btn, input, badge } from '../../theme';
+import { colors, radius, modal, btn, input, zIndex } from '../../theme';
 
-// ── 策略相关的四个弹窗 ──
-// 保存策略 / 策略列表 / 评测集同步 / 验证集列表。全部受控，状态来自 useStrategies。
+// ── 策略轻量表单弹窗 ──
+// 平面化设计约定（仿 data-platform-fe）：modal 只承载轻量表单——
+// 保存策略、评测集同步。列表/详情/可视化一律页内平面展示（见 StrategyPanel.jsx）。
 export default function StrategyModals({
   saveStrategyModalOpen, setSaveStrategyModalOpen,
   strategyForm, setStrategyForm,
   pendingLabel, setPendingLabel,
   onSaveStrategy,
-  strategyListOpen, setStrategyListOpen,
-  strategyList, onLoadStrategy, onDeleteStrategy,
-  onOpenValidationSet, onOpenEvalSync, onSyncStrategyDm,
   evalSyncModal, setEvalSyncModal, onSyncEvalset,
-  validationSetModal, setValidationSetModal, onRelabelCase, onVisualizeCase,
   syncBusy,
 }) {
   return (
     <>
       {/* ── 保存策略弹窗 ── */}
       {saveStrategyModalOpen && (
-        <div style={modal.overlay(1000)}>
+        <div style={modal.overlay(zIndex.modal)}>
           <div style={modal.dialog(400, 480)}>
             <h3 style={modal.title}>保存为策略</h3>
             {pendingLabel && (
@@ -51,48 +48,9 @@ export default function StrategyModals({
         </div>
       )}
 
-      {/* ── 策略列表面板 ── */}
-      {strategyListOpen && (
-        <div style={modal.overlay(1000)}>
-          <div style={modal.dialog(500, 640)}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ ...modal.title, margin: 0 }}>我的策略</h3>
-              <button onClick={() => setStrategyListOpen(false)} style={modal.closeBtn}>✕</button>
-            </div>
-            {strategyList.length === 0 ? (
-              <div style={{ color: colors.textTertiary, textAlign: 'center', padding: 20 }}>暂无自定义策略</div>
-            ) : (
-              <div>
-                {strategyList.map((s) => (
-                  <div key={s.name} style={{ padding: 12, borderBottom: `1px solid ${colors.borderLight}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                      <div>
-                        <strong style={{ fontSize: 14 }}>{s.name}</strong>
-                        <span style={{ marginLeft: 8, fontSize: 11, color: colors.textTertiary }}>
-                          关键词: {s.keywords.join(', ')}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button onClick={() => onLoadStrategy(s)} style={btn.outline(colors.primary, syncBusy)}>加载</button>
-                        <button onClick={() => onOpenValidationSet(s)} style={btn.outline(colors.cyan, syncBusy)}>验证集</button>
-                        <button onClick={() => onOpenEvalSync(s)} disabled={syncBusy} style={btn.outline(colors.purple, syncBusy)}>同步评测集</button>
-                        <button onClick={() => onSyncStrategyDm(s.name)} disabled={syncBusy} style={btn.outline(colors.orange, syncBusy)}>同步策略</button>
-                        <button onClick={() => onDeleteStrategy(s.name)} style={btn.outline(colors.error, syncBusy)}>删除</button>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }}>{s.description || '无备注'}</div>
-                    <pre style={{ fontSize: 10, color: colors.textTertiary, marginTop: 4, maxHeight: 60, overflow: 'auto', background: colors.bgStripe, padding: 6, borderRadius: radius.sm }}>{s.sql.substring(0, 200)}{s.sql.length > 200 ? '...' : ''}</pre>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── 评测集同步弹窗 ── */}
       {evalSyncModal && (
-        <div style={modal.overlay(1002)}>
+        <div style={modal.overlay(zIndex.modal)}>
           <div style={modal.dialog(440, 520)}>
             <h3 style={modal.title}>同步评测集 — {evalSyncModal.strategy.name}</h3>
             <div style={{ marginBottom: 12 }}>
@@ -119,67 +77,6 @@ export default function StrategyModals({
                 {syncBusy ? '同步中...' : `同步 ${evalSyncModal.cases.length} 条到产线`}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 验证集列表弹窗 ── */}
-      {validationSetModal && (
-        <div style={modal.overlay(1003)}>
-          <div style={modal.dialog(600, '90vw')}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ ...modal.title, margin: 0 }}>验证集 — {validationSetModal.strategy.name}</h3>
-              <button onClick={() => setValidationSetModal(null)} style={modal.closeBtn}>✕</button>
-            </div>
-            {validationSetModal.loading ? (
-              <div style={{ padding: '20px 0' }}>
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="skeleton" style={{ height: 32, marginBottom: 8 }} />
-                ))}
-              </div>
-            ) : validationSetModal.cases.length === 0 ? (
-              <div style={{ color: colors.textTertiary, textAlign: 'center', padding: 20 }}>该策略暂无验证集标注</div>
-            ) : (
-              <div>
-                <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 12 }}>
-                  共 {validationSetModal.cases.length} 条标注
-                  （✅ 通过 {validationSetModal.cases.filter((c) => c.verdict === 'pass').length}，
-                  ❌ 不通过 {validationSetModal.cases.filter((c) => c.verdict === 'fail').length}）
-                </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `2px solid ${colors.borderLight}`, textAlign: 'left' }}>
-                      <th style={{ padding: '8px 4px' }}>Bag ID</th>
-                      <th style={{ padding: '8px 4px' }}>时间范围</th>
-                      <th style={{ padding: '8px 4px' }}>标注</th>
-                      <th style={{ padding: '8px 4px' }}>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {validationSetModal.cases.map((c, idx) => (
-                      <tr key={idx} style={{ borderBottom: `1px solid ${colors.borderLight}` }}>
-                        <td style={{ padding: '8px 4px', fontFamily: 'monospace', fontSize: 12 }}>{c.bag_id}</td>
-                        <td style={{ padding: '8px 4px', fontSize: 12 }}>
-                          {c.start_ts != null ? `${c.start_ts}s` : '?'} ~ {c.end_ts != null ? `${c.end_ts}s` : '?'}
-                        </td>
-                        <td style={{ padding: '8px 4px' }}>
-                          <span style={badge(c.verdict === 'pass' ? colors.success : colors.error)}>
-                            {c.verdict === 'pass' ? '✅ 通过' : '❌ 不通过'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '8px 4px' }}>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button onClick={() => onVisualizeCase(c)} style={btn.outline(colors.primary, false)}>📹 可视化</button>
-                            <button onClick={() => onRelabelCase(c, 'pass')} style={btn.outline(colors.success, false, c.verdict === 'pass')}>✅</button>
-                            <button onClick={() => onRelabelCase(c, 'fail')} style={btn.outline(colors.error, false, c.verdict === 'fail')}>❌</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </div>
       )}

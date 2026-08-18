@@ -1,5 +1,5 @@
 import React from 'react';
-import { colors, modal, btn, banner } from '../../theme';
+import { colors, modal, btn, banner, zIndex } from '../../theme';
 
 // SQL 执行进度弹窗：耗时计时 + 慢查询/卡死分级提示 + 取消执行。
 export function SqlExecModal({ elapsed, status, onCancel }) {
@@ -10,7 +10,7 @@ export function SqlExecModal({ elapsed, status, onCancel }) {
     : colors.primary;
 
   return (
-    <div style={modal.overlay(1000)}>
+    <div style={modal.overlay(zIndex.modal)}>
       <div style={{ ...modal.dialog(360, 480), textAlign: 'center' }}>
         <h3 style={modal.title}>⏳ 正在执行 SQL</h3>
         <div style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 12 }}>
@@ -50,7 +50,7 @@ export function ExtractProgressModal({ videoRows, onClose }) {
   const isFailed = v.status === 'failed';
 
   return (
-    <div style={modal.overlay(1000)}>
+    <div style={modal.overlay(zIndex.modal)}>
       <div style={{ ...modal.dialog(360, 450), textAlign: 'center' }}>
         <h3 style={modal.title}>{isFailed ? '❌ 视频提取失败' : '📹 视频提取中'}</h3>
         <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 8 }}>

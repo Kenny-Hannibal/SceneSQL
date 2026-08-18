@@ -1,5 +1,5 @@
 import React from 'react';
-import { colors, modal, btn, input, select } from '../../theme';
+import { colors, modal, btn, input, select, zIndex } from '../../theme';
 
 // Topic 选择弹窗：播包可视化前选择 camera/BEV topic，支持多摄像头宫格入口。
 export default function TopicModal({
@@ -14,7 +14,7 @@ export default function TopicModal({
 
   return (
     <div
-      style={modal.overlay(1000)}
+      style={modal.overlay(zIndex.modal)}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={modal.dialog(400, 500)}>

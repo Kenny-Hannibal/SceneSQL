@@ -36,6 +36,12 @@ export const shadow = {
   modal: '0 8px 32px rgba(31,35,41,0.18)',
 };
 
+// ── 层级规范（全站统一，禁止再写散 z-index） ──
+// modal  : 轻量表单/选择类弹窗（保存策略、评测同步、Topic 选择、进度弹窗）
+// player : 视频/BEV 播放器弹窗 —— 必须压过一切普通 modal
+// toast  : 全局通知，永远最顶
+export const zIndex = { modal: 1000, player: 1100, toast: 2000 };
+
 // ── 卡片 ──
 export const card = {
   background: colors.bgCard,
