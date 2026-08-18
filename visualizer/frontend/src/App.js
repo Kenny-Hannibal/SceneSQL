@@ -3,27 +3,10 @@ import './App.css';
 import AgentPanel from './components/AgentPanel';
 import LoginPage from './components/LoginPage';
 import BevViewer from './components/BevViewer';
-
-const API_BASE = process.env.REACT_APP_API_BASE || '';
-
-// ── 带认证的 fetch wrapper ──
-// 401 时自动清除 token 并刷新页面（跳回登录）
-function authFetch(url, options = {}) {
-  const token = localStorage.getItem('token');
-  const headers = { ...options.headers };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return fetch(url, { ...options, headers }).then(response => {
-    if (response.status === 401) {
-      localStorage.removeItem('token');
-      // 不直接刷新页面，让上层组件通过 token 丢失自然跳回登录
-      // 触发一个自定义事件，App 组件可以监听
-      window.dispatchEvent(new CustomEvent('auth:401'));
-    }
-    return response;
-  });
-}
+import { API_BASE, authFetch, addTokenParam } from './api';
+import { useToast } from './toast';
+import { colors, card, cardTitle, cardSubtitle, btn, input, banner, badge } from './theme';
+import { useMseStream } from './components/agent/useMseStream';
 
 function App() {
   const [authed, setAuthed] = useState(false);
@@ -40,11 +23,10 @@ function App() {
     fetch(`${API_BASE}/api/auth/verify`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then(res => {
+      .then((res) => {
         if (res.ok) {
           setAuthed(true);
         } else {
-          // token 过期或无效，清除
           localStorage.removeItem('token');
           setAuthed(false);
         }
@@ -56,7 +38,7 @@ function App() {
       .finally(() => setAuthChecking(false));
   }, []);
 
-  const handleLogin = useCallback((token) => {
+  const handleLogin = useCallback(() => {
     setAuthed(true);
   }, []);
 
@@ -75,23 +57,22 @@ function App() {
   // ── 加载中 ──
   if (authChecking) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'system-ui' }}>
-        <div style={{ color: '#888', fontSize: 16 }}>加载中...</div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div style={{ color: colors.textTertiary, fontSize: 16 }}>加载中...</div>
       </div>
     );
   }
 
-  // ── 未登录 → 登录页 ──
   if (!authed) {
     return <LoginPage onLoginSuccess={handleLogin} />;
   }
 
-  // ── 已登录 → 原有内容 ──
   return <MainApp onLogout={handleLogout} />;
 }
 
 
 function MainApp({ onLogout }) {
+  const toast = useToast();
   const [topics, setTopics] = useState([]);
   const [bagInput, setBagInput] = useState('');  // 用户输入（bag_id 或路径）
   const [loading, setLoading] = useState(false);
@@ -101,7 +82,6 @@ function MainApp({ onLogout }) {
   const [taskStatus, setTaskStatus] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [durationSec, setDurationSec] = useState(0);
-  const [videoMode, setVideoMode] = useState(null);
   const [videoError, setVideoError] = useState(null);
   const [forceH264, setForceH264] = useState(false);
   const [streamPlayerData, setStreamPlayerData] = useState(null);
@@ -112,6 +92,16 @@ function MainApp({ onLogout }) {
   // ── 双路径：get_bag_info 返回的 em_bin_path 和 rosbag_path ──
   const [emBinPath, setEmBinPath] = useState(null);    // BEV 3D 用
   const [rosbagPath, setRosbagPath] = useState(null);  // camera 视频用
+
+  // MSE 流式播放（Bag Loader 直传模式），逻辑与 AgentPanel 共用 useMseStream
+  useMseStream({
+    videoRef,
+    active: !!streamPlayerData,
+    streamUrl: streamPlayerData?.stream_url,
+    codec: 'video/mp4; codecs="hvc1.1.6.L120.B0"',
+    durationSec: streamPlayerData?.durationSec,
+    onError: (msg) => setVideoError(msg),
+  });
 
   const loadBag = async () => {
     setLoading(true);
@@ -141,9 +131,7 @@ function MainApp({ onLogout }) {
         setSelectedTopic(data.topics[0].name);
       }
       // 自动切换：有 fusion_map → BEV, 有 camera topics → camera
-      if (data.fusion_map_topic && (!data.topics || data.topics.length === 0)) {
-        setViewTab('bev');
-      } else if (data.topics && data.topics.length > 0) {
+      if (data.topics && data.topics.length > 0) {
         setViewTab('camera');
       } else if (data.fusion_map_topic) {
         setViewTab('bev');
@@ -179,7 +167,6 @@ function MainApp({ onLogout }) {
     if (!selectedTopic) return;
     setError('');
     setVideoError(null);
-    setVideoMode(null);
     setVideoUrl('');
     setStreamPlayerData(null);
 
@@ -187,8 +174,6 @@ function MainApp({ onLogout }) {
     const topicDuration = topic && topic.freq > 0 ? topic.message_count / topic.freq : (durationSec || 0);
 
     if (forceH264) {
-      console.log('[HEVC诊断] 用户强制使用 H.264 转码');
-      setVideoMode('h264-file');
       startH264Extraction();
       return;
     }
@@ -197,18 +182,12 @@ function MainApp({ onLogout }) {
     const canPlayHevc = document.createElement('video').canPlayType(hevcMime);
     const supportsHevcMSE = typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(hevcMime);
 
-    console.log('[HEVC诊断] canPlayType:', canPlayHevc, '| MSE支持:', supportsHevcMSE);
-
     if (supportsHevcMSE) {
-      console.log('[HEVC诊断] 浏览器支持HEVC MSE，尝试流式播放');
-      setVideoMode('hevc-stream');
+      // fetch 走 Authorization header 认证（useMseStream → authFetch），URL 不拼 token
       const params = new URLSearchParams({
         bag_path: rosbagPath || bagInput,
         topic: selectedTopic,
       });
-      // 流式播放 URL 需要带 token 作为查询参数（因为 MSE fetch 不支持自定义 header）
-      const token = localStorage.getItem('token');
-      params.set('token', token || '');
       setStreamPlayerData({
         stream_url: `${API_BASE}/api/video/stream-hevc?${params.toString()}`,
         durationSec: topicDuration,
@@ -216,12 +195,11 @@ function MainApp({ onLogout }) {
       return;
     }
 
-    console.log('[HEVC诊断] 浏览器不支持HEVC MSE，降级到H.264转码');
-    alert('当前浏览器不支持 HEVC 解码（canPlayType=' + canPlayHevc + '），将自动使用 H.264 转码方式播放。');
-    setVideoMode('h264-file');
+    toast.warning(`当前浏览器不支持 HEVC 解码（canPlayType=${canPlayHevc || '""'}），将自动使用 H.264 转码方式播放。`, 6000);
     startH264Extraction();
   };
 
+  // 轮询 H.264 转码任务状态
   useEffect(() => {
     if (!taskId) return;
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -232,14 +210,8 @@ function MainApp({ onLogout }) {
         const data = await res.json();
         setTaskStatus(data);
         if (data.status === 'completed') {
-          // video_url 是 /api/video/file/{task_id}，需要拼 token（浏览器 <video> 不带 Authorization header）
-          let vurl = data.video_url || '';
-          const token = localStorage.getItem('token');
-          if (vurl && token) {
-            const sep = vurl.includes('?') ? '&' : '?';
-            vurl = `${vurl}${sep}token=${encodeURIComponent(token)}`;
-          }
-          setVideoUrl(vurl);
+          // video_url 喂给 <video src>（无法设 header），必须拼 token 参数
+          setVideoUrl(addTokenParam(data.video_url || ''));
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         } else if (data.status === 'failed' || data.status === 'not_found') {
@@ -255,299 +227,148 @@ function MainApp({ onLogout }) {
     };
   }, [taskId]);
 
-  // MSE 流式 HEVC 播放逻辑（Bag Loader）
-  useEffect(() => {
-    if (!streamPlayerData || !videoRef.current) return;
-
-    const video = videoRef.current;
-    const mediaSource = new MediaSource();
-    const objectUrl = URL.createObjectURL(mediaSource);
-    video.src = objectUrl;
-
-    let sourceBuffer = null;
-    let reader = null;
-    let aborted = false;
-
-    const mimeCodec = 'video/mp4; codecs="hvc1.1.6.L120.B0"';
-
-    const cleanup = () => {
-      if (aborted) return;
-      aborted = true;
-      URL.revokeObjectURL(objectUrl);
-      if (mediaSource.readyState === 'open') {
-        try { mediaSource.endOfStream(); } catch (e) {}
-      }
-      if (reader) {
-        reader.cancel().catch(() => {});
-      }
-    };
-
-    const onMseError = (source, detail) => {
-      const videoErr = video.error;
-      const msState = mediaSource.readyState;
-      const sbState = sourceBuffer ? {
-        updating: sourceBuffer.updating,
-        buffered: sourceBuffer.buffered?.length,
-      } : null;
-      const diagnostics = {
-        source,
-        detail: detail || '未知错误',
-        videoErrorCode: videoErr?.code,
-        videoErrorMessage: videoErr?.message,
-        mediaSourceState: msState,
-        sourceBufferState: sbState,
-      };
-      console.error('[HEVC诊断] MSE错误:', diagnostics);
-      const msg = `[${source}] ${detail || '未知错误'} | video.error=${videoErr?.code || 'none'} | msState=${msState}`;
-      setVideoError('HEVC流式播放失败: ' + msg);
-      cleanup();
-    };
-
-    mediaSource.addEventListener('sourceopen', async () => {
-      if (aborted) return;
-      try {
-        if (streamPlayerData.durationSec && streamPlayerData.durationSec > 0) {
-          try {
-            mediaSource.duration = streamPlayerData.durationSec;
-            console.log('[HEVC诊断] 预设视频时长:', streamPlayerData.durationSec, '秒');
-          } catch (e) {
-            console.warn('[HEVC诊断] 设置 duration 失败:', e);
-          }
-        }
-
-        sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
-
-        const response = await authFetch(streamPlayerData.stream_url);
-        if (!response.ok) {
-          throw new Error(`Stream HTTP ${response.status}`);
-        }
-        reader = response.body.getReader();
-
-        const queue = [];
-        let isUpdating = false;
-
-        const processQueue = () => {
-          if (aborted || isUpdating || queue.length === 0) return;
-          const chunk = queue.shift();
-          try {
-            sourceBuffer.appendBuffer(chunk);
-            isUpdating = true;
-          } catch (e) {
-            console.error('appendBuffer failed:', e);
-            cleanup();
-          }
-        };
-
-        sourceBuffer.addEventListener('updateend', () => {
-          isUpdating = false;
-          if (queue.length === 0 && reader === null) {
-            try { mediaSource.endOfStream(); } catch (e) {}
-            return;
-          }
-          processQueue();
-        });
-
-        sourceBuffer.addEventListener('error', (e) => {
-          onMseError('SourceBuffer', e.message || 'SourceBuffer error');
-        });
-
-        while (!aborted) {
-          const { done, value } = await reader.read();
-          if (done) {
-            reader = null;
-            if (!isUpdating && queue.length === 0) {
-              try { mediaSource.endOfStream(); } catch (e) {}
-            }
-            break;
-          }
-          queue.push(value);
-          processQueue();
-        }
-      } catch (e) {
-        onMseError('Fetch/Setup', e.message || String(e));
-      }
-    });
-
-    const onVideoError = () => {
-      const ve = video.error;
-      if (ve) {
-        const codes = { 1: 'MEDIA_ERR_ABORTED', 2: 'MEDIA_ERR_NETWORK', 3: 'MEDIA_ERR_DECODE', 4: 'MEDIA_ERR_SRC_NOT_SUPPORTED' };
-        onMseError('VideoElement', `${codes[ve.code] || 'UNKNOWN'}: ${ve.message || ''}`);
-      }
-    };
-    video.addEventListener('error', onVideoError);
-
-    mediaSource.addEventListener('error', (e) => {
-      onMseError('MediaSource', e.message || 'MediaSource error');
-    });
-
-    return () => {
-      video.removeEventListener('error', onVideoError);
-      cleanup();
-    };
-  }, [streamPlayerData]);
+  const tabBtn = (tab) => ({
+    padding: '8px 20px', fontSize: 14, cursor: 'pointer',
+    border: `1px solid ${colors.border}`,
+    borderBottom: viewTab === tab ? '2px solid #fff' : `1px solid ${colors.border}`,
+    borderRadius: '8px 8px 0 0',
+    background: viewTab === tab ? '#fff' : colors.bgHover,
+    color: viewTab === tab ? colors.primary : colors.textSecondary,
+    fontWeight: viewTab === tab ? 600 : 400,
+  });
 
   return (
-    <div className="App" style={{ maxWidth: 1200, margin: '0 auto', padding: 20, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 style={{ margin: 0 }}>🎥 Rosbag Visualizer</h1>
-        <button
-          onClick={onLogout}
-          style={{
-            padding: '6px 16px',
-            fontSize: 13,
-            borderRadius: 4,
-            border: '1px solid #d9d9d9',
-            background: '#fff',
-            color: '#555',
-            cursor: 'pointer',
-          }}
-        >
+    <div className="App" style={{ maxWidth: 1400, width: '100%', margin: '0 auto', padding: '16px clamp(12px, 3vw, 32px)' }}>
+      {/* ── 顶栏 ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <h1 style={{ margin: 0, fontSize: 22, color: colors.text }}>🎥 SceneSQL Visualizer</h1>
+        <button onClick={onLogout} style={btn.ghost(false)}>
           退出登录
         </button>
       </div>
 
-      <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <h2>📁 Bag Loader</h2>
-        <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>支持 bag_id（如 1002AePBU4WlfnBzNtDbBu202606）或本地 rosbag/em bin 路径</div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+      {/* ── Bag Loader ── */}
+      <div style={card}>
+        <h2 style={cardTitle}>📁 Bag Loader</h2>
+        <div style={cardSubtitle}>支持 bag_id（如 1002AePBU4WlfnBzNtDbBu202606）或本地 rosbag/em bin 路径</div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
           <input
             type="text"
             value={bagInput}
             onChange={(e) => setBagInput(e.target.value)}
-            style={{ flex: 1, padding: '10px', fontSize: 16, borderRadius: 4, border: '1px solid #ccc' }}
+            onKeyDown={(e) => e.key === 'Enter' && bagInput.trim() && !loading && loadBag()}
+            style={{ ...input, flex: 1, minWidth: 240, fontSize: 15, padding: '10px 14px' }}
             placeholder="输入 bag_id 或本地路径（如 1002AePBU4WlfnBzNtDbBu202606）"
           />
           <button
             onClick={loadBag}
-            disabled={loading}
-            style={{ padding: '10px 20px', fontSize: 16, cursor: loading ? 'not-allowed' : 'pointer', borderRadius: 4, border: 'none', background: '#1890ff', color: '#fff' }}
+            disabled={loading || !bagInput.trim()}
+            style={{ ...btn.primary(loading || !bagInput.trim()), padding: '10px 24px', fontSize: 15 }}
           >
             {loading ? 'Loading...' : 'Load'}
           </button>
         </div>
-        {error && <div style={{ color: 'red', marginTop: 10 }}>{error}</div>}
+        {error && <div style={banner.error}>{error}</div>}
       </div>
 
       {topics.length > 0 && (
         <>
           {/* ── View Tab 切换 ── */}
           <div style={{ display: 'flex', gap: 0, marginBottom: -1, position: 'relative', zIndex: 1 }}>
-            <button
-              onClick={() => setViewTab('bev')}
-              style={{
-                padding: '8px 20px', fontSize: 14, cursor: 'pointer',
-                border: '1px solid #d9d9d9', borderBottom: viewTab === 'bev' ? '2px solid #fff' : '1px solid #d9d9d9',
-                borderRadius: '8px 8px 0 0',
-                background: viewTab === 'bev' ? '#fff' : '#fafafa',
-                color: viewTab === 'bev' ? '#1890ff' : '#666',
-                fontWeight: viewTab === 'bev' ? 600 : 400,
-              }}
-            >
+            <button onClick={() => setViewTab('bev')} style={tabBtn('bev')}>
               🗺️ BEV View {fusionMapTopic ? '' : '(无数据)'}
             </button>
-            <button
-              onClick={() => setViewTab('camera')}
-              style={{
-                padding: '8px 20px', fontSize: 14, cursor: 'pointer',
-                border: '1px solid #d9d9d9', borderBottom: viewTab === 'camera' ? '2px solid #fff' : '1px solid #d9d9d9',
-                borderRadius: '8px 8px 0 0',
-                background: viewTab === 'camera' ? '#fff' : '#fafafa',
-                color: viewTab === 'camera' ? '#1890ff' : '#666',
-                fontWeight: viewTab === 'camera' ? 600 : 400,
-              }}
-            >
+            <button onClick={() => setViewTab('camera')} style={tabBtn('camera')}>
               📷 Camera ({topics.length})
             </button>
           </div>
 
           {/* ── BEV View ── */}
           {viewTab === 'bev' && (
-            <BevViewer bagPath={emBinPath || bagInput} authFetch={authFetch} />
+            <BevViewer bagPath={emBinPath || bagInput} />
           )}
 
           {/* ── Camera View ── */}
           {viewTab === 'camera' && (
-        <div style={{ padding: 20, background: '#fff', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h2>📷 Camera Topics ({topics.length})</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 12 }}>
-            {topics.map((t) => (
-              <div
-                key={t.name}
-                onClick={() => setSelectedTopic(t.name)}
-                style={{
-                  padding: 12,
-                  borderRadius: 6,
-                  border: selectedTopic === t.name ? '2px solid #1890ff' : '1px solid #e8e8e8',
-                  background: selectedTopic === t.name ? '#e6f7ff' : '#fafafa',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                  {t.message_count} msgs · {t.freq?.toFixed(1)} Hz
-                </div>
+            <div style={card}>
+              <h2 style={cardTitle}>📷 Camera Topics ({topics.length})</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 12 }}>
+                {topics.map((t) => (
+                  <div
+                    key={t.name}
+                    onClick={() => setSelectedTopic(t.name)}
+                    style={{
+                      padding: 12,
+                      borderRadius: 8,
+                      border: selectedTopic === t.name ? `2px solid ${colors.primary}` : `1px solid ${colors.border}`,
+                      background: selectedTopic === t.name ? '#e6f4ff' : colors.bgStripe,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 14, wordBreak: 'break-all' }}>{t.name}</div>
+                    <div style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
+                      {t.message_count} msgs · {t.freq?.toFixed(1)} Hz
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={extractVideo}
-              disabled={!selectedTopic || (taskStatus && taskStatus.status === 'pending')}
-              style={{ padding: '10px 24px', fontSize: 16, borderRadius: 4, border: 'none', background: '#52c41a', color: '#fff', cursor: 'pointer' }}
-            >
-              🎬 Extract Video
-            </button>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={forceH264}
-                onChange={(e) => setForceH264(e.target.checked)}
-                style={{ cursor: 'pointer' }}
-              />
-              ⚙️ 强制 H.264 转码
-            </label>
-            {taskStatus && (
-              <span style={{ fontSize: 14, color: '#555' }}>
-                {taskStatus.status === 'processing' && `⏳ ${taskStatus.message} (${taskStatus.progress.toFixed(1)}%)`}
-                {taskStatus.status === 'completed' && '✅ Done'}
-                {taskStatus.status === 'failed' && `❌ ${taskStatus.message}`}
-                {taskStatus.status === 'pending' && '⏳ Pending...'}
-              </span>
-            )}
-          </div>
-        </div>
+              <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={extractVideo}
+                  disabled={!selectedTopic || (taskStatus && taskStatus.status === 'pending')}
+                  style={{ ...btn.success(!selectedTopic || (taskStatus && taskStatus.status === 'pending')), padding: '10px 24px', fontSize: 15 }}
+                >
+                  🎬 Extract Video
+                </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: colors.textSecondary, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={forceH264}
+                    onChange={(e) => setForceH264(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  ⚙️ 强制 H.264 转码
+                </label>
+                {taskStatus && (
+                  <span style={{ fontSize: 14, color: colors.textSecondary }}>
+                    {taskStatus.status === 'processing' && `⏳ ${taskStatus.message} (${taskStatus.progress.toFixed(1)}%)`}
+                    {taskStatus.status === 'completed' && '✅ Done'}
+                    {taskStatus.status === 'failed' && `❌ ${taskStatus.message}`}
+                    {taskStatus.status === 'pending' && '⏳ Pending...'}
+                  </span>
+                )}
+              </div>
+            </div>
           )}
         </>
       )}
 
+      {/* ── H.264 转码播放器 ── */}
       {videoUrl && (
-        <div style={{ padding: 20, background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h2>
+        <div style={card}>
+          <h2 style={cardTitle}>
             🎬 Video Player
-            <span style={{ fontSize: 12, marginLeft: 8, padding: '2px 8px', borderRadius: 4, background: '#fa8c16', color: '#fff' }}>
-              H.264 转码
-            </span>
+            <span style={badge(colors.orange)}>H.264 转码</span>
           </h2>
           <video
             src={videoUrl}
             controls
-            style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 4, marginTop: 12 }}
+            style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 8, marginTop: 12 }}
           />
         </div>
       )}
 
+      {/* ── HEVC 直传播放器 ── */}
       {streamPlayerData && (
-        <div style={{ padding: 20, background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h2>
+        <div style={card}>
+          <h2 style={cardTitle}>
             🎬 Video Player
-            <span style={{ fontSize: 12, marginLeft: 8, padding: '2px 8px', borderRadius: 4, background: '#52c41a', color: '#fff' }}>
-              HEVC 直传
-            </span>
+            <span style={badge(colors.success)}>HEVC 直传</span>
           </h2>
           {videoError && (
-            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', color: '#cf1322', padding: 12, borderRadius: 4, marginTop: 10, fontSize: 13 }}>
+            <div style={{ ...banner.error, marginTop: 10 }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠️ 播放失败</div>
               <div>{videoError}</div>
               <button
@@ -557,7 +378,7 @@ function MainApp({ onLogout }) {
                   setStreamPlayerData(null);
                   setTimeout(() => extractVideo(), 100);
                 }}
-                style={{ marginTop: 8, padding: '5px 14px', fontSize: 12, borderRadius: 4, border: '1px solid #cf1322', background: '#fff', color: '#cf1322', cursor: 'pointer' }}
+                style={{ ...btn.outline(colors.error, false), marginTop: 8 }}
               >
                 🔄 改用 H.264 转码重试
               </button>
@@ -567,12 +388,12 @@ function MainApp({ onLogout }) {
             ref={videoRef}
             controls
             autoPlay
-            style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 4, marginTop: 12 }}
+            style={{ width: '100%', maxHeight: 600, background: '#000', borderRadius: 8, marginTop: 12 }}
           />
         </div>
       )}
 
-      <AgentPanel authFetch={authFetch} />
+      <AgentPanel />
     </div>
   );
 }

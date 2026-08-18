@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { API_BASE, authFetch } from '../api';
 
-const API_BASE = process.env.REACT_APP_API_BASE || '';
 const PLAYBACK_FPS = 10;  // fusion_map_plus 固定 10fps (帧间100ms)
 const PLAYBACK_INTERVAL = 1000 / PLAYBACK_FPS;  // 100ms
 
@@ -22,7 +22,7 @@ function vehToThree(vx, vy) {
  * BevViewer — BEV 3D渲染组件
  *
  * Props:
- *   bagPath, authFetch, startTsNs, endTsNs — 数据源
+ *   bagPath, startTsNs, endTsNs — 数据源
  *   compact — 紧凑模式：只渲染canvas，不渲染标题/控件/进度条，canvas填满父容器
  *
  * Ref (useImperativeHandle):
@@ -30,7 +30,7 @@ function vehToThree(vx, vy) {
  *   seekToRatio(ratio) — 跳到 0~1 位置
  *   getProgress() → { current: 0~1, frameIdx, totalFrames, playing }
  */
-const BevViewer = forwardRef(function BevViewer({ bagPath, authFetch, startTsNs, endTsNs, compact }, ref) {
+const BevViewer = forwardRef(function BevViewer({ bagPath, startTsNs, endTsNs, compact }, ref) {
   const canvasRef = useRef(null);
   const [info, setInfo] = useState(null);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -241,7 +241,7 @@ const BevViewer = forwardRef(function BevViewer({ bagPath, authFetch, startTsNs,
       if (e.name === 'AbortError') throw new Error(`请求超时(${timeoutMs / 1000}s): ${url.split('?')[0]}`);
       throw e;
     }
-  }, [authFetch]);
+  }, []);
 
   // ── 加载 fusion_map 基本信息 + 帧范围 ──
   const loadInfo = useCallback(async () => {
@@ -433,7 +433,7 @@ const BevViewer = forwardRef(function BevViewer({ bagPath, authFetch, startTsNs,
 
   const loadFrame = useCallback(async (idx) => {
     return await loadFrameDirect(idx);
-  }, [bagPath, authFetch]);
+  }, [bagPath]);
 
   // ── 更新 Three.js 场景 (动态数据: obstacles, boundaries, lanes, paths) ──
   const updateSceneInternal = (data) => {

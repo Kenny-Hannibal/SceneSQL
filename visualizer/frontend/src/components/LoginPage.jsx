@@ -128,10 +128,11 @@ export default function LoginPage({ onLoginSuccess }) {
               fontSize: 16,
               borderRadius: 6,
               border: 'none',
-              background: loading || !username || !password ? '#d9d9d9' : '#1890ff',
+              background: loading || !username || !password ? '#d9d9d9' : '#1677ff',
               color: '#fff',
               cursor: loading || !username || !password ? 'not-allowed' : 'pointer',
               fontWeight: 600,
+              transition: 'background 0.15s ease',
             }}
           >
             {loading ? '登录中...' : '登 录'}
