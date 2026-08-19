@@ -6,6 +6,7 @@
 
 | 日期 | 标题 | 文件 |
 |------|------|------|
+| 2026-08-19 | NL2SQL 路由过拟合修复：recipe 命中改参考 SQL 模式 + user_strategies 目录 bug（0→13 关键词） | `changelog/2026-08-19_NL2SQL路由过拟合修复-recipe命中改参考SQL模式.md` |
 | 2026-08-18 | 播包可视化卡顿根因修复：resolve-bag-path TTL 缓存 + asyncio.to_thread + 弹窗先行 | `changelog/2026-08-18_播包可视化卡顿根因修复-resolve缓存-线程池-弹窗先行.md` |
 | 2026-08-18 | 前端重构与交互优化：AgentPanel 拆分（2715→700行）+ Toast 替代 alert + 历史查询面板 + 主题统一 | `changelog/2026-08-18_前端重构与交互优化-组件拆分-Toast-历史查询面板.md` |
 | 2026-08-14 | Y型路口策略切换 v3 标签（Loop 第一轮调优，评测集 4/20→19/20） | `changelog/2026-08-14_Y型路口策略切换v3标签-loop第一轮调优.md` |
