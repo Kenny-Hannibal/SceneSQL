@@ -246,24 +246,45 @@ def list_batches():
     return list(batch_map.values())
 
 
+# ── resolve-bag-path 结果缓存 ──
+# resolve 走 dm_sdk 远程元数据查询（ubm_vehicle_module_bin + 原始表两次远程调用），
+# 冷查询 5~30s。同一 bag 重复可视化（播包/换 topic/重新打开）非常频繁，
+# 缓存后重复解析即时返回。仅缓存成功结果；TTL 1 小时。
+_RESOLVE_CACHE: dict = {}  # bag_id -> (expire_ts, result_dict)
+_RESOLVE_CACHE_TTL = 3600
+_RESOLVE_CACHE_MAX = 1000
+
+
 @router.get("/resolve-bag-path")
 async def resolve_bag_path(bag_id: str):
     """根据 bag_id 解析 bag 本地路径（用于前端可视化）。
-    
+
     同时返回 em_bin 路径，3D BEV 视图需要从 em bin 目录读取 fusion_map_plus.bin。
     """
+    import time
+    now = time.time()
+    cached = _RESOLVE_CACHE.get(bag_id)
+    if cached and cached[0] > now:
+        return cached[1]
+
     try:
         from tools.rosbag_path_resolver import RosbagPathResolver
-        resolver = RosbagPathResolver()
-        
-        # 先用 resolve_em_bin_path 一次性获取 rosbag 路径 + em bin 路径
-        try:
-            info = resolver.resolve_em_bin_path(bag_id)
-        except Exception:
-            # fallback: 如果 em bin 路径查询失败，至少返回 rosbag 路径
-            info = resolver.resolve(bag_id)
-        
-        return {
+
+        def _do_resolve():
+            resolver = RosbagPathResolver()
+            # 先用 resolve_em_bin_path 一次性获取 rosbag 路径 + em bin 路径
+            try:
+                return resolver.resolve_em_bin_path(bag_id)
+            except Exception:
+                # fallback: 如果 em bin 路径查询失败，至少返回 rosbag 路径
+                return resolver.resolve(bag_id)
+
+        # dm_sdk 是同步阻塞调用（冷查询 5~30s），必须丢线程池，
+        # 否则会卡死整个事件循环，阻塞并发的 SSE/视频状态轮询等所有请求
+        import asyncio
+        info = await asyncio.to_thread(_do_resolve)
+
+        result = {
             "bag_id": bag_id,
             "origin_bag_id": info.origin_bag_id,
             "bag_path": info.local_path or info.oss_path or "",
@@ -272,6 +293,12 @@ async def resolve_bag_path(bag_id: str):
             "em_bin_oss_path": getattr(info, "em_bin_oss_path", None) or "",
             "em_bin_local_path": getattr(info, "em_bin_local_path", None) or "",
         }
+        # 仅缓存解析成功的结果，失败结果每次重试
+        if result["bag_path"]:
+            if len(_RESOLVE_CACHE) >= _RESOLVE_CACHE_MAX:
+                _RESOLVE_CACHE.clear()
+            _RESOLVE_CACHE[bag_id] = (now + _RESOLVE_CACHE_TTL, result)
+        return result
     except ImportError:
         return {"bag_id": bag_id, "bag_path": "", "error": "dm_sdk not installed"}
     except Exception as e:

@@ -504,6 +504,8 @@ export default function AgentPanel() {
   };
 
   const startVisualization = async (row) => {
+    // 记录是否有旧播放器/流在占用连接（决定后面是否需要等 800ms 释放）
+    const hadActiveStream = !!(mseCleanupRef.current || streamAbortControllerRef.current || playerModalOpen);
     // 同步执行旧的 MSE cleanup，确保 TCP 连接立即释放
     if (mseCleanupRef.current) {
       try { mseCleanupRef.current(); } catch (e) { console.error('[MSE] cleanup error:', e); }
@@ -526,8 +528,20 @@ export default function AgentPanel() {
     setPlayerGridMode(false);
     setPlayerGridTopics([]);
 
-    // 给浏览器/后端一点时间彻底释放旧 video stream 的 TCP 连接和 ffmpeg 进程
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // ── 立即打开 topic modal（loading 态），给用户即时反馈 ──
+    // 不要再等 resolve-bag-path（冷查询 5~30s）做完才开弹窗，否则页面零反馈像卡死
+    setTopicModalData({
+      bagPath: row.bag_path || '', emBinPath: '', row, cameraTopics: [],
+      startTs: null, endTs: null, clampedMsg: '', loading: true,
+      loadingMsg: row.bag_path ? '正在加载 bag 信息...' : '正在解析 bag 路径（首次解析可能需数十秒，请稍候）...',
+    });
+    setSelectedTopic(localStorage.getItem('lastSelectedTopic') || '');
+    setTopicModalOpen(true);
+
+    // 仅当确实有旧流在占用连接时，才给浏览器/后端一点时间释放 TCP 连接和 ffmpeg 进程
+    if (hadActiveStream) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
 
     // 如果 bag_path 为空，尝试解析
     let bagPath = row.bag_path;
@@ -551,14 +565,16 @@ export default function AgentPanel() {
           `无法自动解析 bag 本地路径（bag_id: ${row.bag_id || '未知'}）。\n请手动输入 bag 的本地路径：`,
           ''
         );
-        if (!bagPath) return;
+        if (!bagPath) {
+          setTopicModalOpen(false);
+          setTopicModalData(null);
+          return;
+        }
       }
     }
 
-    // 打开 modal 并显示加载进度
-    setTopicModalData({ bagPath, emBinPath, row, cameraTopics: [], startTs: null, endTs: null, clampedMsg: '', loading: true, loadingMsg: '正在加载 bag 信息...' });
-    setSelectedTopic(localStorage.getItem('lastSelectedTopic') || '');
-    setTopicModalOpen(true);
+    // 解析完成，更新 loading 文案继续加载 bag 信息
+    setTopicModalData((prev) => prev ? { ...prev, bagPath, emBinPath, loadingMsg: '正在加载 bag 信息...' } : prev);
 
     // 使用 SSE 流式获取 bag info（带进度反馈）
     const controller = new AbortController();
