@@ -926,13 +926,16 @@ class AgentEngine:
 
             # 参考 SQL 模式：参考 SQL 涉及的所有表都注入 schema（如 static_link），
             # 否则 LLM 拿到参考 SQL 却没有对应表结构，无法在其基础上改写 JOIN/WHERE
+            # 注意：self.schema 是 List[TableInfo]（dataclass），迭代得到的是对象不是表名，
+            # 必须先取 .name（2026-08-19 TableInfo TypeError 崩溃的修复）
             if reference_sql:
-                for t in self.schema:
-                    if t != "range_tag" and re.search(rf'\b{re.escape(t)}\b', reference_sql, re.IGNORECASE):
-                        involved_tables.add(t)
+                _schema_table_names = {t.name if hasattr(t, "name") else str(t) for t in self.schema}
+                for tname in _schema_table_names:
+                    if tname != "range_tag" and re.search(rf'\b{re.escape(tname)}\b', reference_sql, re.IGNORECASE):
+                        involved_tables.add(tname)
                 # 道路类型约束（高速/城区等）依赖 static_link，
                 # 即使参考 SQL 没用到也一并注入，保证 LLM 能补道路约束
-                if "static_link" in self.schema:
+                if "static_link" in _schema_table_names:
                     involved_tables.add("static_link")
                     # static_link 通过 ego.ego_static_map_link_id JOIN，ego schema 必须同时在场
                     involved_tables.add("ego")
@@ -1158,12 +1161,14 @@ class AgentEngine:
                 involved_tables.add("intersection_info")
 
             # 参考 SQL 模式：参考 SQL 涉及的所有表都注入 schema（如 static_link）
+            # 注意：self.schema 是 List[TableInfo]，迭代得到的是对象，必须取 .name
             if reference_sql:
-                for t in self.schema:
-                    if t != "range_tag" and re.search(rf'\b{re.escape(t)}\b', reference_sql, re.IGNORECASE):
-                        involved_tables.add(t)
+                _schema_table_names = {t.name if hasattr(t, "name") else str(t) for t in self.schema}
+                for tname in _schema_table_names:
+                    if tname != "range_tag" and re.search(rf'\b{re.escape(tname)}\b', reference_sql, re.IGNORECASE):
+                        involved_tables.add(tname)
                 # 道路类型约束（高速/城区等）依赖 static_link，即使参考 SQL 没用到也一并注入
-                if "static_link" in self.schema:
+                if "static_link" in _schema_table_names:
                     involved_tables.add("static_link")
                     # static_link 通过 ego.ego_static_map_link_id JOIN，ego schema 必须同时在场
                     involved_tables.add("ego")
