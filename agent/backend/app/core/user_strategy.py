@@ -13,9 +13,12 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# 默认存储路径：与 recipes/ 同级
+# 默认存储路径：与本文件同目录（app/core/user_strategies/）。
+# 注意：必须和 visualizer 的 strategies.py 写入位置、block_assembler.py 读取位置保持一致。
+# 历史上这里写成 "../user_strategies"（app/user_strategies/），导致路由层
+# UserStrategyManager() 读到空目录，用户保存的策略关键词从未进入 ConceptRouter 匹配表。
 DEFAULT_STRATEGY_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "user_strategies"
+    os.path.dirname(os.path.abspath(__file__)), "user_strategies"
 )
 
 

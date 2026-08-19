@@ -301,8 +301,26 @@ ROUND2_SYSTEM_TEMPLATE = """你是自动驾驶场景挖掘的SQL生成专家。
 {context}"""
 
 
-def build_round2_messages(nl: str, context: str) -> list[dict]:
+def build_round2_messages(nl: str, context: str, reference_sql: str = "") -> list[dict]:
     system = ROUND2_SYSTEM_TEMPLATE.format(context=context)
+    if reference_sql:
+        # 参考 SQL 模式（2026-08-19）：recipe 命中后不再直接返回产线 SQL，
+        # 而是作为参考注入 Round 2，让 LLM 结合原始问题按需追加约束。
+        # 解决"高速道路上自车cut in"直接返回 ego_cut_in 产线 SQL、丢失高速约束的过拟合问题。
+        system += f"""
+
+## 参考 SQL（产线验证模板，优先复用）
+以下是与用户问题最匹配的产线模板 SQL：
+```sql
+{reference_sql}
+```
+复用规则：
+1. 如果用户问题与该模板语义完全一致，原样输出此 SQL
+2. 如果用户问题包含模板未覆盖的额外约束（如道路类型/高速、速度、时间段、对象类型等），
+   必须在此 SQL 基础上追加对应的 WHERE/JOIN 条件，其余逻辑保持不变
+   （例如高速约束可通过 ego_static_map_link_id JOIN static_link 判断 link_class）
+3. 禁止删除模板中已有的约束条件和输出列
+"""
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": f"用户问题：{nl}\n\n请生成SQL（只输出纯SQL，不要解释）："},
@@ -842,9 +860,9 @@ class ConceptRouter:
             self.composition_rules, schema_text,
         )
 
-    def get_round2_messages(self, nl: str, r1_result: dict, schema_text: str) -> list[dict]:
+    def get_round2_messages(self, nl: str, r1_result: dict, schema_text: str, reference_sql: str = "") -> list[dict]:
         context = self.build_round2_context(r1_result, schema_text)
-        return build_round2_messages(nl, context)
+        return build_round2_messages(nl, context, reference_sql=reference_sql)
 
 
 # ── 全局单例 ──

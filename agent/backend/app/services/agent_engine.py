@@ -825,18 +825,22 @@ class AgentEngine:
         logger.info("Round 1: concepts=%s composition=%s recipe=%s variant=%s",
                      concepts, composition, recipe_name, recipe_variant)
 
-        # ── Pipeline Recipe 分支：如果Round 1识别出匹配的recipe，直接组装SQL ──
+        # ── Recipe 分支（参考 SQL 模式，2026-08-19 改造）──
+        # 命中 recipe 不再直接返回产线 SQL（短路会丢弃问题中的额外约束，
+        # 如"高速道路上自车cut in"直接返回 ego_cut_in 产线 SQL、丢失高速约束），
+        # 而是把产线 SQL 作为参考注入 Round 2，由 LLM 结合原始问题按需追加约束。
         sql = None
+        reference_sql = None
         if recipe_name and recipe_variant:
             try:
                 from agent.backend.app.core.block_assembler import BlockAssembler
                 assembler = BlockAssembler()
-                sql = assembler.assemble(recipe_name, recipe_variant)
-                logger.info("Recipe assembled: recipe=%s variant=%s sql_len=%d",
-                            recipe_name, recipe_variant, len(sql))
+                reference_sql = assembler.assemble(recipe_name, recipe_variant)
+                logger.info("Recipe reference assembled: recipe=%s variant=%s sql_len=%d",
+                            recipe_name, recipe_variant, len(reference_sql))
             except Exception as e:
-                logger.warning("Recipe assembly failed, fallback to Round 2: %s", e)
-                sql = None
+                logger.warning("Recipe assembly failed, fallback to plain Round 2: %s", e)
+                reference_sql = None
 
         # ── Layer 3: Hybrid Block Assembly ──
         # 当 Round1 识别出 required_blocks 但没有匹配 recipe 时，
@@ -920,13 +924,26 @@ class AgentEngine:
             if need_intersection_info or composition == "tag_join_intersection_info":
                 involved_tables.add("intersection_info")
 
+            # 参考 SQL 模式：参考 SQL 涉及的所有表都注入 schema（如 static_link），
+            # 否则 LLM 拿到参考 SQL 却没有对应表结构，无法在其基础上改写 JOIN/WHERE
+            if reference_sql:
+                for t in self.schema:
+                    if t != "range_tag" and re.search(rf'\b{re.escape(t)}\b', reference_sql, re.IGNORECASE):
+                        involved_tables.add(t)
+                # 道路类型约束（高速/城区等）依赖 static_link，
+                # 即使参考 SQL 没用到也一并注入，保证 LLM 能补道路约束
+                if "static_link" in self.schema:
+                    involved_tables.add("static_link")
+                    # static_link 通过 ego.ego_static_map_link_id JOIN，ego schema 必须同时在场
+                    involved_tables.add("ego")
+
             schema_text = format_schema_for_prompt(
                 self.schema,
                 only_tables=involved_tables,
             )
             schema_text_for_correction = schema_text
 
-            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
+            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text, reference_sql=reference_sql or "")
             # ── 流式生成 SQL：逐 token 回调 on_token ──
             if on_token is not None:
                 sql_chunks = []
@@ -959,7 +976,8 @@ class AgentEngine:
         # ── EXPLAIN 试编译 + Round 3 纠错循环 ──
         max_corrections = self.MAX_CORRECTIONS
         correction_rounds = 0
-        sql_source = "recipe" if recipe_name and recipe_variant else "llm"
+        # 参考 SQL 模式下 SQL 由 LLM 产出（以 recipe 为底），按 llm 路径走纠错循环
+        sql_source = "recipe_guided" if (recipe_name and recipe_variant and reference_sql) else "llm"
 
         # Recipe SQL 语法错 = 模板 bug，不走 LLM 纠错，直接报错给开发者
         if sql_source == "recipe":
@@ -1064,16 +1082,19 @@ class AgentEngine:
         route_method = "llm"
         involved_tables = set()
 
-        # ── Recipe 分支：直接组装，免 LLM ──
+        # ── Recipe 分支（参考 SQL 模式，2026-08-19 改造）──
+        # 不再直接返回产线 SQL（会丢弃问题中的额外约束），
+        # 而是作为参考 SQL 注入 Round 2，由 LLM 结合原始问题按需追加约束。
+        reference_sql = None
         if recipe_name and recipe_variant:
             try:
-                sql = get_block_assembler().assemble(recipe_name, recipe_variant)
-                route_method = "recipe"
-                logger.info("Recipe assembled: recipe=%s variant=%s sql_len=%d",
-                            recipe_name, recipe_variant, len(sql))
+                reference_sql = get_block_assembler().assemble(recipe_name, recipe_variant)
+                route_method = "recipe_guided"
+                logger.info("Recipe reference assembled: recipe=%s variant=%s sql_len=%d",
+                            recipe_name, recipe_variant, len(reference_sql))
             except Exception as e:
-                logger.warning("Recipe assembly failed, fallback to Round 2: %s", e)
-                sql = None
+                logger.warning("Recipe assembly failed, fallback to plain Round 2: %s", e)
+                reference_sql = None
 
         # ── Hybrid 分支：block 拼装 + LLM 胶水 ──
         required_blocks = r1_result.get("required_blocks", [])
@@ -1136,10 +1157,21 @@ class AgentEngine:
             if need_intersection_info or composition == "tag_join_intersection_info":
                 involved_tables.add("intersection_info")
 
+            # 参考 SQL 模式：参考 SQL 涉及的所有表都注入 schema（如 static_link）
+            if reference_sql:
+                for t in self.schema:
+                    if t != "range_tag" and re.search(rf'\b{re.escape(t)}\b', reference_sql, re.IGNORECASE):
+                        involved_tables.add(t)
+                # 道路类型约束（高速/城区等）依赖 static_link，即使参考 SQL 没用到也一并注入
+                if "static_link" in self.schema:
+                    involved_tables.add("static_link")
+                    # static_link 通过 ego.ego_static_map_link_id JOIN，ego schema 必须同时在场
+                    involved_tables.add("ego")
+
             schema_text = format_schema_for_prompt(self.schema, only_tables=involved_tables)
             schema_text_for_correction = schema_text
 
-            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text)
+            r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text, reference_sql=reference_sql or "")
             raw_sql = await self.llm.chat(
                 r2_messages[0]["content"],
                 r2_messages[1]["content"],
