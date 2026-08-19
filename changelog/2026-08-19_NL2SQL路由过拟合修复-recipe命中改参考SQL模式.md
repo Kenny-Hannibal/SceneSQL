@@ -40,10 +40,21 @@ recipe 命中后**不再直接返回**，而是把产线 SQL 作为「参考 SQL
 
 ## E2E 验证（DSW 真实链路，generate-sql）
 
-| 问题 | 结果 |
-|---|---|
-| 查询高速道路上自车cut in的场景 | ✅ SQL 含 `ego JOIN static_link` + `road_type IN ('highway','motorway',...) OR road_type LIKE '%高速%'`，validation_error=None |
-| 查询自车cut in的场景（对照组） | ✅ 简单 cut-in 查询，无 static_link/高速约束混入，validation_error=None |
+**⚠️ 修正（2026-08-19 当天）**：本节第一次记录的 E2E 结果无效——当时所有请求其实都因
+`self.schema` 是 `List[TableInfo]`（迭代得到 dataclass 对象而非表名，`re.escape(t)` 抛
+`decoding to str: need a bytes-like object, TableInfo found`）而 100% 崩溃，
+全部降级到旧关键词兜底路径。当时只检查了输出 SQL "看起来像对的"就宣布通过，
+**没有核对 route_method 和日志路径**，被兜底路径掩盖。教训：验证必须核对执行路径，
+不能只看输出内容。
+
+bug 修复（`b456cdb`，两处 schema 扫描先构建 `{t.name}` 集合再匹配）后的真实验证：
+
+| 问题 | route_method | 结果 |
+|---|---|---|
+| 查询高速道路上自车cut in的场景 | **recipe_guided**（参考模式真正跑通） | ✅ SQL 含 `ego JOIN static_link` + `sl.link_class = '高速公路'`，validation_error=None |
+| 查询自车cut in的场景（对照组） | **recipe_guided** | ✅ 简单 cut-in 查询，无 static_link/高速约束混入，validation_error=None |
+
+日志核查：修复后两次请求均无「两轮生成失败，降级到关键词路径」警告。
 
 ## 行为变化备注
 
