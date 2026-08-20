@@ -9,6 +9,8 @@
 | 2026-08-19 | NL2SQL 路由过拟合修复：recipe 命中改参考 SQL 模式 + user_strategies 目录 bug（0→13 关键词） | `changelog/2026-08-19_NL2SQL路由过拟合修复-recipe命中改参考SQL模式.md` |
 | 2026-08-18 | 播包可视化卡顿根因修复：resolve-bag-path TTL 缓存 + asyncio.to_thread + 弹窗先行 | `changelog/2026-08-18_播包可视化卡顿根因修复-resolve缓存-线程池-弹窗先行.md` |
 | 2026-08-18 | 前端重构与交互优化：AgentPanel 拆分（2715→700行）+ Toast 替代 alert + 历史查询面板 + 主题统一 | `changelog/2026-08-18_前端重构与交互优化-组件拆分-Toast-历史查询面板.md` |
+| 2026-08-18 | Y型路口策略切换 v5 标签（Round3 剔除右转专用道，评测 53/67，全量 1552 正样本） | `changelog/2026-08-18_Y型路口策略切换v5标签-Round3剔除右转专用道.md` |
+| 2026-08-17 | Y型路口策略切换 v4 标签（Round2 消除四类 badcase，评测 46/55） | `changelog/2026-08-17_Y型路口策略切换v4标签-Round2消除四类badcase.md` |
 | 2026-08-14 | Y型路口策略切换 v3 标签（Loop 第一轮调优，评测集 4/20→19/20） | `changelog/2026-08-14_Y型路口策略切换v3标签-loop第一轮调优.md` |
 | 2026-08-13 | Y型路口策略切换 v2 标签（地图分叉点 + 轨迹匹配） | `changelog/2026-08-13_Y型路口策略切换v2标签-地图分叉点轨迹匹配.md` |
 | 2026-08-11 | generate-sql 两轮路由试点（feature/gen-sql-two-round） | `changelog/2026-08-11_generate-sql两轮路由试点.md` |
