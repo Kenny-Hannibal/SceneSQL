@@ -195,11 +195,14 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
                 domain = t.get("domain", "")
                 if isinstance(domain, list):  # 部分模板的 domain 是 list
                     domain = " ".join(str(d) for d in domain)
+                synonyms = synonyms_map.get(recipe_id, "")
+                if isinstance(synonyms, list):  # 同义词表 value 支持 list[str] 或 str
+                    synonyms = " ".join(str(s) for s in synonyms)
                 text = " ".join(filter(None, [
                     _clean_nl(t.get("nl", "")),
                     recipe_id,
                     str(domain),
-                    synonyms_map.get(recipe_id, ""),
+                    synonyms,
                 ]))
                 # id 使用 recipe 原始名称，与 BGE-M3 外部索引脚本一致
                 entries.append((f"tpl__{recipe_id}" if recipe_id else f"tpl__{len(entries)}", text, recipe_id))
@@ -217,8 +220,11 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
                 name = d.get("name", p.replace(".yaml", ""))
                 keywords = " ".join(d.get("keywords", []))
                 desc = d.get("description", "")
+                usr_synonyms = synonyms_map.get(name, "")
+                if isinstance(usr_synonyms, list):
+                    usr_synonyms = " ".join(str(s) for s in usr_synonyms)
                 text = " ".join(filter(None, [keywords, _clean_nl(desc), name,
-                                              synonyms_map.get(name, "")]))
+                                              usr_synonyms]))
                 entries.append((f"usr__{name}", text, name))
             except Exception as e:
                 logger.warning(f"Failed to load strategy {p}: {e}")
