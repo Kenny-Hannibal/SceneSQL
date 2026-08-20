@@ -192,10 +192,13 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
                 recipe_id = t.get("id", "")
                 # 索引文本 = 清洗后的语义描述 + recipe id（英文术语如 cut_in）+ 口语化同义词
                 # id 必须进文本，否则英文查询（"cut in"）完全匹配不到
+                domain = t.get("domain", "")
+                if isinstance(domain, list):  # 部分模板的 domain 是 list
+                    domain = " ".join(str(d) for d in domain)
                 text = " ".join(filter(None, [
                     _clean_nl(t.get("nl", "")),
                     recipe_id,
-                    t.get("domain", ""),
+                    str(domain),
                     synonyms_map.get(recipe_id, ""),
                 ]))
                 # id 使用 recipe 原始名称，与 BGE-M3 外部索引脚本一致
