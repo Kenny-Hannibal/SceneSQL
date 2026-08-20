@@ -244,6 +244,11 @@ def load_from_templates(force: bool = False):
         logger.info(f"Vector DB already has {_collection.count()} entries, skip re-indexing (use force=True to override)")
         return
 
+    if force:
+        # 全量重建前先清空，防止旧 id 方案（外部索引脚本建的条目）残留，
+        # 否则同一 recipe 新旧两份文本共存，搜索结果出现重复项
+        clear()
+
     entries = _collect_template_entries()
     if entries:
         index_recipes(entries)
