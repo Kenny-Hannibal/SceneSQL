@@ -143,14 +143,41 @@ def search(query: str, top_k: int = 3) -> List[Tuple[str, float]]:
     ]
 
 
+def _clean_nl(nl: str) -> str:
+    """去掉 nl 里的模板元信息噪声（"：产线SQL直通模式(raw_sql)"、"不经Block组装"等），
+    只保留语义描述。这些噪声会稀释 embedding 的语义信号。"""
+    for marker in ("产线SQL直通模式", "block组装 + raw_sql直通双模式", "不经Block组装", "不经Blok组装"):
+        idx = nl.find(marker)
+        if idx > 0:
+            nl = nl[:idx]
+    return nl.strip(" ：，,；;()（）")
+
+
+def _load_synonyms() -> dict:
+    """加载口语化同义词表（recipe_id → 额外语义短语）。
+    templates.jsonl 的 nl 都是书面语（"自车切入"），用户查询常是口语（"加塞/别我"），
+    不补同义词时向量召回基本失效。"""
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vector_synonyms.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load vector_synonyms.json: {e}")
+        return {}
+
+
 def _collect_template_entries() -> List[Tuple[str, str, str]]:
     """从 templates.jsonl + 用户策略 收集所有条目（不写DB）。
-    
+
     Returns:
         [(id, text_for_embedding, recipe_name), ...]
         id 使用 recipe 原始名称，确保与外部索引脚本一致。
     """
     entries = []
+    synonyms_map = _load_synonyms()
 
     # 1. 系统模板
     templates_path = os.path.join(
@@ -163,7 +190,14 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
             for line in f:
                 t = json.loads(line)
                 recipe_id = t.get("id", "")
-                text = f"{t.get('nl', '')} {t.get('domain', '')}"
+                # 索引文本 = 清洗后的语义描述 + recipe id（英文术语如 cut_in）+ 口语化同义词
+                # id 必须进文本，否则英文查询（"cut in"）完全匹配不到
+                text = " ".join(filter(None, [
+                    _clean_nl(t.get("nl", "")),
+                    recipe_id,
+                    t.get("domain", ""),
+                    synonyms_map.get(recipe_id, ""),
+                ]))
                 # id 使用 recipe 原始名称，与 BGE-M3 外部索引脚本一致
                 entries.append((f"tpl__{recipe_id}" if recipe_id else f"tpl__{len(entries)}", text, recipe_id))
 
@@ -180,7 +214,8 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
                 name = d.get("name", p.replace(".yaml", ""))
                 keywords = " ".join(d.get("keywords", []))
                 desc = d.get("description", "")
-                text = f"{keywords} {desc}"
+                text = " ".join(filter(None, [keywords, _clean_nl(desc), name,
+                                              synonyms_map.get(name, "")]))
                 entries.append((f"usr__{name}", text, name))
             except Exception as e:
                 logger.warning(f"Failed to load strategy {p}: {e}")
