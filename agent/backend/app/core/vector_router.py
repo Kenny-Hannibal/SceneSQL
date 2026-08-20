@@ -26,10 +26,85 @@ EMBED_MODEL_CANDIDATES = [
 ]
 EMBED_MODEL = None  # 在 _ensure_loaded() 中确定
 
+# ── HTTP embedding 服务模式（方案 B，2026-08-20）──
+# 指向 vLLM/OpenAI 兼容的 /v1/embeddings 服务（如本机 GPU 起的 bge-m3，
+# 通过反向 SSH 隧道暴露为 DSW 的 localhost 端口）。
+# 设置后不再加载本地 SentenceTransformer（DSW CPU 推理 3.3s/次 → HTTP+GPU ~20ms）。
+# 服务不可用时自动降级回本地模型。
+_EMBED_API_BASE = (os.environ.get("SCENESQL_EMBED_API") or "").rstrip("/")
+_EMBED_API_KEY = os.environ.get("SCENESQL_EMBED_API_KEY", "")
+_EMBED_API_MODEL = os.environ.get("SCENESQL_EMBED_MODEL_NAME", "bge-m3")
+_api_degraded = False  # HTTP 服务连续失败后置 True，本进程内降级用本地模型
+
+
+def _api_encode(texts):
+    """通过 OpenAI 兼容 /v1/embeddings API 编码。失败抛异常。"""
+    import requests
+    url = _EMBED_API_BASE
+    if not url.endswith("/embeddings"):
+        # 兼容传入 http://host:8101 / http://host:8101/v1 / http://host:8101/v1/embeddings
+        url = url + ("/v1/embeddings" if not url.endswith("/v1") else "/embeddings")
+    headers = {"Content-Type": "application/json"}
+    if _EMBED_API_KEY:
+        headers["Authorization"] = f"Bearer {_EMBED_API_KEY}"
+    resp = requests.post(
+        url,
+        json={"input": texts, "model": _EMBED_API_MODEL},
+        headers=headers,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = sorted(resp.json()["data"], key=lambda x: x["index"])
+    return [d["embedding"] for d in data]
+
+
+def _load_local_model() -> bool:
+    """加载进程内 SentenceTransformer（HTTP 模式的降级路径）。成功返回 True。"""
+    global _embedding_model, EMBED_MODEL
+    if _embedding_model is not None:
+        return True
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        logger.warning("sentence-transformers not installed")
+        return False
+    for candidate in EMBED_MODEL_CANDIDATES:
+        if not candidate:
+            continue
+        try:
+            _embedding_model = SentenceTransformer(candidate)
+            EMBED_MODEL = candidate
+            logger.info(f"Loaded embedding model: {candidate}")
+            return True
+        except Exception as e:
+            logger.debug(f"Model '{candidate}' not available: {e}")
+    return False
+
+
+def _encode(texts):
+    """统一编码入口：优先 HTTP embedding 服务，失败降级进程内模型。"""
+    global _api_degraded
+    if _EMBED_API_BASE and not _api_degraded:
+        try:
+            return _api_encode(texts)
+        except Exception as e:
+            logger.warning(f"Embedding API failed ({e}), degrading to local model "
+                           f"(will retry API after process restart)")
+            _api_degraded = True
+    if _load_local_model():
+        return _embedding_model.encode(texts, show_progress_bar=False).tolist()
+    raise RuntimeError("No embedding backend available (API down and no local model)")
+
 
 def _ensure_loaded():
-    """懒加载 ChromaDB 和 embedding 模型。首次调用时下载/加载。"""
-    global _chromadb, _collection, _embedding_model, _LOADED, EMBED_MODEL
+    """懒加载 ChromaDB 和 embedding 后端。首次调用时初始化。
+
+    两种 embedding 后端（由 SCENESQL_EMBED_API 决定）：
+    1. HTTP 服务模式：OpenAI 兼容 /v1/embeddings（vLLM serve bge-m3，DSW CPU 3.3s/次 → ~20ms）
+    2. 进程内模式：SentenceTransformer 加载本地模型（HTTP 不可用时的降级路径）
+    ChromaDB 索引两个后端共用（同一个 bge-m3 模型，向量空间一致）。
+    """
+    global _chromadb, _collection, _LOADED, EMBED_MODEL
     if _LOADED:
         return
 
@@ -40,25 +115,24 @@ def _ensure_loaded():
         logger.warning("chromadb not installed, vector routing disabled")
         return
 
-    try:
-        from sentence_transformers import SentenceTransformer
-        # 选择可用的 embedding 模型
-        for candidate in EMBED_MODEL_CANDIDATES:
-            if not candidate:
-                continue
-            try:
-                _embedding_model = SentenceTransformer(candidate)
-                EMBED_MODEL = candidate
-                logger.info(f"Loaded embedding model: {candidate}")
-                break
-            except Exception as e:
-                logger.debug(f"Model '{candidate}' not available: {e}")
-                continue
-        if _embedding_model is None:
+    if _EMBED_API_BASE:
+        # HTTP 服务模式：探活一次，确认可用
+        try:
+            probe = _api_encode(["probe"])
+            EMBED_MODEL = f"{_EMBED_API_MODEL}@{_EMBED_API_BASE}"
+            logger.info(f"Embedding HTTP mode: {EMBED_MODEL} (dim={len(probe[0])})")
+        except Exception as e:
+            global _api_degraded
+            _api_degraded = True
+            logger.warning(f"Embedding API {_EMBED_API_BASE} unavailable ({e}), "
+                           f"falling back to local SentenceTransformer")
+            _load_local_model()
+    else:
+        if not _load_local_model():
             logger.warning("No embedding model available, vector routing disabled")
             return
-    except ImportError:
-        logger.warning("sentence-transformers not installed, vector routing disabled")
+
+    if EMBED_MODEL is None and _embedding_model is None:
         return
 
     # ChromaDB 持久化目录 — 根据模型选择不同DB（BGE-M3和MiniLM维度不同，不能混用）
@@ -66,7 +140,7 @@ def _ensure_loaded():
         db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vector_db_bge_m3")
     else:
         db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vector_db")
-    client = chromadb.PersistentClient(path=db_dir)
+    client = _chromadb.PersistentClient(path=db_dir)
     _collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
@@ -79,7 +153,7 @@ def _ensure_loaded():
 def is_available() -> bool:
     """检查向量路由是否可用。"""
     _ensure_loaded()
-    return _LOADED and _collection is not None and _embedding_model is not None
+    return _LOADED and _collection is not None and (EMBED_MODEL is not None or _embedding_model is not None)
 
 
 def index_recipes(entries: List[Tuple[str, str, str]]):
@@ -102,8 +176,8 @@ def index_recipes(entries: List[Tuple[str, str, str]]):
     texts = [e[1] for e in entries]
     metadatas = [{"recipe_name": e[2]} for e in entries]
 
-    # 编码
-    embeddings = _embedding_model.encode(texts, show_progress_bar=False).tolist()
+    # 编码（HTTP embedding 服务优先，降级本地模型）
+    embeddings = _encode(texts)
 
     _collection.add(
         ids=ids,
@@ -127,7 +201,7 @@ def search(query: str, top_k: int = 3) -> List[Tuple[str, float]]:
     if not is_available() or _collection.count() == 0:
         return []
 
-    query_embedding = _embedding_model.encode([query], show_progress_bar=False).tolist()
+    query_embedding = _encode([query])
     results = _collection.query(
         query_embeddings=query_embedding,
         n_results=min(top_k, _collection.count()),
