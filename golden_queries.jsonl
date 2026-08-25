@@ -12,7 +12,7 @@
 {"id": "rg-12", "category": "colloquial", "question": "有人横穿马路鬼探头的场景", "expect": {"must_contain": ["tag_name"]}}
 {"id": "rg-13", "category": "colloquial", "question": "过环岛转盘的场景", "expect": {"must_contain": ["tag_name"]}}
 {"id": "rg-14", "category": "colloquial", "question": "走错路偏航了的场景", "expect": {"must_contain": ["tag_name"]}}
-{"id": "rg-15", "category": "negation", "question": "查询变道场景但不要高速公路上的", "expect": {"must_contain": ["tag_name"], "must_not_contain_any_of": ["sl.link_class = '高速公路'"], "comment": "否定高速：不应出现高速过滤条件"}}
+{"id": "rg-15", "category": "negation", "question": "查询变道场景但不要高速公路上的", "expect": {"must_contain": ["NOT EXISTS", "高速公路"], "comment": "否定高速：应以 NOT EXISTS 排除高速（v2修正断言：原断言误杀正确的否定写法）"}}
 {"id": "rg-16", "category": "negation", "question": "查询非高速道路上前车急刹的场景", "expect": {"must_contain": ["tag_name"]}}
 {"id": "rg-17", "category": "aggregation", "question": "统计每个bag_id有多少条标签记录", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["GROUP BY"], "comment": "聚合查询（rg-17修复后回归用例）：应跳过 start_ts/end_ts 锚定校验正常返回"}}
 {"id": "rg-18", "category": "aggregation", "question": "查询标签数量最多的前10种tag_name", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["COUNT"]}}

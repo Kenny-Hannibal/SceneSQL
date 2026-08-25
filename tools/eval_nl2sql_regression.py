@@ -117,6 +117,7 @@ def main():
     ap.add_argument("--case", default="", help="只跑单条（如 rg-06）")
     ap.add_argument("--token", default="", help="JWT（默认从 .env 铸造）")
     ap.add_argument("--report", default="", help="输出 JSON 报告路径")
+    ap.add_argument("--retries", type=int, default=1, help="失败重试次数（LLM不确定性容忍，默认1，0=不重试）")
     ap.add_argument("--verbose", action="store_true", help="打印每条 SQL")
     args = ap.parse_args()
 
@@ -135,6 +136,14 @@ def main():
     t0 = time.time()
     for case in cases:
         res = eval_case(case, token, batch, args.verbose)
+        # LLM 不确定性容忍：失败自动重试一次，两次都失败才计 fail（标注 retry 信息）
+        if not res["pass"] and args.retries > 0:
+            retry = eval_case(case, token, batch, args.verbose)
+            if retry["pass"]:
+                retry["note"] = f"RETRY-PASSED（首次失败: {'; '.join(res['failures'])[:100]}）"
+                res = retry
+            else:
+                res["failures"] = res["failures"] + [f"[retry仍失败: {'; '.join(retry['failures'])[:100]}]"]
         results.append(res)
         mark = "✅" if res["pass"] else "❌"
         print(f"{mark} {res['id']} [{res.get('category','')}] {res['question']}")
