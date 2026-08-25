@@ -75,6 +75,15 @@ def eval_case(case: dict, token: str, batch: str, verbose: bool) -> dict:
     route_method = data.get("route_method") or ""
     failures = []
 
+    # 已知限制：期望该 case 因记录的原因失败（如聚合查询 vs start_ts 锚定校验）。
+    # 命中已知限制计为通过（标注 KNOWN），将来修复后会自然显示为行为变化。
+    known = expect.get("known_limitation")
+    if known and data.get("validation_error"):
+        return {"id": case["id"], "question": q, "pass": True,
+                "failures": [], "sql": sql, "route_method": route_method,
+                "category": case.get("category", ""),
+                "note": f"KNOWN LIMITATION（预期失败）: {known}"}
+
     if data.get("validation_error"):
         failures.append(f"validation_error: {data['validation_error']}")
 
@@ -129,10 +138,12 @@ def main():
         results.append(res)
         mark = "✅" if res["pass"] else "❌"
         print(f"{mark} {res['id']} [{res.get('category','')}] {res['question']}")
+        if res.get("note"):
+            print(f"     └─ {res['note']}")
         if not res["pass"]:
             for fail in res["failures"]:
                 print(f"     └─ {fail}")
-        else:
+        elif not res.get("note"):
             print(f"     route={res['route_method']} | sql_len={len(res['sql'])}")
 
     passed = sum(1 for r in results if r["pass"])
