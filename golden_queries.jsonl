@@ -14,7 +14,7 @@
 {"id": "rg-14", "category": "colloquial", "question": "走错路偏航了的场景", "expect": {"must_contain": ["tag_name"]}}
 {"id": "rg-15", "category": "negation", "question": "查询变道场景但不要高速公路上的", "expect": {"must_contain": ["tag_name"], "must_not_contain_any_of": ["sl.link_class = '高速公路'"], "comment": "否定高速：不应出现高速过滤条件"}}
 {"id": "rg-16", "category": "negation", "question": "查询非高速道路上前车急刹的场景", "expect": {"must_contain": ["tag_name"]}}
-{"id": "rg-17", "category": "aggregation", "question": "统计每个bag_id有多少条标签记录", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["GROUP BY"], "known_limitation": "聚合查询无行级时间语义，与 start_ts/end_ts 可视化锚定校验(_check_start_end_ts)冲突，当前预期 validation_error；待'非可视化结果类型'支持后应改为通过"}}
+{"id": "rg-17", "category": "aggregation", "question": "统计每个bag_id有多少条标签记录", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["GROUP BY"], "comment": "聚合查询（rg-17修复后回归用例）：应跳过 start_ts/end_ts 锚定校验正常返回"}}
 {"id": "rg-18", "category": "aggregation", "question": "查询标签数量最多的前10种tag_name", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["COUNT"]}}
 {"id": "rg-19", "category": "schema_presence", "question": "查询在高速公路上行驶的场景", "expect": {"must_contain": ["static_link"], "comment": "纯高速场景必须有static_link JOIN"}}
 {"id": "rg-20", "category": "recipe_exact", "question": "查询无保护左转的场景", "expect": {"route_method": ["recipe_guided", "llm"], "must_contain": ["tag_name"]}}
@@ -23,3 +23,4 @@
 {"id": "rg-23", "category": "recipe_exact", "question": "查询路口直行的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
 {"id": "rg-24", "category": "negation", "question": "查询切入场景但排除卡车切入", "expect": {"must_contain": ["tag_name"]}}
 {"id": "rg-25", "category": "basic_contract", "question": "查询变道的场景", "expect": {"must_contain": ["tag_name", "start_ts", "end_ts"], "comment": "基本契约：结果必须含tag_name/start_ts/end_ts"}}
+{"id": "rg-26", "category": "recipe_constrained", "question": "查询高速上下匝道的场景", "expect": {"must_contain": ["static_link"], "comment": "高速+匝道复合约束（add_golden_case 工具首个转正用例）"}}

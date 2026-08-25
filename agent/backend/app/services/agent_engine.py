@@ -52,6 +52,8 @@ class AgentResult:
     correction_rounds: int = 0
     max_corrections_exceeded: bool = False
     sql_source: str = "llm"  # "recipe" or "llm"
+    # 聚合/统计类结果没有行级时间语义，不可锚定视频片段（rg-17）
+    visualizable: bool = True
 
 
 
@@ -400,6 +402,22 @@ class AgentEngine:
     DB_QUERY_TIMEOUT = int(os.environ.get("DB_QUERY_TIMEOUT", "5"))
     # 整体查询超时（秒）— 避免全量扫描 11878 DB 无限运行
     BATCH_TIMEOUT = int(os.environ.get("BATCH_TIMEOUT", "180"))
+
+    @staticmethod
+    def _is_aggregate_sql(sql: str) -> bool:
+        """判断 SQL 是否为聚合/统计类（无行级时间语义）。
+
+        这类结果（GROUP BY / 顶层 COUNT/SUM/AVG 等）每行是一个统计值而非时间片段，
+        无法锚定视频可视化，应跳过 start_ts/end_ts 校验并标记 visualizable=False（rg-17）。
+        """
+        upper = re.sub(r"--.*?\n", "\n", sql).upper()
+        if re.search(r"\bGROUP\s+BY\b", upper):
+            return True
+        # 顶层聚合函数且不含行级时间列
+        if re.search(r"\b(COUNT|SUM|AVG|MIN|MAX)\s*\(", upper) \
+                and "START_TS" not in upper and "END_TS" not in upper:
+            return True
+        return False
 
     def _check_start_end_ts(self, sql: str) -> Optional[str]:
         """校验 LLM 生成的 SQL 是否包含 start_ts 和 end_ts 输出列。
@@ -1009,7 +1027,10 @@ class AgentEngine:
             for attempt in range(max_corrections + 1):
                 ok, err_msg = self._dry_run(sql)
                 if ok:
-                    # ── start_ts/end_ts 校验 ──
+                    # ── start_ts/end_ts 校验（聚合类结果无行级时间语义，跳过）──
+                    if self._is_aggregate_sql(sql):
+                        logger.info("Aggregate SQL detected, skip start_ts/end_ts check (visualizable=False)")
+                        break
                     ts_err = self._check_start_end_ts(sql)
                     if ts_err:
                         ok = False
@@ -1055,6 +1076,8 @@ class AgentEngine:
             result = await self._query_single(sql, result_limit=result_limit)
         result.sql_source = sql_source
         result.correction_rounds = correction_rounds
+        # 聚合/统计类结果标记为不可视化（rg-17：无行级时间语义，无法锚定视频片段）
+        result.visualizable = not self._is_aggregate_sql(sql)
         return result
 
     # generate-sql 路径的纠错预算（语义同 MAX_CORRECTIONS：容忍失败次数，实际纠错 = N-1 次）
@@ -1211,6 +1234,9 @@ class AgentEngine:
                 for attempt in range(self.GENERATE_MAX_CORRECTIONS + 1):
                     ok, err_msg = self._dry_run(sql)
                     if ok:
+                        # 聚合类结果无行级时间语义，跳过 start_ts/end_ts 校验（rg-17）
+                        if self._is_aggregate_sql(sql):
+                            break
                         ts_err = self._check_start_end_ts(sql)
                         if ts_err:
                             ok, err_msg = False, ts_err
@@ -1239,6 +1265,8 @@ class AgentEngine:
             "route_method": route_method,
             "matched_tags": concepts,
             "involved_tables": sorted(involved_tables),
+            # 聚合/统计类结果不可视化（rg-17）
+            "visualizable": not self._is_aggregate_sql(sql),
         }
 
 

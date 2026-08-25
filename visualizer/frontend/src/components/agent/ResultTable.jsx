@@ -22,6 +22,8 @@ export default function ResultTable({
 }) {
   const columns = result?.columns || [];
   const hasResults = allRows.length > 0;
+  // 聚合/统计类结果（GROUP BY/COUNT 等）无行级时间语义，不展示可视化按钮（rg-17）
+  const visualizable = result?.visualizable !== false;
 
   // 双向滚动条同步：顶部 + 底部
   useEffect(() => {
@@ -152,14 +154,20 @@ export default function ResultTable({
                         position: 'sticky', right: 0, background: isVisualized ? '#e6f4ff' : zebra, zIndex: 1,
                         boxShadow: '-2px 0 4px rgba(0,0,0,0.05)', whiteSpace: 'nowrap',
                       }}>
-                        <button
-                          onClick={() => onVisualize(row, rowKey)}
-                          disabled={actionDisabled}
-                          title={actionDisabled ? '请先关闭当前弹窗' : '播包可视化'}
-                          style={btn.outline(colors.primary, actionDisabled)}
-                        >
-                          📹 播包可视化
-                        </button>
+                        {visualizable ? (
+                          <button
+                            onClick={() => onVisualize(row, rowKey)}
+                            disabled={actionDisabled}
+                            title={actionDisabled ? '请先关闭当前弹窗' : '播包可视化'}
+                            style={btn.outline(colors.primary, actionDisabled)}
+                          >
+                            📹 播包可视化
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: 11, color: colors.textTertiary }} title="聚合/统计结果无行级时间语义，不可锚定视频片段">
+                            统计结果
+                          </span>
+                        )}
                         {matchedLabels[labelKey(row)] && (
                           <span
                             title={matchedLabels[labelKey(row)] === 'pass' ? '已标注：通过' : '已标注：不通过'}

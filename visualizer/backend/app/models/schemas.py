@@ -67,6 +67,8 @@ class AgentQueryResponse(BaseModel):
     page_size: int = 50
     correction_rounds: int = 0
     max_corrections_exceeded: bool = False
+    # 聚合/统计类结果为 False：无行级时间语义，前端隐藏可视化按钮（rg-17）
+    visualizable: bool = True
 
 
 class ExecuteSQLRequest(BaseModel):

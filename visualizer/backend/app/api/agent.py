@@ -423,6 +423,7 @@ async def agent_query(req: AgentQueryRequest):
         total_rows=total_rows,
         page=page,
         page_size=page_size,
+        visualizable=getattr(result, "visualizable", True),
     )
 
 
@@ -567,6 +568,7 @@ async def execute_sql(req: ExecuteSQLRequest):
         total_rows=total_rows,
         page=page,
         page_size=page_size,
+        visualizable=getattr(result, "visualizable", True),
     )
 
 
