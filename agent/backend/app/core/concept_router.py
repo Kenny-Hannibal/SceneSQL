@@ -733,8 +733,11 @@ class ConceptRouter:
             # 否定词护栏（2026-08-20）：双塔 embedding 无法区分正反语义
             # （"靠右"与"不要靠右"余弦相似度 >0.9），NL 含否定意图时跳过向量短路，
             # 交给 Round 2 LLM 结合完整问题自由生成（参考 SQL 模式下 LLM 看得到问题）。
-            _NEGATION_MARKERS = ("不要", "不用", "别查", "排除", "不包含", "非高速", "禁止",
-                                 "避免", "除了", "不考虑", "不查", "没有")
+            # 注意（2026-08-25 修正）：只拦"概念级否定"（不要X/排除X），不拦"约束级否定"
+            # （非高速/没有XX 是排除条件，锚定正例 recipe + LLM 加 NOT EXISTS 才是正确路径，
+            # rg-16 教训：拦了约束否定反而丢掉 recipe 锚点导致 LLM 自由发挥输出非 SQL）
+            _NEGATION_MARKERS = ("不要", "不用", "别查", "排除", "不包含", "禁止",
+                                 "避免", "除了", "不考虑", "不查")
             _has_negation = any(m in nl for m in _NEGATION_MARKERS)
             if not result.get("recipe") and not result.get("_routed") and nl and not _has_negation:
                 try:
