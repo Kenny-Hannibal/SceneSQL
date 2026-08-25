@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 import yaml
 from pathlib import Path
 from typing import Any
@@ -727,15 +728,27 @@ class ConceptRouter:
                         result["recipe_variant"] = result.get("recipe_variant") or variant
                         result["sql_source"] = "user_strategy" if key in self._user_strategy_map else "recipe"
                         logger.info(f"Phase3 NL match: '{nl}' -> '{key}' (len={len(key)})")
-            # Phase 4a: 向量语义搜索（ChromaDB + MiniLM）
-            if not result.get("recipe") and not result.get("_routed") and nl:
+            # Phase 4a: 向量语义搜索（ChromaDB + BGE-M3/MiniLM）
+            #
+            # 否定词护栏（2026-08-20）：双塔 embedding 无法区分正反语义
+            # （"靠右"与"不要靠右"余弦相似度 >0.9），NL 含否定意图时跳过向量短路，
+            # 交给 Round 2 LLM 结合完整问题自由生成（参考 SQL 模式下 LLM 看得到问题）。
+            _NEGATION_MARKERS = ("不要", "不用", "别查", "排除", "不包含", "非高速", "禁止",
+                                 "避免", "除了", "不考虑", "不查", "没有")
+            _has_negation = any(m in nl for m in _NEGATION_MARKERS)
+            if not result.get("recipe") and not result.get("_routed") and nl and not _has_negation:
                 try:
                     from .vector_router import search as vector_search, is_available as vector_available, EMBED_MODEL
                     if vector_available():
-                        hits = vector_search(nl, top_k=1)
-                        # Phase 4a threshold: MiniLM→0.35 (strict); BGE-M3→0.40 (75% precision, 57% recall)
-                        _vec_threshold = 0.40 if "bge-m3" in (EMBED_MODEL or "").lower() else 0.35
-                        if hits and hits[0][1] < _vec_threshold:
+                        hits = vector_search(nl, top_k=2)
+                        # 阈值按 2026-08-20 同义词增强后的分布重校准：
+                        # 正确命中集中 0.20-0.31，误报线在 0.4+，收紧到 0.35（env 可覆盖）
+                        _vec_threshold = float(os.environ.get("SCENESQL_VEC_THRESHOLD", "0.35"))
+                        # margin 检查：top1 与 top2 距离差需 ≥0.03，防止贴脸误路由
+                        _margin = float(os.environ.get("SCENESQL_VEC_MARGIN", "0.03"))
+                        _ok = (hits and hits[0][1] < _vec_threshold
+                               and (len(hits) < 2 or hits[1][1] - hits[0][1] >= _margin))
+                        if _ok:
                             recipe_name = hits[0][0]
                             # 在 combined_map 中查找 recipe_name 对应的 key
                             matched_key = None
@@ -748,9 +761,12 @@ class ConceptRouter:
                                 result["recipe"] = recipe
                                 result["recipe_variant"] = result.get("recipe_variant") or variant
                                 result["sql_source"] = "user_strategy" if matched_key in self._user_strategy_map else "recipe_vector"
-                                logger.info(f"Phase4a vector match: '{nl}' → '{recipe_name}' (dist={hits[0][1]:.3f})")
+                                _m = hits[1][1] - hits[0][1] if len(hits) > 1 else 9.99
+                                logger.info(f"Phase4a vector match: '{nl}' → '{recipe_name}' (dist={hits[0][1]:.3f}, margin={_m:.3f})")
                 except Exception as e:
                     logger.debug(f"Vector search failed: {e}")
+            elif _has_negation and nl and not result.get("recipe") and not result.get("_routed"):
+                logger.info(f"Phase4a skipped: negation detected in NL: '{nl}'")
             # Phase 4: n-gram 余弦相似度兜底 — 语义模糊匹配
             if not result.get("recipe") and not result.get("_routed") and nl:
                 best_key, best_score = self._fuzzy_match(nl)

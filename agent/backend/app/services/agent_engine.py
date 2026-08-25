@@ -806,12 +806,19 @@ class AgentEngine:
         # ── Round 1: 概念识别 ──
         r1_messages = concept_router.get_round1_messages(question)
         # Round 1用JSON mode + 低温度
-        r1_raw = await self.llm.chat(
-            r1_messages[0]["content"],
-            r1_messages[1]["content"],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
+        try:
+            r1_raw = await self.llm.chat(
+                r1_messages[0]["content"],
+                r1_messages[1]["content"],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            # LLM 单点故障降级（2026-08-20）：DeepSeek/API 挂了不瘫，
+            # 降级到旧关键词路径（TagRouter 单轮生成），保证链路可用。
+            # 换模型无需改码：LLMClient 走 OPENAI_BASE_URL/AGENT_MAIN_MODEL 环境变量。
+            logger.error("Round 1 LLM 调用失败，降级到关键词路径: %s", e)
+            return await self.query(question, result_limit, db_limit, max_workers, use_two_round=False)
         try:
             r1_result = concept_router.parse_round1_output(r1_raw, question)
         except Exception as e:

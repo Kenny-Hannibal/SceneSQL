@@ -291,6 +291,9 @@ def _collect_template_entries() -> List[Tuple[str, str, str]]:
             try:
                 with open(os.path.join(strategy_dir, p)) as f:
                     d = yaml.safe_load(f)
+                # disabled 策略不进向量索引（与路由 map 过滤保持一致）
+                if d.get("status", "active") != "active":
+                    continue
                 name = d.get("name", p.replace(".yaml", ""))
                 keywords = " ".join(d.get("keywords", []))
                 desc = d.get("description", "")

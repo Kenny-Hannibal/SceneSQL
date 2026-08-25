@@ -137,6 +137,25 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
     } catch (e) { toast.error('删除失败: ' + e.message); }
   };
 
+  // 启停策略（disabled 保留存档但不进路由/向量索引）
+  const handleToggleStrategyStatus = async (s) => {
+    const next = s.status === 'disabled' ? 'active' : 'disabled';
+    try {
+      const res = await authFetch(`${API_BASE}/api/strategies/${encodeURIComponent(s.name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (res.ok) {
+        toast.success(next === 'active' ? `已启用 ${s.name}` : `已停用 ${s.name}（不再参与路由与索引）`);
+        loadStrategyList();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        toast.error(d.detail || '更新失败');
+      }
+    } catch (e) { toast.error('更新失败: ' + e.message); }
+  };
+
   const handleLoadStrategy = (s) => {
     setSqlEditor(s.sql);
     setStrategyListOpen(false);
@@ -304,6 +323,7 @@ export function useStrategies({ getSqlEditor, setSqlEditor, playerData }) {
     loadStrategyList,
     handleSaveStrategy,
     handleDeleteStrategy,
+    handleToggleStrategyStatus,
     handleLoadStrategy,
     handleLabel,
     handleSyncStrategyDm,

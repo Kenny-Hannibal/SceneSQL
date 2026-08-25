@@ -1,0 +1,25 @@
+{"id": "rg-01", "category": "recipe_exact", "question": "查询自车切入的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["cutin"], "must_not_contain": ["static_link"]}}
+{"id": "rg-02", "category": "recipe_exact", "question": "查询路口左转的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-03", "category": "recipe_exact", "question": "查询下匝道的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-04", "category": "recipe_exact", "question": "查询前车急刹的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-05", "category": "recipe_exact", "question": "查询跟车太近的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-06", "category": "recipe_constrained", "question": "查询高速道路上自车cut in的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["static_link"], "comment": "高速约束必须出现（参考SQL模式的核心回归用例）"}}
+{"id": "rg-07", "category": "recipe_constrained", "question": "查询高速道路上跟车过近的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["static_link"]}}
+{"id": "rg-08", "category": "recipe_constrained", "question": "查询城区道路上前车急刹的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["static_link"]}}
+{"id": "rg-09", "category": "compound", "question": "查询路口左转并且有行人横穿的场景", "expect": {"route_method": ["hybrid", "llm"], "must_contain": ["tag_name"]}}
+{"id": "rg-10", "category": "compound", "question": "查询变道后紧接着急刹的场景", "expect": {"route_method": ["hybrid", "llm", "recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-11", "category": "colloquial", "question": "旁边车道有车加塞插到我前面的场景", "expect": {"must_contain": ["tag_name"], "comment": "口语化查询，语义应为cut-in相关"}}
+{"id": "rg-12", "category": "colloquial", "question": "有人横穿马路鬼探头的场景", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-13", "category": "colloquial", "question": "过环岛转盘的场景", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-14", "category": "colloquial", "question": "走错路偏航了的场景", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-15", "category": "negation", "question": "查询变道场景但不要高速公路上的", "expect": {"must_contain": ["tag_name"], "must_not_contain_any_of": ["sl.link_class = '高速公路'"], "comment": "否定高速：不应出现高速过滤条件"}}
+{"id": "rg-16", "category": "negation", "question": "查询非高速道路上前车急刹的场景", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-17", "category": "aggregation", "question": "统计每个bag_id有多少条标签记录", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["GROUP BY"]}}
+{"id": "rg-18", "category": "aggregation", "question": "查询标签数量最多的前10种tag_name", "expect": {"route_method": ["llm", "hybrid"], "must_contain": ["COUNT"]}}
+{"id": "rg-19", "category": "schema_presence", "question": "查询在高速公路上行驶的场景", "expect": {"must_contain": ["static_link"], "comment": "纯高速场景必须有static_link JOIN"}}
+{"id": "rg-20", "category": "recipe_exact", "question": "查询无保护左转的场景", "expect": {"route_method": ["recipe_guided", "llm"], "must_contain": ["tag_name"]}}
+{"id": "rg-21", "category": "colloquial", "question": "前面大货车突然别过来的场景", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-22", "category": "recipe_exact", "question": "查询上匝道的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-23", "category": "recipe_exact", "question": "查询路口直行的场景", "expect": {"route_method": ["recipe_guided"], "must_contain": ["tag_name"]}}
+{"id": "rg-24", "category": "negation", "question": "查询切入场景但排除卡车切入", "expect": {"must_contain": ["tag_name"]}}
+{"id": "rg-25", "category": "basic_contract", "question": "查询变道的场景", "expect": {"must_contain": ["tag_name", "start_ts", "end_ts"], "comment": "基本契约：结果必须含tag_name/start_ts/end_ts"}}

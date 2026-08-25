@@ -35,12 +35,14 @@ class StrategyUpdateRequest(BaseModel):
     tag_name: Optional[str] = None
     sql: Optional[str] = None
     description: Optional[str] = None
+    status: Optional[str] = None  # "active" | "disabled" — disabled 的策略不进路由与向量索引
 
 
 class StrategyInfo(BaseModel):
     name: str
     keywords: List[str]
     tag_name: str
+    status: str = "active"  # "active" | "disabled"
     sql: str
     description: str
     created_at: Optional[float] = None
@@ -74,6 +76,7 @@ class UserStrategyManager:
                     tag_name=d.get("variants", {}).get("default", {}).get("tag_name", ""),
                     sql=d.get("variants", {}).get("default", {}).get("raw_sql", ""),
                     description=d.get("description", ""),
+                    status=d.get("status", "active"),
                     created_at=d.get("created_at"),
                     updated_at=d.get("updated_at"),
                 ))
@@ -94,6 +97,7 @@ class UserStrategyManager:
             tag_name=d.get("variants", {}).get("default", {}).get("tag_name", ""),
             sql=d.get("variants", {}).get("default", {}).get("raw_sql", ""),
             description=d.get("description", ""),
+            status=d.get("status", "active"),
             created_at=d.get("created_at"),
             updated_at=d.get("updated_at"),
         )
@@ -143,6 +147,10 @@ class UserStrategyManager:
             d["variants"]["default"]["tag_name"] = req.tag_name
         if req.sql is not None:
             d["variants"]["default"]["raw_sql"] = req.sql
+        if req.status is not None:
+            if req.status not in ("active", "disabled"):
+                raise ValueError(f"Invalid status: {req.status}（只允许 active/disabled）")
+            d["status"] = req.status
         d["updated_at"] = time.time()
 
         with open(p, "w") as f:
@@ -161,9 +169,12 @@ class UserStrategyManager:
         return True
 
     def get_concept_recipe_map_entries(self) -> dict:
-        """返回可供 ConceptRouter 注入的 {keyword: (recipe_name, variant)} 映射。"""
+        """返回可供 ConceptRouter 注入的 {keyword: (recipe_name, variant)} 映射。
+        仅收 status=active 的策略（disabled 版本保留存档但不进路由）。"""
         entries = {}
         for info in self.list_strategies():
+            if info.status != "active":
+                continue
             for kw in info.keywords:
                 entries[kw] = (info.name, "default")
         return entries

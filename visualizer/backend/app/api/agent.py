@@ -4,6 +4,7 @@ import json
 import re
 import io
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Query
@@ -246,22 +247,55 @@ def list_batches():
     return list(batch_map.values())
 
 
-# ── resolve-bag-path 结果缓存 ──
+# ── resolve-bag-path 结果缓存（内存 + 磁盘双层）──
 # resolve 走 dm_sdk 远程元数据查询（ubm_vehicle_module_bin + 原始表两次远程调用），
-# 冷查询 5~30s。同一 bag 重复可视化（播包/换 topic/重新打开）非常频繁，
-# 缓存后重复解析即时返回。仅缓存成功结果；TTL 1 小时。
+# 冷查询 5~30s。同一 bag 重复可视化（播包/换 topic/重新打开）非常频繁。
+# 内存缓存抗高频重复；磁盘缓存（JSON）让 deploy --force 重启后依然秒回
+# （bag_id→路径映射基本不可变，TTL 24h 兜底过期）。仅缓存成功结果。
 _RESOLVE_CACHE: dict = {}  # bag_id -> (expire_ts, result_dict)
-_RESOLVE_CACHE_TTL = 3600
+_RESOLVE_CACHE_TTL = int(os.environ.get("RESOLVE_CACHE_TTL", "86400"))
 _RESOLVE_CACHE_MAX = 1000
+_RESOLVE_CACHE_FILE = os.environ.get("RESOLVE_CACHE_FILE", "/tmp/rosbag_path_cache.json")
+_RESOLVE_CACHE_DIRTY = False
 
 
-@router.get("/resolve-bag-path")
-async def resolve_bag_path(bag_id: str):
-    """根据 bag_id 解析 bag 本地路径（用于前端可视化）。
+def _load_resolve_cache():
+    """启动时从磁盘恢复缓存。"""
+    global _RESOLVE_CACHE
+    try:
+        if os.path.exists(_RESOLVE_CACHE_FILE):
+            with open(_RESOLVE_CACHE_FILE) as f:
+                data = json.load(f)
+            now = time.time()
+            _RESOLVE_CACHE = {k: (v["expire"], v["result"]) for k, v in data.items()
+                              if v.get("expire", 0) > now}
+            logger.info(f"resolve cache restored from {_RESOLVE_CACHE_FILE}: {len(_RESOLVE_CACHE)} entries")
+    except Exception as e:
+        logger.warning(f"resolve cache load failed (ignored): {e}")
+        _RESOLVE_CACHE = {}
 
-    同时返回 em_bin 路径，3D BEV 视图需要从 em bin 目录读取 fusion_map_plus.bin。
-    """
-    import time
+
+def _save_resolve_cache():
+    """落盘缓存（原子写）。失败不影响主流程。"""
+    global _RESOLVE_CACHE_DIRTY
+    if not _RESOLVE_CACHE_DIRTY:
+        return
+    try:
+        tmp = _RESOLVE_CACHE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({k: {"expire": v[0], "result": v[1]} for k, v in _RESOLVE_CACHE.items()}, f)
+        os.replace(tmp, _RESOLVE_CACHE_FILE)
+        _RESOLVE_CACHE_DIRTY = False
+    except Exception as e:
+        logger.warning(f"resolve cache save failed (ignored): {e}")
+
+
+_load_resolve_cache()
+
+
+async def _resolve_bag_path_core(bag_id: str) -> dict:
+    """解析 bag_id → 路径（带双层缓存）。预取与 HTTP 端点共用。"""
+    global _RESOLVE_CACHE_DIRTY
     now = time.time()
     cached = _RESOLVE_CACHE.get(bag_id)
     if cached and cached[0] > now:
@@ -298,11 +332,33 @@ async def resolve_bag_path(bag_id: str):
             if len(_RESOLVE_CACHE) >= _RESOLVE_CACHE_MAX:
                 _RESOLVE_CACHE.clear()
             _RESOLVE_CACHE[bag_id] = (now + _RESOLVE_CACHE_TTL, result)
+            _RESOLVE_CACHE_DIRTY = True
+            _save_resolve_cache()
         return result
     except ImportError:
         return {"bag_id": bag_id, "bag_path": "", "error": "dm_sdk not installed"}
     except Exception as e:
         return {"bag_id": bag_id, "bag_path": "", "error": str(e)}
+
+
+@router.get("/resolve-bag-path")
+async def resolve_bag_path(bag_id: str):
+    """根据 bag_id 解析 bag 本地路径（用于前端可视化）。
+
+    同时返回 em_bin 路径，3D BEV 视图需要从 em bin 目录读取 fusion_map_plus.bin。
+    """
+    return await _resolve_bag_path_core(bag_id)
+
+
+async def _prefetch_resolve(bag_ids):
+    """后台预取：查询结果返回后，提前解析其中的 bag_id，
+    用户点可视化时 resolve 已命中缓存（冷查询 5~30s 的等待被消化在后台）。"""
+    for bid in bag_ids:
+        try:
+            await _resolve_bag_path_core(bid)
+        except Exception as e:
+            logger.debug(f"prefetch resolve failed for {bid}: {e}")
+    logger.info(f"prefetch resolve done: {len(bag_ids)} bags")
 
 
 def _paginate_rows(rows, page: int, page_size: int):
@@ -338,6 +394,23 @@ async def agent_query(req: AgentQueryRequest):
     page = max(req.page, 1)
     page_size = max(req.page_size, 1)
     page_rows, total_rows = _paginate_rows(result.rows, page, page_size)
+
+    # 后台预取：提前解析结果中缺 bag_path 的 bag_id（上限 20 个，去重），
+    # 用户点可视化时 resolve 已命中缓存，消除 5~30s 的冷查询等待
+    try:
+        prefetch_ids = []
+        seen = set()
+        for row in page_rows:
+            bid = row.get("bag_id")
+            if bid and not row.get("bag_path") and bid not in seen:
+                seen.add(bid)
+                prefetch_ids.append(bid)
+            if len(prefetch_ids) >= 20:
+                break
+        if prefetch_ids:
+            asyncio.create_task(_prefetch_resolve(prefetch_ids))
+    except Exception as e:
+        logger.debug(f"prefetch resolve skipped: {e}")
 
     return AgentQueryResponse(
         sql=result.sql,

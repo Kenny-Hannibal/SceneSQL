@@ -9,6 +9,7 @@ export default function StrategyPanel({
   strategyList,
   syncBusy,
   onDeleteStrategy,
+  onToggleStatus,
   validationSet,            // {name, cases, loading} | null
   onToggleValidationSet,    // (strategy) => void —— 展开/收起该策略的验证集
   onOpenEvalSync, onSyncStrategyDm,
@@ -26,18 +27,29 @@ export default function StrategyPanel({
     <div style={{ border: `1px solid ${colors.border}`, borderRadius: radius.md, overflow: 'hidden' }}>
       {strategyList.map((s) => {
         const expanded = validationSet?.name === s.name;
+        const disabled = s.status === 'disabled';
         return (
           <div key={s.name} style={{ borderBottom: `1px solid ${colors.borderLight}` }}>
             {/* ── 策略行 ── */}
-            <div style={{ padding: '10px 14px', background: '#fff' }}>
+            <div style={{ padding: '10px 14px', background: disabled ? colors.bgStripe : '#fff', opacity: disabled ? 0.65 : 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
                   <strong style={{ fontSize: 14 }}>{s.name}</strong>
+                  {disabled && (
+                    <span style={{ ...badge(colors.textTertiary), marginLeft: 6 }}>已停用</span>
+                  )}
                   <span style={{ marginLeft: 8, fontSize: 11, color: colors.textTertiary }}>
                     关键词: {s.keywords.join(', ')}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => onToggleStatus(s)}
+                    style={btn.outline(disabled ? colors.success : colors.textTertiary, false)}
+                    title={disabled ? '启用后重新参与路由与索引' : '停用后保留存档但不进路由/索引'}
+                  >
+                    {disabled ? '启用' : '停用'}
+                  </button>
                   <button onClick={() => onToggleValidationSet(s)} style={btn.outline(colors.cyan, false, expanded)}>
                     验证集 {expanded ? '▲' : '▼'}
                   </button>

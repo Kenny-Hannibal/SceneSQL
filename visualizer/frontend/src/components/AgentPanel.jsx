@@ -1041,6 +1041,7 @@ export default function AgentPanel() {
             strategyList={strategies.strategyList}
             syncBusy={strategies.syncBusy}
             onDeleteStrategy={strategies.handleDeleteStrategy}
+            onToggleStatus={strategies.handleToggleStrategyStatus}
             validationSet={strategies.validationSet}
             onToggleValidationSet={strategies.toggleValidationSet}
             onOpenEvalSync={strategies.openEvalSyncModal}
