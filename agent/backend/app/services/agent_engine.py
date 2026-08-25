@@ -3,6 +3,7 @@
 
 import os
 import re
+import json
 import sqlite3
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -402,6 +403,18 @@ class AgentEngine:
     DB_QUERY_TIMEOUT = int(os.environ.get("DB_QUERY_TIMEOUT", "5"))
     # 整体查询超时（秒）— 避免全量扫描 11878 DB 无限运行
     BATCH_TIMEOUT = int(os.environ.get("BATCH_TIMEOUT", "180"))
+
+    @staticmethod
+    def _enum_keywords(concepts, reference_sql=None):
+        """构造 range_tag 枚举精选关键词：Round 1 概念（多为中文）+ 参考 SQL 中的
+        UPPER_SNAKE tag 词及其 ≥4 字母部件（英文 tag 名如 CRUISE_CUTIN）。
+        中文概念几乎匹配不到英文枚举，没有 tag 词补充时下限保护会让精选形同虚设。"""
+        kws = set(concepts)
+        if reference_sql:
+            for tok in re.findall(r"\b[A-Z][A-Z0-9_]{3,}\b", reference_sql):
+                kws.add(tok)
+                kws.update(p for p in tok.split("_") if len(p) >= 4)
+        return kws
 
     @staticmethod
     def _is_aggregate_sql(sql: str) -> bool:
@@ -818,6 +831,8 @@ class AgentEngine:
     async def _query_two_round(self, question: str, result_limit: int = 100, db_limit: int = 30, max_workers: int = 32, on_token=None) -> AgentResult:
         """两轮NL2SQL：Round 1 概念识别 → Round 2 SQL生成"""
         from agent.backend.app.core.concept_router import ConceptRouter
+        import time as _time
+        _t0 = _time.time()
 
         concept_router = ConceptRouter()
 
@@ -856,6 +871,7 @@ class AgentEngine:
         # 而是把产线 SQL 作为参考注入 Round 2，由 LLM 结合原始问题按需追加约束。
         sql = None
         reference_sql = None
+        involved_tables = set()  # Round 2 schema 按需注入的表集合（ROUTING 日志用）
         if recipe_name and recipe_variant:
             try:
                 from agent.backend.app.core.block_assembler import BlockAssembler
@@ -912,6 +928,10 @@ class AgentEngine:
                     clean = _re.sub(r'\{[a-zA-Z_]\w*\}', '', cte)
                     clean = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', clean)
                     sanitized_ctes.append(clean)
+                # 截断防护（2026-08-25）：LLM 输出缺 FINAL_SELECT（常见于 max_tokens 截断）
+                # 直接抛错走 Round 2 完整降级，而不是拼出 "SELECT 1" 垃圾 SQL
+                if not hybrid_result.get("final_select", "").strip():
+                    raise ValueError("hybrid LLM 输出缺少 FINAL_SELECT（疑似 max_tokens 截断），降级 Round 2")
                 sanitized_final = _re.sub(r'\{[a-zA-Z_]\w*\}', '',
                                           hybrid_result.get("final_select", "SELECT 1"))
                 sanitized_final = _re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sanitized_final)
@@ -968,6 +988,7 @@ class AgentEngine:
             schema_text = format_schema_for_prompt(
                 self.schema,
                 only_tables=involved_tables,
+                enum_keywords=self._enum_keywords(concepts, reference_sql),  # range_tag 枚举精选
             )
             schema_text_for_correction = schema_text
 
@@ -1078,6 +1099,16 @@ class AgentEngine:
         result.correction_rounds = correction_rounds
         # 聚合/统计类结果标记为不可视化（rg-17：无行级时间语义，无法锚定视频片段）
         result.visualizable = not self._is_aggregate_sql(sql)
+        # 结构化路由决策日志（2026-08-25）：badcase 排查拿 question 一行查完
+        logger.info("ROUTE_DECISION %s", json.dumps({
+            "question": question, "concepts": concepts, "composition": composition,
+            "recipe": recipe_name, "variant": recipe_variant,
+            "sql_source": sql_source, "involved_tables": sorted(involved_tables),
+            "correction_rounds": correction_rounds,
+            "rows": len(result.rows), "error": bool(result.error),
+            "visualizable": result.visualizable,
+            "duration_s": round(_time.time() - _t0, 1),
+        }, ensure_ascii=False))
         return result
 
     # generate-sql 路径的纠错预算（语义同 MAX_CORRECTIONS：容忍失败次数，实际纠错 = N-1 次）
@@ -1091,6 +1122,8 @@ class AgentEngine:
         """
         from agent.backend.app.core.concept_router import get_concept_router, build_hybrid_round2_messages
         from agent.backend.app.core.block_assembler import get_block_assembler
+        import time as _time
+        _t0 = _time.time()
 
         concept_router = get_concept_router()
 
@@ -1143,7 +1176,7 @@ class AgentEngine:
                     r2_messages[0]["content"],
                     r2_messages[1]["content"],
                     temperature=0.0,
-                    max_tokens=8192,
+                    max_tokens=16384,  # hybrid 输出含多段 CTE，8192 曾致截断（rg-26 flake）
                 )
                 hybrid_result = _parse_hybrid_llm_output(raw_sql, required_blocks)
                 block_params_from_llm = hybrid_result.get("block_params", {})
@@ -1156,6 +1189,8 @@ class AgentEngine:
                     clean = re.sub(r'\{[a-zA-Z_]\w*\}', '', cte)
                     clean = re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', clean)
                     sanitized_ctes.append(clean)
+                if not hybrid_result.get("final_select", "").strip():
+                    raise ValueError("hybrid LLM 输出缺少 FINAL_SELECT（疑似 max_tokens 截断），降级 Round 2")
                 sanitized_final = re.sub(r'\{[a-zA-Z_]\w*\}', '',
                                          hybrid_result.get("final_select", "SELECT 1"))
                 sanitized_final = re.sub(r'\{\{[a-zA-Z_]\w*\}\}', '', sanitized_final)
@@ -1203,7 +1238,8 @@ class AgentEngine:
                     # static_link 通过 ego.ego_static_map_link_id JOIN，ego schema 必须同时在场
                     involved_tables.add("ego")
 
-            schema_text = format_schema_for_prompt(self.schema, only_tables=involved_tables)
+            schema_text = format_schema_for_prompt(self.schema, only_tables=involved_tables,
+                                                   enum_keywords=self._enum_keywords(concepts, reference_sql))
             schema_text_for_correction = schema_text
 
             r2_messages = concept_router.get_round2_messages(question, r1_result, schema_text, reference_sql=reference_sql or "")
@@ -1259,6 +1295,14 @@ class AgentEngine:
                     )
                     sql = self._clean_sql(raw_sql)
 
+        # 结构化路由决策日志（2026-08-25）
+        logger.info("ROUTE_DECISION %s", json.dumps({
+            "question": question, "concepts": concepts, "composition": composition,
+            "recipe": recipe_name, "variant": recipe_variant,
+            "route_method": route_method, "involved_tables": sorted(involved_tables),
+            "validation_error": bool(validation_error),
+            "duration_s": round(_time.time() - _t0, 1),
+        }, ensure_ascii=False))
         return {
             "sql": sql,
             "validation_error": validation_error,

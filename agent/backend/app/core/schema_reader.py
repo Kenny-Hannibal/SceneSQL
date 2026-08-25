@@ -364,13 +364,18 @@ def _read_schema_from_parquet(conn: Optional[Any], parquet_path: str, field_desc
     return result
 
 
-def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int = 50, only_tables: Optional[Set[str]] = None) -> str:
+def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int = 50,
+                             only_tables: Optional[Set[str]] = None,
+                             enum_keywords: Optional[Set[str]] = None) -> str:
     """将 Schema 格式化为 Markdown，供 LLM Prompt 使用。
-    
+
     Args:
         tables: 全量表 Schema 列表
         max_columns_per_table: 每表最多显示的列数
         only_tables: 如果指定，只输出这些表的 Schema（Layer 1 按需注入）
+        enum_keywords: 如果指定，range_tag 的全量 tag 枚举按关键词精选
+            （2026-08-25：数百条枚举全量进 prompt 浪费 token 且稀释注意力，
+            按 Round 1 概念过滤；过滤结果 <15 条时保留全量，防精选过度导致幻觉）
     """
     lines = ["# 数据库 Schema", ""]
     for t in tables:
@@ -383,9 +388,20 @@ def format_schema_for_prompt(tables: List[TableInfo], max_columns_per_table: int
 
         # 注入 range_tag 表级 enum（兼容旧逻辑：tag_name 可选值列表）
         if t.enum:
-            lines.append(f"> **tag_name 可选值**（共 {len(t.enum)} 个）：")
+            enum_vals = t.enum
+            pruned = False
+            if enum_keywords:
+                kws = {k.upper() for k in enum_keywords if k}
+                filtered = [v for v in t.enum if any(k in v.upper() for k in kws)]
+                if len(filtered) >= 15:  # 下限保护
+                    enum_vals = filtered
+                    pruned = True
+            if pruned:
+                lines.append(f"> **tag_name 可选值**（按查询概念精选 {len(enum_vals)}/{len(t.enum)} 个）：")
+            else:
+                lines.append(f"> **tag_name 可选值**（共 {len(t.enum)} 个）：")
             # 将 enum 分组显示，每行 8 个，避免单行过长
-            enum_chunks = [t.enum[i:i + 8] for i in range(0, len(t.enum), 8)]
+            enum_chunks = [enum_vals[i:i + 8] for i in range(0, len(enum_vals), 8)]
             for chunk in enum_chunks:
                 lines.append("> " + ", ".join(f"`{v}`" for v in chunk))
             lines.append("")
