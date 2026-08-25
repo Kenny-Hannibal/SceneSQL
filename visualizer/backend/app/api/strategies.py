@@ -5,7 +5,7 @@
 认证由 auth_middleware 统一处理，路由无需额外 Depends。
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import List
 
 from app.core.user_strategy import (
@@ -30,11 +30,28 @@ _STRATEGY_DIR = os.path.normpath(os.path.join(
 ))
 _manager = UserStrategyManager(strategy_dir=_STRATEGY_DIR)
 
+def _current_user(request: Request) -> str:
+    return getattr(request.state, "user", "admin")
+
+
+def _can_edit(info, user: str, env_admin: str) -> bool:
+    """编辑权限：owner 本人或 admin。存量策略 owner=admin → 仅 admin 可改。"""
+    return user == env_admin or getattr(info, "owner", "admin") == user
+
+
+import os as _os
+_ENV_ADMIN = _os.getenv("AUTH_USERNAME", "gac")
+
+
 
 @router.get("", response_model=List[StrategyInfo])
-async def list_strategies():
-    """列出所有用户策略。"""
-    return _manager.list_strategies()
+async def list_strategies(request: Request):
+    """列出策略（多用户 v1）：自己的 + admin 的（共享知识）。admin 看到全部。"""
+    user = _current_user(request)
+    all_strategies = _manager.list_strategies()
+    if user == _ENV_ADMIN:
+        return all_strategies
+    return [s for s in all_strategies if s.owner in (user, _ENV_ADMIN)]
 
 
 @router.get("/{name}", response_model=StrategyInfo)
@@ -47,10 +64,10 @@ async def get_strategy(name: str):
 
 
 @router.post("", response_model=StrategyInfo)
-async def create_strategy(req: StrategyCreateRequest):
-    """创建新策略。"""
+async def create_strategy(req: StrategyCreateRequest, request: Request):
+    """创建新策略（owner=当前用户）。"""
     try:
-        info = _manager.create_strategy(req)
+        info = _manager.create_strategy(req, owner=_current_user(request))
         _reload_concept_router()
         return info
     except FileExistsError as e:
@@ -58,8 +75,15 @@ async def create_strategy(req: StrategyCreateRequest):
 
 
 @router.put("/{name}", response_model=StrategyInfo)
-async def update_strategy(name: str, req: StrategyUpdateRequest):
-    """更新策略。"""
+async def update_strategy(name: str, req: StrategyUpdateRequest, request: Request):
+    """更新策略（仅 owner 或 admin）。"""
+    user = _current_user(request)
+    try:
+        existing = _manager.get_strategy(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
+    if not _can_edit(existing, user, _ENV_ADMIN):
+        raise HTTPException(status_code=403, detail=f"只有创建者或 admin 可以修改策略 {name}")
     try:
         info = _manager.update_strategy(name, req)
         _reload_concept_router()

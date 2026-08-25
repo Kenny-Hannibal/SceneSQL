@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { colors, radius, btn } from '../../theme';
+import { authFetch, API_BASE } from '../../api';
 
-// ── 历史查询面板（P2，docs/ARCHITECTURE.md 待办项） ──
-// 纯前端 localStorage 实现，不依赖后端。
-// 记录每次成功查询的 question/sql/上下文，点击可回填到输入框和 SQL 编辑器。
+// ── 历史查询面板 ──
+// 多用户 v1（2026-08-25）：云端按用户隔离存储（/api/history），localStorage 仅作
+// 离线兜底缓存。换设备/浏览器历史不丢。
 
-const STORAGE_KEY = 'scenesql_query_history';
-const MAX_ENTRIES = 50;
+const STORAGE_KEY = 'scenesql_query_history';  // 离线兜底缓存
+const MAX_ENTRIES = 100;
 
-export function loadHistory() {
+function loadHistoryLocal() {
   try {
     const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
     return Array.isArray(arr) ? arr : [];
@@ -17,25 +18,45 @@ export function loadHistory() {
   }
 }
 
-// 记录一条历史（由 AgentPanel 在查询成功后调用）
+// 从云端加载历史；失败回退 localStorage
+export async function loadHistory() {
+  try {
+    const res = await authFetch(`${API_BASE}/api/history`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.entries || [];
+    }
+  } catch { /* 网络失败走本地兜底 */ }
+  return loadHistoryLocal();
+}
+
+// 记录一条历史（云端为主，本地兜底）
 export function saveHistoryEntry({ question, sql, queryMode, batchId, rowCount }) {
   if (!sql?.trim()) return;
   const entry = {
-    ts: Date.now(),
     question: question || '',
     sql: sql.trim(),
     queryMode: queryMode || 'sqlite',
     batchId: batchId || '',
     rowCount: rowCount ?? 0,
   };
-  const list = loadHistory();
-  // 相同 SQL 去重（移到最新）
+  // 云端（fire-and-forget）
+  authFetch(`${API_BASE}/api/history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+  }).catch(() => {});
+  // 本地兜底缓存
+  const list = loadHistoryLocal();
   const deduped = list.filter((e) => e.sql !== entry.sql);
-  deduped.unshift(entry);
+  deduped.unshift({ ...entry, ts: Date.now() });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(deduped.slice(0, MAX_ENTRIES)));
 }
 
-export function clearHistory() {
+export async function clearHistory() {
+  try {
+    await authFetch(`${API_BASE}/api/history`, { method: 'DELETE' });
+  } catch { /* 忽略 */ }
   localStorage.removeItem(STORAGE_KEY);
 }
 
@@ -49,13 +70,13 @@ export default function HistoryPanel({ onRestore }) {
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState([]);
 
-  const toggle = () => {
-    if (!open) setEntries(loadHistory());
+  const toggle = async () => {
+    if (!open) setEntries(await loadHistory());
     setOpen(!open);
   };
 
-  const handleClear = () => {
-    clearHistory();
+  const handleClear = async () => {
+    await clearHistory();
     setEntries([]);
   };
 

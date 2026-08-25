@@ -43,6 +43,7 @@ _PUBLIC_PATHS = {
     "/redoc",
     "/openapi.json",
     "/api/auth/login",
+    "/api/auth/register",
 }
 
 # 静态资源前缀 —— 这些也不需要认证
@@ -84,10 +85,18 @@ def verify_token(token: str) -> dict:
 
 
 def authenticate(username: str, password: str) -> str | None:
-    """验证用户名密码，成功返回 JWT token，失败返回 None。"""
+    """验证用户名密码，成功返回 JWT token，失败返回 None。
+    env 账户（admin）优先，其次查注册用户 store（多用户隔离 v1）。"""
     if username == _AUTH_USERNAME and password == _AUTH_PASSWORD:
-        logger.info("User '%s' logged in successfully", username)
+        logger.info("User '%s' logged in successfully (env admin)", username)
         return create_token(username)
+    try:
+        from app.core.users import verify_user
+        if verify_user(username, password):
+            logger.info("User '%s' logged in successfully (registered)", username)
+            return create_token(username)
+    except Exception as e:
+        logger.warning("User store check failed: %s", e)
     logger.warning("Login failed for user '%s'", username)
     return None
 

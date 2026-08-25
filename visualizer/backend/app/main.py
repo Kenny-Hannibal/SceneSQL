@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from app.api import bag, video, agent, strategies, fusion_map, eval_labels, mage_vl
+from app.api import bag, video, agent, strategies, fusion_map, eval_labels, mage_vl, history
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.exceptions import setup_exception_handlers
@@ -94,10 +94,32 @@ async def verify_auth(request: Request):
     return {"valid": True, "user": user}
 
 
+# ── 注册接口（多用户隔离 v1，开放注册）──
+@app.post("/api/auth/register", tags=["auth"])
+async def register(request: Request):
+    """注册新用户（role=user）。成功自动登录返回 token。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"detail": "用户名和密码不能为空"})
+    try:
+        from app.core.users import create_user
+        create_user(username, password)
+    except ValueError as e:
+        return JSONResponse(status_code=409, content={"detail": str(e)})
+    token = authenticate(username, password)
+    return {"access_token": token, "token_type": "bearer"}
+
+
 app.include_router(bag.router)
 app.include_router(video.router)
 app.include_router(agent.router)
 app.include_router(strategies.router)
+app.include_router(history.router)
 app.include_router(fusion_map.router)
 app.include_router(eval_labels.router)
 app.include_router(mage_vl.router)

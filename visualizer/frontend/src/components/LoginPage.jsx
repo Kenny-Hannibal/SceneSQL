@@ -7,6 +7,7 @@ export default function LoginPage({ onLoginSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState('login');  // 'login' | 'register'
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -14,7 +15,7 @@ export default function LoginPage({ onLoginSuccess }) {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
+      const res = await fetch(`${API_BASE}/api/auth/${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -23,7 +24,7 @@ export default function LoginPage({ onLoginSuccess }) {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || '登录失败');
+        setError(data.detail || (mode === 'login' ? '登录失败' : '注册失败'));
         return;
       }
 
@@ -135,8 +136,18 @@ export default function LoginPage({ onLoginSuccess }) {
               transition: 'background 0.15s ease',
             }}
           >
-            {loading ? '登录中...' : '登 录'}
+            {loading ? '请稍候...' : (mode === 'login' ? '登 录' : '注册并登录')}
           </button>
+
+          <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13 }}>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
+              style={{ color: '#1677ff', textDecoration: 'none' }}
+            >
+              {mode === 'login' ? '没有账号？注册新用户' : '已有账号？返回登录'}
+            </a>
+          </div>
         </form>
       </div>
     </div>
