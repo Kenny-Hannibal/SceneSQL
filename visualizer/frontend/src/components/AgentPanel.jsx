@@ -211,7 +211,7 @@ export default function AgentPanel() {
       question: question.trim(),
       result_limit: getResultLimit(),
       page: 1,
-      page_size: getResultLimit() || 999999,  // 无限制时取回全部，前端分页
+      page_size: getResultLimit() || 5000,  // 交互浏览上限 5000 行（大结果集改走 CSV 导出，防前后端内存爆）
     };
     if (dbPath.trim()) {
       payload.db_path = dbPath.trim();
@@ -323,7 +323,7 @@ export default function AgentPanel() {
         sql,
         result_limit: getResultLimit(),
         page: 1,
-        page_size: getResultLimit() || 999999,  // 取回全量数据
+        page_size: getResultLimit() || 5000,  // 交互浏览上限 5000 行（大结果集改走 CSV 导出）
       };
       if (dbPath.trim()) {
         payload.db_path = dbPath.trim();
@@ -1146,7 +1146,7 @@ export default function AgentPanel() {
         labelKey={strategies.labelKey}
         actionDisabled={topicModalOpen || playerModalOpen}
         onArrowDownload={handleArrowDownload}
-        mayBeTruncated={!resultLimitUnlimited && totalRows >= getResultLimit()}
+        mayBeTruncated={totalRows >= (getResultLimit() || 5000)}
       />
       </>
       )}

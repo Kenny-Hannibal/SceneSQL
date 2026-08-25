@@ -87,7 +87,7 @@ export default function ResultTable({
         <div>
           <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 6, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <span>
-              共 <b>{totalRows}</b> 行{mayBeTruncated ? '（可能已截断，可调大结果行数限制）' : ''} · 第 {page} 页
+              共 <b>{totalRows}</b> 行{mayBeTruncated ? '（已截断：可调大结果行数限制，或用「导出 CSV」获取全量）' : ''} · 第 {page} 页
             </span>
             {result?.scanned_dbs > 0 && (
               <span style={{ color: colors.textTertiary }}>

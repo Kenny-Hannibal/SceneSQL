@@ -100,14 +100,15 @@ export default function QueryBar({
           title="单条 SQL 返回的最大行数（聚焦时允许清空以便输入）"
           style={{ ...input, width: 110 }}
         />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: colors.textSecondary, cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: colors.textSecondary, cursor: 'pointer' }}
+               title="交互浏览最多取回 5000 行；更多数据请用「导出 CSV」获取全量">
           <input
             type="checkbox"
             checked={resultLimitUnlimited}
             onChange={(e) => setResultLimitUnlimited(e.target.checked)}
             style={{ cursor: 'pointer' }}
           />
-          不限制结果数量
+          不限制结果数量（上限5000行）
         </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 13, color: colors.textSecondary, whiteSpace: 'nowrap' }}>每页显示</label>
