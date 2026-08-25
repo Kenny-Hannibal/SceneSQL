@@ -45,7 +45,7 @@ def mint_token() -> str:
 def pick_batch(token: str) -> str:
     """选 sqlite_count 最大的 batch。"""
     r = requests.get(f"{BASE_URL}/api/agent/batches",
-                     headers={"Authorization": f"Bearer {token}"}, timeout=15)
+                     headers={"Authorization": f"Bearer {token}"}, timeout=60)
     r.raise_for_status()
     batches = r.json()
     if not batches:
