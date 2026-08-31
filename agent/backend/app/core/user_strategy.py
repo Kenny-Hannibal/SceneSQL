@@ -43,6 +43,7 @@ class StrategyInfo(BaseModel):
     keywords: List[str]
     tag_name: str
     status: str = "active"  # "active" | "disabled"
+    owner: str = "admin"  # 多用户隔离 v1：创建者；存量策略缺省 admin
     sql: str
     description: str
     created_at: Optional[float] = None
@@ -77,6 +78,7 @@ class UserStrategyManager:
                     sql=d.get("variants", {}).get("default", {}).get("raw_sql", ""),
                     description=d.get("description", ""),
                     status=d.get("status", "active"),
+                    owner=d.get("owner", "admin"),
                     created_at=d.get("created_at"),
                     updated_at=d.get("updated_at"),
                 ))
@@ -98,12 +100,13 @@ class UserStrategyManager:
             sql=d.get("variants", {}).get("default", {}).get("raw_sql", ""),
             description=d.get("description", ""),
             status=d.get("status", "active"),
+            owner=d.get("owner", "admin"),
             created_at=d.get("created_at"),
             updated_at=d.get("updated_at"),
         )
 
-    def create_strategy(self, req: StrategyCreateRequest) -> StrategyInfo:
-        """创建新策略。"""
+    def create_strategy(self, req: StrategyCreateRequest, owner: str = "admin") -> StrategyInfo:
+        """创建新策略（多用户 v1：记录创建者 owner）。"""
         p = self._yaml_path(req.name)
         if p.exists():
             raise FileExistsError(f"Strategy already exists: {req.name}")
@@ -114,6 +117,7 @@ class UserStrategyManager:
             "version": "1.0",
             "description": req.description,
             "keywords": req.keywords,
+            "owner": owner,
             "created_at": now,
             "updated_at": now,
             "blocks": [],

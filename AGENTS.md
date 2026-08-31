@@ -62,3 +62,21 @@ git push origin master
 - **HEVC 直传**是首选路径（`+default_base_moof` + `empty_moov`）
 - **H.264 转码**作为 fallback 必须保留
 - 任何 MSE / ffmpeg 修改后，必须在 CHANGELOG 测试验证项中注明浏览器兼容性测试结果
+
+## 标签开发交接知识库（2026-08-31）
+
+接到标签开发 / 策略 / 评测集 / Spark 打标 / schema 相关任务时：
+
+1. **总交接手册**：`/data/var/workspace/projects/projects/docs/gac/LLM标签开发交接手册.md`（Schema 查看与更新、链路A: SQL→策略→评测集、链路B: Spark 批量打标→转数据集、18 条实证坑、交付纪律、fact_store 嵌入说明）
+2. **深度知识库**：`docs/scene_tag_sql_dev_guide.md`（坑的完整版含案例与排查套路）
+3. **fact_store**：前任积累的记忆已通过 `docs/knowledge_base/import_fact_store.py`
+   导入本机 `/root/.hermes/memory_store.db`（若未导入先跑一次，幂等）。
+   查询模板（中文必须用 LIKE）：
+   ```bash
+   python3 -c "
+   import sqlite3
+   c = sqlite3.connect('file:/root/.hermes/memory_store.db?mode=ro', uri=True).cursor()
+   for r in c.execute(\"SELECT content FROM facts WHERE content LIKE '%关键词%'\"):
+       print(r[0], '\n---')
+   "
+   ```

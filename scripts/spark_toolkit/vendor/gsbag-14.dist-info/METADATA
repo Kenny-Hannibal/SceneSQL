@@ -1,0 +1,34 @@
+Metadata-Version: 2.4
+Name: gsbag
+Version: 14
+Summary: gsbag reader
+Home-page: 
+Author: liyaofeng
+Author-email: 
+Requires-Python: ==3.10.*
+Description-Content-Type: text/markdown
+Dynamic: author
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: requires-python
+Dynamic: summary
+
+#### 介绍
+
+adigo python wrapper
+
+
+#### 安装依赖
+
+```
+apt-get install cmake pkg-config python3-dev python3-setuptools python3-protobuf
+```
+
+#### 安装 (Python)
+```
+export SDK_HOME=adigobag sdk的所在路径
+python3 setup.py install
+```
+
+#### 
+https://zhuanlan.zhihu.com/p/164653613

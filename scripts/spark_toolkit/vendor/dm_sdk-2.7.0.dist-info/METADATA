@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: dm_sdk
+Version: 2.7.0
+Summary: DataManage SDK for dataset, pipeline data, and raw data
+Requires-Python: >=3.8
+Requires-Dist: alibabacloud-oss-v2>=1.2.1
+Requires-Dist: cachetools>=5.0.0
+Requires-Dist: kafka-python>=2.3.0
+Description-Content-Type: text/markdown
+
+# dm_sdk

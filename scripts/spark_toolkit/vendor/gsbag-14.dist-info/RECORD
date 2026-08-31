@@ -1,0 +1,15 @@
+PyComm.cpython-310-x86_64-linux-gnu.so,sha256=C3LkWiSNdqYCsGo-575Ji_fHLmNhRz__TG_6_nIf_uw,606976
+gsbag-14.dist-info/INSTALLER,sha256=5hhM4Q4mYTT9z6QB6PGpUAW81PGNFrYrdXMj4oM_6ak,2
+gsbag-14.dist-info/METADATA,sha256=azrbejDZnrQCgoa2er7HdftIip5vQ6ONNgnX08ot2Ok,582
+gsbag-14.dist-info/RECORD,,
+gsbag-14.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+gsbag-14.dist-info/WHEEL,sha256=0-G7woG4LgutcYzUGJCOYFgoh749-FtfhSMeIPLVGS0,104
+gsbag-14.dist-info/direct_url.json,sha256=7zDDQmd9FXwH7fhyw4Ji755Rz3zCvjUVC-CqWHgEXPM,123
+gsbag-14.dist-info/top_level.txt,sha256=4REmNGNsQBuhur1_-EucaKGtcY4qAcKu33XxPHqramU,19
+gsbag-14.dist-info/uv_cache.json,sha256=jh4I_XG7lG3wI-WYQAofyLdZmNWDfzK-b28pQWsmc6U,126
+gsbag/__init__.py,sha256=oKpScJu3vxUBFbm27GqxU6TTvEJxpPWo3dYd3q4d3EA,243
+gsbag/gsbag_reader.py,sha256=0b33mOe2Qcu-SpNpnu8DsvZ1iNSTYrPgaeIcx6QZ-I8,4599
+gsbag/gsbag_types.py,sha256=BnBdoqm_KyPHGasi_CY5a4dCIhO8Dr9rgGXE2B3tf34,399
+gsbag/gsbag_writer.py,sha256=ewx7BpWjtrRU72Qf016fYMQ6CIV-fMlxEG4eXG_jDEg,3217
+gsbag_reader_wrapper.so,sha256=WySLmdDmjSI-gi5Zw44nJoSZIsgf_ElLVMnV6w7KY3o,142016
+gsbag_writer_wrapper.so,sha256=LoGXoCyOvtk_agNuU-Ylsiqbtx2y-6R0B63FRY2Xu5I,171112
