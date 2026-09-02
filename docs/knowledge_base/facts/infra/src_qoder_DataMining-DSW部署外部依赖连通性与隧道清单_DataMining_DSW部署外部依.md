@@ -3,6 +3,8 @@ category: infra
 tags: qoder,DSW,DataMining,autossh,隧道,MongoDB,连通性
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 [src=qoder:DataMining-DSW部署外部依赖连通性与隧道清单] DataMining DSW部署外部依赖连通性与隧道清单
 DSW（8.130.209.216:1025）不在部分 RDS 的 VPC 网段，外部依赖连通性实测（2026-08-11）：
 

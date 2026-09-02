@@ -3,6 +3,8 @@ category: infra
 tags: qoder
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 [src=qoder:SceneSQL部署目标-大写DSW] SceneSQL部署目标-大写DSW
 SceneSQL 部署目标 — 统一用大写 DSW（小写 dsw 已废弃）
 

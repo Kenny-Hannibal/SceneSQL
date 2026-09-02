@@ -13,10 +13,12 @@
 
 ## ⚠️ 部署目标（务必看清）
 
-- **统一部署到「大写 `DSW`」**：`ssh DSW` → `8.130.209.216:1025`，仓库路径 `/root/data/text2sql`
-- **「小写 `dsw`」（`8.130.175.37:1021`）已废弃，不再部署、不再验证**
-- 两台是不同机器；ssh 别名大小写敏感。每次部署/端到端测试一律用大写 `DSW`。
-- 部署命令：`ssh DSW "cd /root/data/text2sql && git pull --ff-only && bash visualizer/deploy.sh -f"`
+- **SceneSQL 部署在当前的 DSW 平台机器本地**：仓库路径本机自定（前任环境为 `/root/data/text2sql`），
+  服务端口 30001，凭证走部署根目录 `.env`。开发即在本机改代码 → 本机部署重启，**无需 ssh 到别的机器**。
+- **历史注**：前任环境曾另有一台跳板机（ssh 别名 `DSW`，8.130.209.216:1025，已随交接移交），
+  旧文档/脚本/聊天记录中出现的 `ssh DSW` 均指那台机器，与当前环境无关，勿模仿。
+- 部署/重启命令（在本机仓库根目录）：`bash visualizer/deploy.sh -f`
+  （远程部署场景则为：`ssh <你的DSW> "cd <仓库路径> && git pull --ff-only && bash visualizer/deploy.sh -f"`）
 
 ## 工作流（必须遵守）
 
@@ -67,7 +69,7 @@ git push origin master
 
 接到标签开发 / 策略 / 评测集 / Spark 打标 / schema 相关任务时：
 
-1. **总交接手册**：`/data/var/workspace/projects/projects/docs/gac/LLM标签开发交接手册.md`（Schema 查看与更新、链路A: SQL→策略→评测集、链路B: Spark 批量打标→转数据集、18 条实证坑、交付纪律、fact_store 嵌入说明）
+1. **总交接手册**：`docs/gac/LLM标签开发交接手册.md（仓库内，随clone分发）`（Schema 查看与更新、链路A: SQL→策略→评测集、链路B: Spark 批量打标→转数据集、18 条实证坑、交付纪律、fact_store 嵌入说明）
 2. **深度知识库**：`docs/scene_tag_sql_dev_guide.md`（坑的完整版含案例与排查套路）
 3. **fact_store**：前任积累的记忆已通过 `docs/knowledge_base/import_fact_store.py`
    导入本机 `/root/.hermes/memory_store.db`（若未导入先跑一次，幂等）。

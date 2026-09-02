@@ -3,6 +3,8 @@ category: project
 tags: qoder
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 [src=qoder:SceneSQL标签schema实证坑] SceneSQL标签schema实证坑（18条）
 SceneSQL schema 实证坑（文档没写或写错的，全部 bag_id 可复现）
 
@@ -25,4 +27,4 @@ SceneSQL schema 实证坑（文档没写或写错的，全部 bag_id 可复现�
 17. 跟踪器**远距/初段朝向不可靠**（接近 180° 翻转），接近后收敛；朝向判据以**最近帧为锚**或只用窗口内帧（obj278 案）
 18. execute-sql API 偶发路由抽风（裸库有数据 API 返回空）→ 排查先 SSH 直查 sqlite3 对照
 
-**完整版（含验证方式/案例/排查套路）**：`/data/var/workspace/projects/projects/SceneSQL/docs/scene_tag_sql_dev_guide.md` §2
+**完整版（含验证方式/案例/排查套路）**：`<SceneSQL仓库>/docs/scene_tag_sql_dev_guide.md` §2

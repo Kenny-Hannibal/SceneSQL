@@ -3,9 +3,11 @@ category: project
 tags: SSH,DSW,mage-vl,scenesql,e2e,sqlite,batch20260702,topic-dict,critical
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 SQL Loop E2E 关键坑 (2026-08-11 DSW实测):
 
-★ SSH必须大写: ssh DSW (8.130.209.216:1025), 小写dsw (8.130.175.37:1021)是旧机器只有8策略
+★ SSH必须大写: ssh DSW (8.130.209.216:1025), 小写dsw（8.130.175.37:1021，前任旧机，与你无关）是旧机器只有8策略
 ★ SQL不能SELECT bag_id: range_tag表无bag_id列, API自动从db文件名提取bag_id
 ★ range_tag.start_ts/end_ts是秒级(10位Unix timestamp): 传给mage-vl/evaluate API时必须×10^9转纳秒(19位)
 ★ ★ 默认评测topic是前视宽120°: /gac/cam/orig_fw120_encoded (大多数bag) 或 /gac/cam/fw120_encoded (少数bag)。不是30°的ft30。

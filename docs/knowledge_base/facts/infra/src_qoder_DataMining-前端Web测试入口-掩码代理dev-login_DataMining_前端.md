@@ -3,6 +3,8 @@ category: infra
 tags: qoder,DSW,vite,dev-login,掩码代理,评测页面,公司防火墙
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 [src=qoder:DataMining-前端Web测试入口-掩码代理dev-login] DataMining 前端 Web 测试入口（掩码代理+dev-login）
 用户公司电脑有防火墙（按 MAC 全局禁止），直接访问 ALB SSO 会被拦；解决方案是 DSW 上 vite 做掩码代理，浏览器只访问 http://8.130.209.216:31684：
 

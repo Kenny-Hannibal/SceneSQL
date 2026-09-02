@@ -3,8 +3,10 @@ category: project
 tags: SceneSQL,抽帧,API,extract-batch,video
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 SceneSQL 抽帧 API (extract-batch):
-- 路径: /data/var/workspace/projects/projects/SceneSQL/visualizer/backend/app/api/video.py
+- 路径: <SceneSQL仓库>/visualizer/backend/app/api/video.py
 - 端点: POST /api/video/extract-batch (批量抽帧)
   - 输入: clips array, 每个 clip = {bag_id, start_ts, end_ts, topic, sample_fps, max_frames_per_clip, resolve_bag_path}
   - 输出: task_id

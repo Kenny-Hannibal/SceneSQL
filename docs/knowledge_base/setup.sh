@@ -52,7 +52,7 @@ for r in c.execute(\"SELECT content, category FROM facts WHERE content LIKE '%�
 ```
 
 SceneSQL 项目内的配套文档：
-`/data/var/workspace/projects/projects/docs/gac/LLM标签开发交接手册.md`（总交接手册）、
+`<SceneSQL仓库>/docs/gac/LLM标签开发交接手册.md`（总交接手册，随仓库分发）、
 `SceneSQL/docs/scene_tag_sql_dev_guide.md`（深度知识库）。
 <!-- /fact-store-handover -->
 EOF

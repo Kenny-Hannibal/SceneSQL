@@ -3,9 +3,11 @@ category: project
 tags: SceneSQL,mp4,export,API,video
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 SceneSQL mp4 导出 API (2026-08-07):
 - 用途: bag 视频片段 → mp4 文件, 供 Mage-VL 推理
-- 路径: /data/var/workspace/projects/projects/SceneSQL/visualizer/backend/app/api/video.py
+- 路径: <SceneSQL仓库>/visualizer/backend/app/api/video.py
 - 端点:
   1. POST /api/video/extract — bag → mp4
      输入: ExtractRequest(bag_path, topic, start_ts, end_ts, fps)

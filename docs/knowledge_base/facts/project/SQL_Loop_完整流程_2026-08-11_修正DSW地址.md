@@ -3,17 +3,19 @@ category: project
 tags: SQL-Loop,Mage-VL,workflow,SceneSQL,strategy,evalset,auth,merged
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 SQL Loop 完整流程 (2026-08-11 修正DSW地址):
 
 【认证】
 - 登录端点: POST /api/auth/login, body: {"username":"gac","password":"gac_data"}
 - 返回: {"access_token":"...","token_type":"bearer"}
 - 后续请求 Header: Authorization: Bearer <token>
-- 用户名/密码来源: 项目部署根目录 .env 文件 (AUTH_USERNAME=gac, AUTH_PASSWORD=gac_data)
+- 用户名/密码来源: 项目部署根目录 .env 文件 (AUTH_USERNAME/AUTH_PASSWORD（原环境值 gac/gac_data，你部署时在 .env 自定）)
 - JWT Secret: JWT_SECRET env var (默认 sceneSQL_visualizer_secret_key_2026)
 
-【API 端点 — 大写DSW: http://8.130.209.216:30001】
-- SceneSQL 后端: http://8.130.209.216:30001 (大写DSW, 非小写dsw)
+【API 端点 — 大写DSW: http://8.130.209.216:30001（原环境快照值；你的服务地址 = 你自己DSW的30001）】
+- SceneSQL 后端: http://8.130.209.216:30001（原环境快照值；你的服务地址 = 你自己DSW的30001） (大写DSW, 非小写dsw)
 - 登录: POST /api/auth/login
 - NL查询: POST /api/agent/query
 - SQL执行: POST /api/agent/execute-sql
@@ -44,7 +46,7 @@ SQL Loop 完整流程 (2026-08-11 修正DSW地址):
 - 用户调取评测集二次打标 → 下一轮loop的评测集作为金标准
 
 【关键注意事项】
-- SSH必须大写: ssh DSW (8.130.209.216:1025), 小写dsw (8.130.175.37:1021)是旧机器只有8策略
+- SSH必须大写: ssh DSW (8.130.209.216:1025), 小写dsw（8.130.175.37:1021，前任旧机，与你无关）是旧机器只有8策略
 - SQL必须返回 start_ts/end_ts (秒), 前端依赖这两个标准列名定位视频片段
 - 送完整视频不抽帧, 保留 codec-native sparsity 优势
 - VLM judge: Mage-VL (SGLang port 31000, codec-native sparsity)

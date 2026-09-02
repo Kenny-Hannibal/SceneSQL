@@ -3,10 +3,12 @@ category: project
 tags: qoder
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 [src=qoder:场景标签SQL开发Loop规程] 场景标签SQL开发Loop规程
 场景标签 SQL 开发 Loop（自 Qoder 接手版）
 
-**详细知识库（开工必读）**：`/data/var/workspace/projects/projects/SceneSQL/docs/scene_tag_sql_dev_guide.md`
+**详细知识库（开工必读）**：`<SceneSQL仓库>/docs/scene_tag_sql_dev_guide.md`
 ——18 条 schema 实证事实、误报分类学（机理→判据→案例 bag_id）、SQL 工程技巧、当前判据链。
 
 开工强制顺序
@@ -63,7 +65,7 @@ tags: qoder
 
 参考实现
 
-- 定稿底稿：`/data/var/workspace/projects/projects/SceneSQL/unprotected_left_turn.sql`（v10.4）
+- 定稿底稿：`<SceneSQL仓库>/unprotected_left_turn.sql`（v10.4）
 - recipe：`SceneSQL/agent/backend/app/core/recipes/unprotected_left_turn.yaml`（与底稿逐字节一致）
 - 验证集：`docs/gac/sql_validation/unprotected_left_turn_visualation_val_v10.4/`
 - 精度基线：55 事件/55 bags，10 样本 7 TRUE + 2 LIKELY + 1 UNCERTAIN，0 FALSE

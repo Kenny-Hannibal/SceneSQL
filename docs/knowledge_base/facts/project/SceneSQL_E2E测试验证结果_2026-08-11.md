@@ -3,6 +3,8 @@ category: project
 tags: SceneSQL,E2E,mage-vl,DSW,ambiguity,verified
 ---
 
+> [交接注] 本条为前任原环境(2026-08-31)快照：服务地址/凭证/绝对路径均为历史值，操作时以你自己的 DSW 部署和 .env 为准（映射见交接手册附录A）。
+
 SceneSQL E2E测试验证结果 (2026-08-11):
 
 【完整链路验证】
